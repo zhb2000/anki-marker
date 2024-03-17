@@ -1,0 +1,11 @@
+# 请勿手动修改此字段
+__minimal-version__ = "0.0.1"
+
+# AnkiConnect 服务的 URL
+anki-connect-url = "http://localhost:8765"
+
+# 将划词结果添加到哪个牌组
+deck-name = "划词助手默认牌组"
+
+# 使用的笔记模板名称
+model-name = "划词助手默认单词模板"

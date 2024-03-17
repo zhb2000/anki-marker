@@ -1,0 +1,32 @@
+:root {
+    --accent: #0067c0;
+    --control-background: #fbfbfb;
+    --control-background-hover: #f6f6f6;
+    --control-background-active: #f5f5f5;
+    --control-text-color: black;
+    --control-text-color-active: #5d5d5d;
+    --control-accent-background-hover: #1975c5;
+    --control-accent-background-active: #3183ca;
+    --control-accent-text-color: white;
+    --control-accent-text-color-active: #c2daef;
+    --border-width: 1.4px;
+    --border-radius: 5px;
+    --border-color: #e5e5e5;
+    --border-bottom-color: #cccccc;
+    --border-accent-color: #1473c5;
+    --border-accent-bottom-color: #003e73;
+    --font-size: 16px;
+    --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    /* window */
+    --window-background: #f3f3f3;
+    /* text input */
+    --input-text-background-focus: white;
+    --input-text-border-bottom-width-focus: 2px;
+    --placeholder-color: #5f5f5f;
+    --placeholder-color-focus: #8d8d8d;
+    /* radio button */
+    --radio-border-color: #838383;
+    --radio-background: #ededed;
+    --radio-background-hover: #e5e5e5;
+    --radio-background-active: #dcdcdc;
+}

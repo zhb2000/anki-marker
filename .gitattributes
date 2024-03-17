@@ -1,0 +1,17 @@
+*.db filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/icon.ico filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/Square310x310Logo.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/128x128.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/Square150x150Logo.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/Square89x89Logo.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/Square71x71Logo.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/icon.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/Square107x107Logo.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/Square142x142Logo.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/Square30x30Logo.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/Square44x44Logo.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/128x128@2x.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/32x32.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/icon.icns filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/Square284x284Logo.png filter=lfs diff=lfs merge=lfs -text
+src-tauri/icons/StoreLogo.png filter=lfs diff=lfs merge=lfs -text

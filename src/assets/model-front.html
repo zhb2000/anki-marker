@@ -1,0 +1,26 @@
+<!-- config & version section-->
+<div class="section">
+    <div class="bar anki-icon">
+        <a href="https://github.com/zhb2000/anki-marker" style="color:white;text-decoration:none">Anki 划词助手</a>
+    </div>
+    <!--  version section -->
+    <div id='version' class='item'></div>
+</div>
+
+<!-- front section -->
+<div class="section">
+    <div id="front" class="items">
+        <span>{{单词}}</span>
+    </div>
+    <hr>
+    <div id="phonetic" class="items">
+        <span>{{音标}} {{发音}}</span>
+    </div>
+
+    {{#例句}}
+    <div class="section">
+        <div class="bar sentence" onclick="toggle('sentence')">Sentence</div>
+        <div id="sentence" class="backlist items">{{例句}}</div>
+    </div>
+    {{/例句}}
+</div>

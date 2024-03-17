@@ -1,0 +1,86 @@
+{
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devPath": "http://localhost:1420",
+    "distDir": "../dist",
+    "withGlobalTauri": false
+  },
+  "package": {
+    "productName": "Anki 划词助手",
+    "version": "../package.json"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "shell": {
+        "all": false,
+        "open": ".*"
+      },
+      "clipboard": {
+        "all": false,
+        "readText": true,
+        "writeText": false
+      },
+      "http": {
+        "all": false,
+        "request": true,
+        "scope": [
+          "http://*",
+          "https://*"
+        ]
+      },
+      "dialog": {
+        "all": false,
+        "message": true
+      },
+      "os": {
+        "all": true
+      },
+      "app": {
+        "all": true
+      }
+    },
+    "bundle": {
+      "category": "Education",
+      "shortDescription": "Anki 划词助手",
+      "longDescription": "Anki 划词助手是一个制作 Anki 卡片的工具，你可以用它标记句子中的生词，通过“单词结合上下文”的方式更好地背单词。",
+      "active": true,
+      "targets": "all",
+      "identifier": "com.zhb2000.anki-marker",
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico",
+        "icons/icon.png"
+      ],
+      "resources": [
+        "resources/*"
+      ],
+      "windows": {
+        "nsis": {
+          "languages": [
+            "SimpChinese"
+          ]
+        },
+        "wix": {
+          "language": "zh-CN"
+        }
+      }
+    },
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "resizable": true,
+        "title": "Anki 划词助手",
+        "width": 800,
+        "height": 500
+      }
+    ]
+  }
+}
