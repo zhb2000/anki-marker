@@ -15,3 +15,5 @@ src-tauri/icons/32x32.png filter=lfs diff=lfs merge=lfs -text
 src-tauri/icons/icon.icns filter=lfs diff=lfs merge=lfs -text
 src-tauri/icons/Square284x284Logo.png filter=lfs diff=lfs merge=lfs -text
 src-tauri/icons/StoreLogo.png filter=lfs diff=lfs merge=lfs -text
+
+*.db linguist-vendored
