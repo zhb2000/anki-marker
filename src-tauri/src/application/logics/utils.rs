@@ -12,26 +12,31 @@ pub fn show_in_explorer(path: impl AsRef<Path>) -> Result<(), String> {
             .ok_or("path is not valid utf-8")?
             .replace('/', std::path::MAIN_SEPARATOR_STR)
             .replace('\\', std::path::MAIN_SEPARATOR_STR);
-        match std::env::consts::OS {
-            "windows" => {
-                let command = format!("explorer /select,{}", path);
-                std::process::Command::new("cmd")
-                    .args(&["/C", &command])
-                    .output()
-                    .map_err(|err| err.to_string())?;
-            }
-            "macos" => {
-                std::process::Command::new("open")
-                    .args(&["-R", &path])
-                    .output()
-                    .map_err(|err| err.to_string())?;
-            }
-            other => {
-                return Err(format!(
-                    "show_in_explorer is not implemented on {other} platform"
-                ));
-            }
-        };
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            let command = format!("explorer /select,{path}");
+            std::process::Command::new("cmd")
+                .args(&["/C", &command])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .map_err(|e| e.to_string())?;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open")
+                .args(&["-R", &path])
+                .output()
+                .map_err(|e| e.to_string())?;
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            return Err(format!(
+                "show_in_explorer is not implemented on this platform: {}",
+                std::env::consts::OS
+            ));
+        }
         return Ok(());
     }
     return inner(path.as_ref());
