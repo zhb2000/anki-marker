@@ -1,10 +1,10 @@
 [package]
 name = "anki-marker"
-version = "0.0.1"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+version = "0.0.2-0"
+description = "Anki Marker is a tool for creating Anki cards."
+authors = ["ZHB"]
+license = "GPL-3.0"
+repository = "https://github.com/zhb2000/anki-marker"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -25,3 +25,8 @@ notify-debouncer-full = "0.3.1"
 # this feature is used for production builds or when `devPath` points to the filesystem
 # DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = 'abort'
+lto = true
+strip = true

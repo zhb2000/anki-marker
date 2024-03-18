@@ -75,7 +75,7 @@ dependencies = [
 
 [[package]]
 name = "anki-marker"
-version = "0.0.1"
+version = "0.0.2-0"
 dependencies = [
  "notify",
  "notify-debouncer-full",

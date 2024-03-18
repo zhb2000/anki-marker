@@ -40,8 +40,8 @@ impl ConfigPath {
 
 #[tauri::command(rename_all = "snake_case")]
 pub fn read_config(
-    config_path: State<'_, ConfigPath>,
-    portable: State<'_, Portable>,
+    config_path: State<ConfigPath>,
+    portable: State<Portable>,
     app: AppHandle,
 ) -> Result<Config, String> {
     let config_path: &Path = config_path.0.as_ref();
@@ -66,19 +66,19 @@ pub fn read_config(
 #[tauri::command(rename_all = "snake_case")]
 pub fn commit_config(
     modified: PartialConfig,
-    config_path: State<'_, ConfigPath>,
+    config_path: State<ConfigPath>,
 ) -> Result<(), String> {
     let config_path: &Path = config_path.0.as_ref();
     return logics::config::commit_config(config_path, modified);
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn config_path(config_path: State<'_, ConfigPath>) -> String {
+pub fn config_path(config_path: State<ConfigPath>) -> String {
     return config_path.0.clone();
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn is_portable(portable: State<'_, Portable>) -> bool {
+pub fn is_portable(portable: State<Portable>) -> bool {
     return portable.0;
 }
 
