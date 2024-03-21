@@ -16,9 +16,8 @@ pub fn show_in_explorer(path: impl AsRef<Path>) -> Result<(), String> {
         {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
-            let command = format!("explorer /select,{path}");
             std::process::Command::new("cmd")
-                .args(&["/C", &command])
+                .args(&["/C", "explorer", "/select,", &path])
                 .creation_flags(CREATE_NO_WINDOW)
                 .output()
                 .map_err(|e| e.to_string())?;
