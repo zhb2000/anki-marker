@@ -29,4 +29,8 @@
     --radio-background: #ededed;
     --radio-background-hover: #e5e5e5;
     --radio-background-active: #dcdcdc;
+    /* scrollbar */
+    --scrollbar-width: 15px;
+    --scrollbar-thumb-background: #8a8a8a;
+    --scrollbar-thumb-background-hover: #636363;
 }

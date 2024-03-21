@@ -127,33 +127,4 @@ body,
     height: 100vh;
     background-color: var(--window-background);
 }
-
-::-webkit-scrollbar {
-    width: 15px;
-    height: 15px;
-    background-color: transparent;
-}
-
-::-webkit-scrollbar-track,
-::-webkit-scrollbar-track-piece,
-::-webkit-scrollbar-corner {
-    background-color: transparent;
-}
-
-/* set background-clip for transparent border */
-::-webkit-scrollbar-thumb {
-    background-color: #8a8a8a;
-    border-radius: calc(15px / 2);
-    border: 5px solid transparent;
-    background-clip: padding-box;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background-color: #636363;
-    border-width: 3px;
-}
-
-::-webkit-scrollbar-button {
-    display: none;
-}
 </style>
