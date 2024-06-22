@@ -2,9 +2,13 @@
 import { useHover } from './useHover';
 import { generateUniqueId } from './generateUniqueId';
 
-const props = defineProps<{ label?: string; }>();
+const props = defineProps<{
+    value?: string;
+    name?: string;
+    label?: string;
+}>();
 
-const model = defineModel();
+const model = defineModel<string>();
 
 const radioHover = useHover();
 const labelHover = useHover();
@@ -14,7 +18,7 @@ const radioId = generateUniqueId('fluent-radio');
 
 <template>
     <span class="fluent-radio-container">
-        <input :id="radioId" type="radio" class="fluent-radio"
+        <input :id="radioId" type="radio" class="fluent-radio" :name="props.name" :value="props.value"
             :class="{ hover: radioHover.hovered.value || labelHover.hovered.value }" v-model="model"
             v-on="radioHover.listeners" />
         <label v-if="props.label != null" :for="radioId" class="fluent-radio-label" v-on="labelHover.listeners">{{
