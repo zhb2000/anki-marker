@@ -132,7 +132,11 @@ onMounted(async () => {
             </div>
             <h2>关于</h2>
             <div class="term">应用版本：{{ appVersion }}</div>
-            <div class="term">作者：ZHB</div>
+            <div class="term">作者：
+                <FluentHyperlink href="https://github.com/zhb2000" target="_blank">
+                    ZHB
+                </FluentHyperlink>
+            </div>
             <div class="term">
                 <span>
                     项目地址：
