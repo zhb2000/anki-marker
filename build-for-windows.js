@@ -65,10 +65,12 @@ function main() {
     const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
     /** @type {string} */
     const version = packageJson.version;
+    /** @type {string} */
+    const packageName = packageJson.name;
     const tauriJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'src-tauri/tauri.conf.json'), 'utf8'));
     /** @type {string} */
     const productName = tauriJson.package.productName;
-    const portableName = `${productName}_${version}_windows-portable`;
+    const portableName = `${packageName}_${version}_windows-x64-portable`;
     if (skipBuild) {
         console.log('tauri build 已跳过');
         makePortable(productName, portableName);
