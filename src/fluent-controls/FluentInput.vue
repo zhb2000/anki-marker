@@ -18,7 +18,7 @@ const hover = useHover();
 </script>
 
 <template>
-    <input v-bind="$attrs" v-on="{ ...hover.listeners, ...$attrs }" v-model="model" class="fluent-input"
+    <input v-on="{ ...hover.listeners }" v-model="model" class="fluent-input"
         :class="hover.classes.value" />
 </template>
 

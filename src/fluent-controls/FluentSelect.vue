@@ -7,8 +7,7 @@ const hover = useHover();
 </script>
 
 <template>
-    <select class="fluent-select" :class="hover.classes.value" v-bind="$attrs" v-on="{ ...hover.listeners, ...$attrs }"
-        v-model="model">
+    <select class="fluent-select" :class="hover.classes.value" v-on="hover.listeners" v-model="model">
         <slot></slot>
     </select>
 </template>

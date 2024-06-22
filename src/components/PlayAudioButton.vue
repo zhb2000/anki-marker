@@ -5,8 +5,7 @@ const hover = useHover();
 </script>
 
 <template>
-    <button title="点击以发音" class="play-audio-button" :class="hover.classes.value" v-bind="$attrs"
-        v-on="{ ...hover.listeners, ...$attrs }">
+    <button title="点击以发音" class="play-audio-button" :class="hover.classes.value" v-on="hover.listeners">
         <slot></slot>
     </button>
 </template>

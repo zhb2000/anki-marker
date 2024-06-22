@@ -15,8 +15,8 @@ const radioId = generateUniqueId('fluent-radio');
 <template>
     <span class="fluent-radio-container">
         <input :id="radioId" type="radio" class="fluent-radio"
-            :class="{ hover: radioHover.hovered.value || labelHover.hovered.value }" v-model="model" v-bind="$attrs"
-            v-on="{ ...radioHover.listeners, ...$attrs }" />
+            :class="{ hover: radioHover.hovered.value || labelHover.hovered.value }" v-model="model"
+            v-on="radioHover.listeners" />
         <label v-if="props.label != null" :for="radioId" class="fluent-radio-label" v-on="labelHover.listeners">{{
             props.label }}</label>
     </span>

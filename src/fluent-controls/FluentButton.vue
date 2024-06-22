@@ -16,11 +16,10 @@ const hover = useHover();
 </script>
 
 <template>
-    <!-- 使用 $attrs 传递所有未声明的属性和事件监听器 -->
     <button class="fluent-button" :class="{
-            ...hover.classes.value,
-            accent: props.accent
-        }" v-bind="$attrs" v-on="{ ...hover.listeners, ...$attrs }" @click="emit('click', $event)">
+        ...hover.classes.value,
+        accent: props.accent
+    }" v-on="hover.listeners" @click="emit('click', $event)">
         <!-- 插槽内容允许父组件定制按钮文本或内容 -->
         <slot></slot>
     </button>

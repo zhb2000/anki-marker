@@ -5,7 +5,7 @@ const hover = useHover();
 </script>
 
 <template>
-    <a class="fluent-hyperlink" :class="hover.classes.value" v-bind="$attrs" v-on="{ ...hover.listeners, ...$attrs }">
+    <a class="fluent-hyperlink" :class="hover.classes.value" v-on="hover.listeners">
         <slot></slot>
     </a>
 </template>

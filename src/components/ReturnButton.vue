@@ -5,8 +5,7 @@ const hover = useHover();
 </script>
 
 <template>
-    <button class="return-button" :class="hover.classes.value" title="返回" v-bind="$attrs"
-        v-on="{ ...hover.listeners, ...$attrs }">
+    <button class="return-button" :class="hover.classes.value" title="返回" v-on="hover.listeners">
         <slot></slot>
     </button>
 </template>
