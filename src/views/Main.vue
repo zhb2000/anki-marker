@@ -226,6 +226,22 @@ async function changeItemAdded(index: number) {
     }
 }
 
+/** 点击单词卡片的“编辑笔记”按钮后，打开 Anki 的编辑对话框 */
+async function openEditDialog(index: number) {
+    const selected = selectedDict.value;
+    const item = wordItems[selected][index];
+    if (item.id == null) {
+        console.error('item.id is null when openEditDialog, item:', item);
+        return;
+    }
+    try {
+        await ankiService.guiEditNote(item.id!);
+    } catch (error) {
+        console.error(error);
+        await dialogMessage(String(error), { title: '打开编辑对话框失败', type: 'error' });
+    }
+}
+
 function makeSentenceHTML(): string {
     return tokens.value.map(({ token, marked }) => marked ? `<b>${escapeHTML(token)}</b>` : token).join('');
 }
@@ -318,11 +334,11 @@ onMounted(async () => {
             </div>
             <div ref="wordContainer" class="words-container-inner" v-if="selectedDict === 'collins'">
                 <CollinsCard v-for="(item, index) in wordItems['collins']" :item="item.item" :index="index"
-                    :status="item.status" @add-btn-click="changeItemAdded" />
+                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
             </div>
             <div class="words-container-inner" v-else>
                 <OxfordCard v-for="(item, index) in wordItems['oxford']" :item="item.item" :index="index"
-                    :status="item.status" @add-btn-click="changeItemAdded" />
+                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
             </div>
         </div>
     </div>

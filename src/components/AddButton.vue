@@ -86,6 +86,10 @@ const hover = useHover();
     background-color: var(--accent);
 }
 
+.add-btn.is-added.hover {
+    background-color: var(--control-accent-background-hover);
+}
+
 .add-btn.processing {
     cursor: not-allowed;
     --processing-background-color: #e4e4e4;

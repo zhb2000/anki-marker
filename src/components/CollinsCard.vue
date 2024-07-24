@@ -22,15 +22,20 @@ const props = defineProps({
 
 const emit = defineEmits<{
     'add-btn-click': [index: number];
+    'edit-btn-click': [index: number];
 }>();
 
 function emitAddBtnClick() {
     emit('add-btn-click', props.index);
 }
+
+function emitEditBtnClick() {
+    emit('edit-btn-click', props.index);
+}
 </script>
 
 <template>
-    <WordCard :index="index" :status="status" @add-btn-click="emitAddBtnClick">
+    <WordCard :index="index" :status="status" @add-btn-click="emitAddBtnClick" @edit-btn-click="emitEditBtnClick">
         <b>{{ item.word }}</b>
         <span v-if="item.sense != null"><span v-html="' '"></span><i>{{ item.sense }}</i></span>
         <div v-if="item.enDef != null" v-html="item.enDef"></div>

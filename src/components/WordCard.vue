@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, PropType } from 'vue';
 
+import { useHover } from '../fluent-controls';
 import AddButton from './AddButton.vue';
 import type { CardStatus } from './CardStatus';
 
@@ -17,9 +18,12 @@ const props = defineProps({
 
 const emit = defineEmits<{
     'add-btn-click': [index: number];
+    'edit-btn-click': [index: number];
 }>();
 
 const boxShadowAnimation = ref<string | undefined>(undefined);
+
+const editButtonHover = useHover();
 
 function emitAddBtnClick() {
     if (props.status === 'not-added') {
@@ -28,6 +32,10 @@ function emitAddBtnClick() {
         boxShadowAnimation.value = 'use-remove-box-shadow-animation';
     }
     emit('add-btn-click', props.index);
+}
+
+function emitEditBtnClick() {
+    emit('edit-btn-click', props.index);
 }
 
 function handleAnimationEnd() {
@@ -45,7 +53,12 @@ function handleAnimationEnd() {
             <div class="flex-grow-1">
                 <slot></slot>
             </div>
-            <AddButton :status="status" class="flex-shrink-0" @click="emitAddBtnClick" />
+            <div class="flex-shrink-0">
+                <AddButton :status="status" class="card-button" @click="emitAddBtnClick" />
+                <button class="card-button edit-button" :class="editButtonHover.classes.value"
+                    v-on="editButtonHover.listeners" title="编辑笔记" @click="emitEditBtnClick"
+                    v-show="status === 'is-added'"></button>
+            </div>
         </div>
     </div>
 </template>
@@ -118,5 +131,29 @@ function handleAnimationEnd() {
 
 .flex-shrink-0 {
     flex-shrink: 0;
+}
+
+.card-button {
+    display: block;
+    margin-bottom: 8px;
+    width: 16px;
+    height: 16px;
+}
+
+.edit-button {
+    padding: 0;
+    border: none;
+    border-radius: var(--border-radius);
+    background-color: #D4D7D7;
+    /* 使用 mask-image 后，用 background 设置图标的颜色 */
+    mask-image: url('../assets/edit.svg');
+}
+
+.edit-button.hover {
+    background-color: var(--accent);
+}
+
+.edit-button:active {
+    background-color: var(--control-accent-background-active);
 }
 </style>
