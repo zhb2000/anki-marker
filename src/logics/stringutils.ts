@@ -21,9 +21,9 @@ export function tokenize(text: string): string[] {
     return tokens;
 }
 
-const __escapeDiv = document.createElement('div');
+const escapeDiv = document.createElement('div');
 
 export function escapeHTML(html: string): string {
-    __escapeDiv.textContent = html; // 使用 textContent 而不是 innerHTML 来避免 HTML 解析
-    return __escapeDiv.innerHTML; // 获取转义后的 HTML 字符串
+    escapeDiv.textContent = html; // 使用 textContent 而不是 innerHTML 来避免 HTML 解析
+    return escapeDiv.innerHTML; // 获取转义后的 HTML 字符串
 }

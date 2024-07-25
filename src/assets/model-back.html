@@ -3,35 +3,33 @@
 <!-- back section -->
 {{#释义}}
 <div class="section">
-    <div id="back" class="items">{{释义}}</div>
+    <div class="bar back-icon" onclick="toggle('back-grid')" title="点击展开/折叠释义">释义</div>
+    <div id="back-grid" class="items-grid">
+        <div class="items-overflow-hidden">
+            <div id="back" class="items">{{释义}}</div>
+        </div>
+    </div>
 </div>
 {{/释义}}
 
 {{#笔记}}
 <div class="section">
-    <div class="bar note" onclick="toggle('note')">Notes</div>
-    <div id="note" class="items">{{笔记}}</div>
+    <div class="bar note-icon" onclick="toggle('note-grid')" title="点击展开/折叠笔记">笔记</div>
+    <div id="note-grid" class="items-grid">
+        <div class="items-overflow-hidden">
+            <div id="note" class="items">{{笔记}}</div>
+        </div>
+    </div>
 </div>
 {{/笔记}}
 
-<!-- foot section -->
-<div class="bar foot">
-    <div id="url"><a href={{text:url}}>URL</a></div>
+{{#url}}
+<div class="section">
+    <div class="bar url-icon" onclick="toggle('url-grid')" title="点击展开/折叠 URL">URL</div>
+    <div id="url-grid" class="items-grid">
+        <div class="items-overflow-hidden">
+            <div id="url" class="items"><a href={{text:url}}>{{url}}</a></div>
+        </div>
+    </div>
 </div>
-
-<script type="text/javascript">
-    // customzied format function
-    // clearFormat();
-
-    // hide hint based on config
-    if (config.fold) {
-        toggle('note');
-        toggle('sentence');
-    }
-
-    // sample function
-    highlightTag();
-
-    // sample function
-    // makeCloze()
-</script>
+{{/url}}

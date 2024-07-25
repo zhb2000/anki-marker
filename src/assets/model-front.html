@@ -1,26 +1,54 @@
-<!-- config & version section-->
 <div class="section">
-    <div class="bar anki-icon">
-        <a href="https://github.com/zhb2000/anki-marker" style="color:white;text-decoration:none">Anki 划词助手</a>
+    <div class="bar anki-icon" style="cursor: auto;">
+        <a href="https://github.com/zhb2000/anki-marker" title="zhb2000/anki-marker">Anki 划词助手</a>
     </div>
-    <!--  version section -->
-    <div id='version' class='item'></div>
 </div>
 
-<!-- front section -->
 <div class="section">
-    <div id="front" class="items">
-        <span>{{单词}}</span>
-    </div>
+    <div id="front" class="items">{{单词}}</div>
     <hr>
-    <div id="phonetic" class="items">
-        <span>{{音标}} {{发音}}</span>
-    </div>
-
-    {{#例句}}
-    <div class="section">
-        <div class="bar sentence" onclick="toggle('sentence')">Sentence</div>
-        <div id="sentence" class="backlist items">{{例句}}</div>
-    </div>
-    {{/例句}}
+    <div id="phonetic" class="items">{{音标}} {{发音}}</div>
 </div>
+
+{{#例句}}
+<div class="section">
+    <div class="bar sentence-icon" onclick="toggle('sentence-grid')" title="点击展开/折叠例句">例句</div>
+    <div id="sentence-grid" class="items-grid">
+        <div class="items-overflow-hidden">
+            <div class="items">
+                <span id="sentence-content">{{例句}}</span>
+                <div onclick="clickSentenceButton()" id="sentenceButton" class="audio-button tappable" title="例句发音"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{{/例句}}
+
+<script type="text/javascript">
+    /** hide or display the content */
+    function toggle(e) {
+        const box = document.getElementById(e);
+        if (box != null) {
+            if (box.classList.contains('fold')) {
+                box.classList.remove('fold');
+            } else {
+                box.classList.add('fold');
+            }
+        }
+    }
+
+    const __sentenceAudio = new Audio();
+    function clickSentenceButton() {
+        const isPlaying = !__sentenceAudio.paused;
+        __sentenceAudio.pause();
+        if (isPlaying) {
+            return;
+        }
+        const sentenceElem = document.getElementById('sentence-content');
+        const sentence = sentenceElem.innerText;
+        const voiceURL = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(sentence)}`;
+        __sentenceAudio.src = voiceURL;
+        __sentenceAudio.play();
+    }
+</script>

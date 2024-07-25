@@ -243,7 +243,9 @@ async function openEditDialog(index: number) {
 }
 
 function makeSentenceHTML(): string {
-    return tokens.value.map(({ token, marked }) => marked ? `<b>${escapeHTML(token)}</b>` : token).join('');
+    return tokens.value.map(
+        ({ token, marked }) => marked ? `<b>${escapeHTML(token)}</b>` : escapeHTML(token)
+    ).join('');
 }
 // #endregion
 
