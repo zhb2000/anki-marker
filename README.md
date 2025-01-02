@@ -15,7 +15,7 @@ Anki 划词助手是一个制作 Anki 卡片的工具，你可以用它标记句
 # 安装
 ## 安装划词助手本体
 
-[Releases 页面](https://github.com/zhb2000/anki-marker/releases)提供了 Windows 平台的便携式应用（.zip）和安装包（.msi/.exe），其余平台请自行编译。
+[Releases 页面](https://github.com/zhb2000/anki-marker/releases)提供了 Windows 平台的便携式应用（.zip）和安装程序（.msi/.exe），其余平台请自行编译。
 
 Anki 划词助手是一个基于 Tauri 的桌面应用，你的 Windows 系统需要带有 [Microsoft Edge WebView2](https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/) 才能运行（Windows 10 2004 及以上版本已经自带）。
 
@@ -54,7 +54,7 @@ AnkiConnect 默认会在 `localhost:8765` 上启动一个 HTTP 服务，如果�
 
 # 开发
 
-开发模式：
+开发模式（热重载）：
 
 ```shell
 cargo tauri dev
@@ -62,10 +62,20 @@ cargo tauri dev
 npm run tauri dev
 ```
 
-打包成 Windows 安装包和便携式应用：
+打包成 Windows 安装程序（.msi/.exe）和便携式应用（.zip）：
 
 ```shell
 node build-for-windows.js
 ```
 
-打包好的便携式应用位于 `src-tauri/target/release/portable` 目录下，安装包位于 `src-tauri/target/release/bundle` 目录下。
+打包好的安装程序和便携式应用位于 `src-tauri/target/release/release-assets` 目录下。
+
+在其他平台上构建：
+
+```shell
+cargo tauri build
+# 或者
+npm run tauri build
+```
+
+打包好的应用位于 `src-tauri/target/release/bundle` 目录下。

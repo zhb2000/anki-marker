@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import { ElConfigProvider } from 'element-plus';
 
 const currentRoute = useRoute();
 const transitionName = ref<string | undefined>(undefined);
@@ -12,13 +13,15 @@ watch(() => currentRoute.path, (newPath, _oldPath) => {
 </script>
 
 <template>
-    <RouterView v-slot="{ Component, route }">
-        <Transition :name="transitionName">
-            <KeepAlive>
-                <component :is="Component" :key="route.path" />
-            </KeepAlive>
-        </Transition>
-    </RouterView>
+    <ElConfigProvider :message="{ showClose: true }">
+        <RouterView v-slot="{ Component, route }">
+            <Transition :name="transitionName">
+                <KeepAlive>
+                    <component :is="Component" :key="route.path" />
+                </KeepAlive>
+            </Transition>
+        </RouterView>
+    </ElConfigProvider>
 </template>
 
 <style scoped>

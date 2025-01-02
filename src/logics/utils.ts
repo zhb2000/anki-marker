@@ -1,8 +1,12 @@
-import { invoke as tauriInvoke } from '@tauri-apps/api/tauri';
+import * as api from '@tauri-apps/api';
+
+export * as string from './stringutils';
+export { isWord, tokenize, escapeHTML } from './stringutils';
+export * as typing from './typing';
 
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     try {
-        return await tauriInvoke<T>(cmd, args);
+        return await api.tauri.invoke<T>(cmd, args);
     } catch (error) {
         throw (typeof error === 'string') ? new Error(error) : error;
     }
@@ -80,4 +84,37 @@ export function throttle<F extends (...args: any[]) => any>(func: F, wait: numbe
             timeout = setTimeout(execute, wait - (now - lastExec));
         }
     };
+}
+
+/** 将 HEX 转换为 RGB */
+export function hexToRgb(hex: string): { r: number; g: number; b: number; } {
+    const bigint: number = parseInt(hex.slice(1), 16);
+    const r: number = (bigint >> 16) & 255;
+    const g: number = (bigint >> 8) & 255;
+    const b: number = bigint & 255;
+    return { r, g, b };
+}
+
+/** 将 RGB 转换为 HSL */
+export function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number; } {
+    r /= 255;
+    g /= 255;
+    b /= 255;
+
+    const max: number = Math.max(r, g, b);
+    const min: number = Math.min(r, g, b);
+    let h: number = 0, s: number = 0, l: number = (max + min) / 2;
+
+    if (max !== min) {
+        const d: number = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+        }
+        h /= 6;
+    }
+
+    return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
 }

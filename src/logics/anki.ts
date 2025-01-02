@@ -1,158 +1,97 @@
-import { fetch, Body, ResponseType } from '@tauri-apps/api/http';
-
+import { AnkiConnectApi } from './anki-connect';
 import { typeAssertion } from './typing';
 import type { CollinsItem, OxfordItem } from './dict';
 import { escapeHTML } from './stringutils';
 
 /**
- * Anki Connect API: https://foosoft.net/projects/anki-connect/
+ * Anki 服务类，在 Anki Connect API 的基础上针对应用的需求进行了封装。
  */
-export class AnkiService {
-    public url: string;
-
+export class AnkiService extends AnkiConnectApi {
     public constructor(url: string) {
-        this.url = url;
+        super(url);
     }
 
-    public async invoke<T>(action: string, params?: Record<string, any>): Promise<T> {
-        // 使用 Tauri 发送 HTTP 请求，以规避跨域问题
-        const responseObj = await fetch(this.url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: Body.json({ action, params, version: 6 }),
-            responseType: ResponseType.JSON
-        });
-        if (!responseObj.ok) {
-            throw new Error(
-                'HTTP request is not ok. ' +
-                `status: ${responseObj.status}, ` +
-                `data: ${JSON.stringify(responseObj.data)}, ` +
-                `headers: ${JSON.stringify(responseObj.headers)}.`
-            );
-        }
-        if (!(responseObj.data instanceof Object)) {
-            throw TypeError(`Expect response data to be object but receive ${typeof responseObj.data}.`);
-        }
-        const response = responseObj.data;
-        if (!('error' in response)) {
-            throw new Error('response is missing required error field');
-        }
-        if (!('result' in response)) {
-            throw new Error('response is missing required result field');
-        }
-        typeAssertion<{ error: string | null, result: T; }>(response);
-        if (response.error != null) {
-            throw new Error(response.error);
-        }
-        return response.result;
-    }
-
-    // #region Deck Actions, https://foosoft.net/projects/anki-connect/#deck-actions
-    /** Gets the complete list of deck names for the current user. */
-    public async deckNames(): Promise<string[]> {
-        return await this.invoke('deckNames');
-    }
-
-    /** Gets the complete list of deck names and their respective IDs for the current user. */
-    public async deckNamesAndIds(): Promise<Record<string, number>> {
-        return await this.invoke('deckNamesAndIds');
-    }
-
-    /** Create a new empty deck. Will not overwrite a deck that exists with the same name. */
-    public async createDeck(deck: string): Promise<number> {
-        return await this.invoke('createDeck', { deck });
-    }
-    // #endregion
-
-    // #region Model Actions, https://foosoft.net/projects/anki-connect/#model-actions
-    /** Gets the complete list of model names for the current user. */
-    public async modelNames(): Promise<string[]> {
-        return await this.invoke('modelNames');
-    }
-
-    /** Gets a list of models for the provided model names from the current user. */
-    public async findModelsByName(modelNames: string[]): Promise<Record<string, any>[]> {
-        return await this.invoke('findModelsByName', { modelNames });
-    }
-
-    /**
-     * Creates a new model to be used in Anki. User must provide the `modelName`, `inOrderFields` and `cardTemplates`
-     * to be used in the model. There are optional fields `css` and `isCloze`. If not specified, `css` will use the
-     * default Anki css and `isCloze` will be equal to `False`. If `isCloze` is `True` then model will be created
-     * as `Cloze`.
-     * 
-     * Optionally the `Name` field can be provided for each entry of `cardTemplates`. By default the card names will
-     * be `Card 1`, `Card 2`, and so on.
-     */
-    public async createModel(
-        modelName: string,
-        inOrderFields: string[],
-        cardTemplates: Record<string, string>[],
-        css?: string,
-        isCloze?: boolean
-    ): Promise<number> {
-        return await this.invoke('createModel', {
+    /** 创建划词助手笔记模板 */
+    public async createMarkerModel(modelName: string) {
+        await this.createModel(
             modelName,
-            inOrderFields,
-            cardTemplates,
-            css,
-            isCloze
-        });
+            ["单词", "音标", "释义", "笔记", "例句", "url", "发音"], // inOrderFields
+            [
+                {
+                    "Name": "Card 1",
+                    "Front": MODEL_FRONT,
+                    "Back": MODEL_BACK
+                }
+            ], // cardTemplates
+            MODEL_CSS
+        );
     }
-    // #endregion
 
-    // #region Note Actions, https://foosoft.net/projects/anki-connect/#note-actions
-    /**
-     * Creates a note using the given deck and model, with the provided field values and tags.
-     * Returns the identifier of the created note created on success, and null on failure.
-     */
-    public async addNote(
+    /** 获取划词助手笔记模板的第一个 model template */
+    private async getMarkerModelTemplate(modelName: string): Promise<{
+        name: string;
+        ord: number;
+        /** 卡片正面模板 */
+        qfmt: string;
+        /** 卡片背面模板 */
+        afmt: string;
+    }> {
+        const models = await this.findModelsByName([modelName]);
+        if (models.length === 0) {
+            throw new Error(`Model ${modelName} 不存在`);
+        }
+        const model = models[0];
+        const templates = model.tmpls as {
+            name: string;
+            ord: number;
+            qfmt: string;
+            afmt: string;
+        }[];
+        if (templates.length === 0) {
+            throw new Error(`Model ${modelName} 没有卡片模板`);
+        }
+        return templates[0];
+    }
+
+    /** 更新划词助手的笔记模板（更新 model templates 和 model styling） */
+    public async updateMarkerModel(modelName: string) {
+        const template = await this.getMarkerModelTemplate(modelName);
+        const templateName = template.name;
+        await this.updateModelTemplates(modelName, { [templateName]: { Front: MODEL_FRONT, Back: MODEL_BACK } });
+        await this.updateModelStyling(modelName, MODEL_CSS);
+    }
+
+    /** 获取划词助手笔记模板的版本号 */
+    public async getCardTemplateVersionByModelName(modelName: string): Promise<string | null> {
+        const template = await this.getMarkerModelTemplate(modelName);
+        return extractCardTemplateVersion(template.qfmt);
+    }
+
+    /** 添加一条划词助手单词笔记 */
+    public async addMarkerNote(
         deckName: string,
         modelName: string,
         fields: Fields,
         audioURL: string,
         audioFilename: string
     ): Promise<number | null> {
-        return await this.invoke('addNote', {
-            note: {
-                deckName,
-                modelName,
-                fields: { ...fields },
-                audio: [{
+        return await this.addNote(
+            deckName,
+            modelName,
+            { ...fields }, // fields
+            [
+                {
                     url: audioURL,
                     filename: audioFilename,
                     fields: ['发音']
-                }],
-                options: { allowDuplicate: true }
-            }
-        });
+                }
+            ], // audio
+            { allowDuplicate: true } // options
+        );
     }
-
-    /**
-     * Deletes notes with the given ids. If a note has several cards associated with it,
-     * all associated cards will be deleted.
-     */
-    public async deleteNotes(notes: number[]) {
-        await this.invoke('deleteNotes', { notes });
-    }
-    // #endregion
-
-    // #region Graphical Actions, https://foosoft.net/projects/anki-connect/#graphical-actions
-    /**
-     * Opens the Edit dialog with a note corresponding to given note ID. The dialog is similar to
-     * the Edit Current dialog, but:
-     * 
-     * - has a Preview button to preview the cards for the note
-     * - has a Browse button to open the browser with these cards
-     * - has Previous/Back buttons to navigate the history of the dialog
-     * - has no bar with the Close button
-     */
-    public async guiEditNote(note: number) {
-        await this.invoke('guiEditNote', { note });
-    }
-    // #endregion
 }
 
+/** 划词助手笔记模板的字段 */
 interface Fields {
     '单词': string;
     '音标'?: string;
@@ -186,6 +125,7 @@ function makeMeaning(item: CollinsItem | OxfordItem): string | null {
     return (meaning.length > 0) ? meaning.join('<br>') : null;
 }
 
+/** 根据单词释义和例句生成划词助手单词笔记的字段 */
 export function makeFields(
     dict: 'collins' | 'oxford',
     item: CollinsItem | OxfordItem,
@@ -212,17 +152,30 @@ export function makeFields(
 
 import MODEL_FRONT from '../assets/model-front.html?raw';
 import MODEL_BACK from '../assets/model-back.html?raw';
-import MODEL_CSS from '../assets/model-css.html?raw';
+import MODEL_CSS from '../assets/model-css.css?raw';
 
-export async function createMarkerModel(service: AnkiService, modelName: string) {
-    await service.createModel(
-        modelName,
-        ["单词", "音标", "释义", "笔记", "例句", "url", "发音"],
-        [{
-            "Name": "card1",
-            "Front": MODEL_FRONT,
-            "Back": MODEL_BACK
-        }],
-        MODEL_CSS
-    );
+function extractCardTemplateInfo(html: string): Record<string, any> | null {
+    const parser = new DOMParser();
+    // 解析 HTML 字符串为一个 Document 对象
+    const doc = parser.parseFromString(html, 'text/html');
+    const scriptElement = doc.getElementById('com.zhb2000.anki-marker_card-template-info');
+    if (scriptElement != null) {
+        // 获取 script 节点的文本内容
+        const jsonString = scriptElement.textContent;
+        if (jsonString != null) {
+            // 解析 JSON 字符串为对象并返回
+            return JSON.parse(jsonString);
+        } else {
+            return null;
+        }
+    }
+    return null;
 }
+
+function extractCardTemplateVersion(html: string): string | null {
+    const info = extractCardTemplateInfo(html);
+    return (info != null && typeof info.version === 'string') ? info.version : null;
+}
+
+/** 应用内置的卡片模板的版本号 */
+export const CARD_TEMPLATE_VERSION = extractCardTemplateVersion(MODEL_FRONT)!;

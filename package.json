@@ -1,7 +1,7 @@
 {
   "name": "anki-marker",
   "private": true,
-  "version": "0.0.2-0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,16 +11,23 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^1.5.6",
+    "element-plus": "^2.9.1",
+    "github-markdown-css": "^5.8.1",
+    "markdown-it": "^14.1.0",
     "normalize.css": "^8.0.1",
+    "semver": "^7.6.3",
     "vue": "^3.4.29",
     "vue-router": "^4.4.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^1.5.14",
+    "@types/markdown-it": "^14.1.2",
+    "@types/semver": "^7.5.8",
     "@vitejs/plugin-vue": "^5.0.5",
     "archiver": "^7.0.1",
     "typescript": "^5.5.2",
     "vite": "^5.3.1",
+    "vite-svg-loader": "^5.1.0",
     "vue-tsc": "^2.0.21"
   }
 }

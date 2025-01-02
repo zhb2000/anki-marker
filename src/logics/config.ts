@@ -1,5 +1,4 @@
-import { open as shellOpen } from '@tauri-apps/api/shell';
-import { listen } from '@tauri-apps/api/event';
+import * as api from '@tauri-apps/api';
 
 import { invoke } from './utils';
 
@@ -23,13 +22,21 @@ export class Config implements ConfigModel {
     public readonly path: string;
     /** Whether the app is in portable mode. */
     public readonly portable: boolean;
+    /** Anki Connect 服务的 URL */
     public ankiConnectURL!: string;
+    /** 将划词结果添加到的牌组名 */
     public deckName!: string;
+    /** 划词结果使用的笔记模板名 */
     public modelName!: string;
+    /** 存储配置项的对象 */
     private config: ConfigModel;
+    /** 被修改过的配置项 */
     private modified: Partial<ConfigModel>;
-    public __unlistenChanged?: () => void;
-    public __unlistenWatcherError?: () => void;
+    // Config 对象被设计为始终存活的全局单例，因此不需要取消事件监听
+    /** 'config-changed' 事件对应的取消监听函数 */
+    public __unlistenConfigChanged?: () => void;
+    /** 'config-watcher-error' 事件对应的取消监听函数 */
+    public __unlistenConfigWatcherError?: () => void;
 
     private constructor(config: ConfigModel, path: string, portable: boolean) {
         this.config = config;
@@ -73,6 +80,14 @@ export class Config implements ConfigModel {
         }
     }
 
+    /**
+     * 启动配置文件监视器。
+     * Return true if the watcher is started successfully, false if it's already started.
+     */
+    public async startWatcher(): Promise<boolean> {
+        return startConfigWatcher(this);
+    }
+
     public static async load(): Promise<Config> {
         const [config_path, cfg, portable] = await Promise.all([
             invoke<string>('config_path'),
@@ -88,20 +103,27 @@ export async function showInExplorer(path: string) {
 }
 
 export async function openFile(path: string) {
-    await shellOpen(path);
+    await api.shell.open(path);
 }
 
-export async function startConfigWatcher(config: Config) {
-    await invoke<boolean>('start_config_watcher');
+/**
+ * 启动配置文件监视器。
+ * Return true if the watcher is started successfully, false if it's already started.
+ */
+export async function startConfigWatcher(config: Config): Promise<boolean> {
+    const newWatcherStarted = await invoke<boolean>('start_config_watcher');
     // listeners set in the front-end will be removed after the page is reloaded
-    if (config.__unlistenChanged == null) {
-        config.__unlistenChanged = await listen('config-changed', async () => {
+    if (config.__unlistenConfigChanged == null) {
+        // 监听 'config-changed' 事件，以便在配置文件被修改时重新加载配置
+        config.__unlistenConfigChanged = await api.event.listen('config-changed', async () => {
             await config.reload();
         });
     }
-    if (config.__unlistenWatcherError == null) {
-        config.__unlistenWatcherError = await listen('config-watcher-error', () => {
+    if (config.__unlistenConfigWatcherError == null) {
+        // 监听 'config-watcher-error' 事件，以便在配置文件监视器出错时输出错误信息
+        config.__unlistenConfigWatcherError = await api.event.listen('config-watcher-error', () => {
             console.error('Config watcher error');
         });
     }
+    return newWatcherStarted;
 }

@@ -3,12 +3,16 @@
     --control-background: #fbfbfb;
     --control-background-hover: #f6f6f6;
     --control-background-active: #f5f5f5;
+    --control-background-disabled: #f5f5f5;
     --control-text-color: black;
     --control-text-color-active: #5d5d5d;
+    --control-text-color-disabled: #9d9d9d;
     --control-accent-background-hover: #1975c5;
     --control-accent-background-active: #3183ca;
+    --control-accent-background-disabled: var(--control-accent-background-active);
     --control-accent-text-color: white;
     --control-accent-text-color-active: #c2daef;
+    --control-accent-text-color-disabled: var(--control-accent-text-color-active);
     --border-width: 1.4px;
     --border-radius: 5px;
     --border-color: #e5e5e5;

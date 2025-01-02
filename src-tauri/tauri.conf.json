@@ -32,7 +32,8 @@
       },
       "dialog": {
         "all": false,
-        "message": true
+        "message": true,
+        "confirm": true
       },
       "os": {
         "all": true

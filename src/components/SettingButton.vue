@@ -1,13 +1,26 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+import { ElBadge } from 'element-plus';
+
 import { useHover } from '../fluent-controls';
 
+const props = defineProps({
+    updateAvailable: {
+        type: Boolean,
+        required: true
+    }
+});
+
 const hover = useHover();
+const tooltipTitle = computed(() => props.updateAvailable ? '设置（更新可用）' : '设置');
 </script>
 
 <template>
-    <button class="setting-button" :class="hover.classes.value" title="设置" v-on="hover.listeners">
-        <slot></slot>
-    </button>
+    <ElBadge is-dot :offset="[-2, 2]" :hidden="!props.updateAvailable">
+        <button class="setting-button" :class="hover.classes.value" :title="tooltipTitle" v-on="hover.listeners">
+            <slot></slot>
+        </button>
+    </ElBadge>
 </template>
 
 <style scoped>

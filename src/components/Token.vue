@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 
 import { useHover } from '../fluent-controls';
-import { isWord as testIsWord } from '../logics/stringutils';
+import * as utils from '../logics/utils';
 
 const props = defineProps({
     token: {
@@ -13,7 +13,7 @@ const props = defineProps({
 
 const marked = defineModel<boolean>('marked', { required: true });
 
-const isWord = computed(() => testIsWord(props.token));
+const isWord = computed(() => utils.string.isWord(props.token));
 
 const hover = useHover();
 

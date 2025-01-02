@@ -49,6 +49,12 @@ const hover = useHover();
     color: var(--control-text-color-active);
 }
 
+.fluent-button:disabled {
+    background-color: var(--control-background-disabled);
+    border-bottom-color: var(--border-color);
+    color: var(--control-text-color-disabled);
+}
+
 .fluent-button.accent {
     color: var(--control-accent-text-color);
     background-color: var(--accent);
@@ -64,5 +70,11 @@ const hover = useHover();
     background-color: var(--control-accent-background-active);
     border-bottom-color: var(--border-accent-color);
     color: var(--control-accent-text-color-active);
+}
+
+.fluent-button.accent:disabled {
+    background-color: var(--control-accent-background-disabled);
+    border-bottom-color: var(--border-accent-color);
+    color: var(--control-accent-text-color-disabled);
 }
 </style>

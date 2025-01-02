@@ -1,25 +1,25 @@
 <script setup lang="ts">
 import { ref, reactive, watch, nextTick, onMounted, onActivated } from 'vue';
 import { useRouter } from 'vue-router';
-import { readText as clipboardReadText } from '@tauri-apps/api/clipboard';
-import { message as dialogMessage } from '@tauri-apps/api/dialog';
+import * as api from '@tauri-apps/api';
 
-import { tokenize, escapeHTML } from '../logics/stringutils';
-import { throttle, tauriInRelease } from '../logics/utils';
+import * as utils from '../logics/utils';
 import * as dict from '../logics/dict';
 import * as anki from '../logics/anki';
 import * as cfg from '../logics/config';
-import { getConfig } from '../logics/globals';
+import * as globals from '../logics/globals';
 import { FluentButton, FluentSelect, FluentInput, FluentRadio } from '../fluent-controls';
-import type { CardStatus } from '../components/CardStatus';
-import SentencePanel from '../components/SentencePanel.vue';
-import CollinsCard from '../components/CollinsCard.vue';
-import OxfordCard from '../components/OxfordCard.vue';
-import PlayAudioButton from '../components/PlayAudioButton.vue';
-import SettingButton from '../components/SettingButton.vue';
+import {
+    CardStatus,
+    SentencePanel,
+    CollinsCard,
+    OxfordCard,
+    PlayAudioButton,
+    SettingButton
+} from '../components';
+
 
 let config: cfg.Config;
-
 let ankiService: anki.AnkiService;
 
 // #region 单词搜索
@@ -76,13 +76,13 @@ async function searchAndUpdate(word: string, dictionary: 'collins' | 'oxford') {
             : await dict.searchOxford(word);
     } catch (error) {
         console.error(error);
-        await dialogMessage(String(error), { title: '查询失败', type: 'error' });
+        await api.dialog.message(String(error), { title: '查询失败', type: 'error' });
         return;
     }
     wordItems[dictionary] = results.map(item => ({ item, status: 'not-added', id: null })) as any[];
 }
 
-const throttledSearch = throttle(async () => {
+const throttledSearch = utils.throttle(async () => {
     await searchAndUpdate(searchText.value, selectedDict.value);
 }, 200);
 // #endregion
@@ -97,11 +97,11 @@ const editTextarea = ref<HTMLTextAreaElement | null>(null);
 
 /** 文本框中的句子被更改时，更新 tokens */
 watch(sentence, newSentence => {
-    tokens.value = tokenize(newSentence).map(token => ({ token, marked: false }));
+    tokens.value = utils.string.tokenize(newSentence).map(token => ({ token, marked: false }));
 });
 
 async function pasteToEdit() {
-    const text = await clipboardReadText();
+    const text = await api.clipboard.readText();
     if (text != null) {
         sentence.value = text.trim();
         if (showEdit.value) {
@@ -162,7 +162,7 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
         }
         if (!modelExists) {
             try {
-                await anki.createMarkerModel(ankiService, modelName);
+                await ankiService.createMarkerModel(modelName);
             } catch (error) {
                 errorTitle = `笔记模板 ${modelName} 创建失败`;
                 throw error;
@@ -173,7 +173,7 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
     try {
         await Promise.all([prepareDeck(deckName), prepareModel(modelName)]);
     } catch (error) {
-        await dialogMessage(String(error), { title: errorTitle!, type: 'error' });
+        await api.dialog.message(String(error), { title: errorTitle!, type: 'error' });
         throw error;
     }
 }
@@ -195,7 +195,7 @@ async function changeItemAdded(index: number) {
             const word = ('phrase' in item.item && item.item.phrase != null)
                 ? item.item.phrase
                 : item.item.word;
-            const id = await ankiService.addNote(
+            const id = await ankiService.addMarkerNote(
                 config.deckName,
                 config.modelName,
                 fields,
@@ -210,7 +210,7 @@ async function changeItemAdded(index: number) {
         } catch (error) {
             item.status = 'not-added';
             console.error(error);
-            await dialogMessage(String(error), { title: '添加失败', type: 'error' });
+            await api.dialog.message(String(error), { title: '添加失败', type: 'error' });
         }
     } else if (item.status === 'is-added') { // remove from Anki
         item.status = 'processing-remove';
@@ -221,7 +221,7 @@ async function changeItemAdded(index: number) {
         } catch (error) {
             item.status = 'is-added';
             console.error(error);
-            await dialogMessage(String(error), { title: '删除失败', type: 'error' });
+            await api.dialog.message(String(error), { title: '删除失败', type: 'error' });
         }
     }
 }
@@ -238,13 +238,15 @@ async function openEditDialog(index: number) {
         await ankiService.guiEditNote(item.id!);
     } catch (error) {
         console.error(error);
-        await dialogMessage(String(error), { title: '打开编辑对话框失败', type: 'error' });
+        await api.dialog.message(String(error), { title: '打开编辑对话框失败', type: 'error' });
     }
 }
 
 function makeSentenceHTML(): string {
     return tokens.value.map(
-        ({ token, marked }) => marked ? `<b>${escapeHTML(token)}</b>` : escapeHTML(token)
+        ({ token, marked }) => marked
+            ? `<b>${utils.string.escapeHTML(token)}</b>`
+            : utils.string.escapeHTML(token)
     ).join('');
 }
 // #endregion
@@ -270,38 +272,16 @@ function playPronunciation() {
 }
 // #endregion
 
+// 由于使用了 KeepAlive 不销毁页面，所以 onMounted 只会执行一次
 onMounted(async () => {
-    if (tauriInRelease()) {
-        document.addEventListener('contextmenu', e => {
-            if (!((e.target instanceof HTMLInputElement && e.target.type === 'text')
-                || e.target instanceof HTMLTextAreaElement)) {
-                e.preventDefault();
-            }
-        }); // disable context menu in release mode
-    } else {
-        sentence.value = 'I\'m a student. This is test sentence 123.'; // test sentence in dev mode
+    await globals.initAtAppStart();
+    [config, ankiService] = await Promise.all([
+        globals.getConfig(),
+        globals.getAnkiService()
+    ]);
+    if (!utils.tauriInRelease()) {
+        sentence.value = 'The quick brown fox jumps over the lazy dog.'; // test sentence in dev mode
     }
-
-    try {
-        config = await getConfig();
-    } catch (error) {
-        console.error(error);
-        await dialogMessage(String(error), { title: '配置文件读取失败', type: 'error' });
-        return;
-    }
-    try {
-        await cfg.startConfigWatcher(config);
-    } catch (error) {
-        console.error(error);
-        await dialogMessage(String(error), { title: '配置文件监听失败', type: 'error' });
-    }
-
-    ankiService = new anki.AnkiService(config.ankiConnectURL);
-
-    /** 监听 config 的 anki-connect-url 更新 */
-    watch(() => config.ankiConnectURL, newURL => {
-        ankiService.url = newURL;
-    });
 });
 </script>
 
@@ -312,14 +292,15 @@ onMounted(async () => {
                 {{ showEdit ? '完成' : '编辑' }}
             </FluentButton>
             <FluentButton class="header-button" @click="pasteToEdit">粘贴</FluentButton>
+            <FluentInput class="header-input-text" type="text" v-model.trim="searchText" placeholder="回车查询单词"
+                @keydown.enter="searchAndUpdate(searchText, selectedDict)" />
+            <FluentButton class="header-button" @click="searchAndUpdate(searchText, selectedDict)">查询</FluentButton>
             <FluentSelect class="header-select" v-model="selectedDict">
                 <option value="collins">柯林斯词典</option>
                 <option value="oxford">新牛津英汉双解</option>
             </FluentSelect>
-            <FluentInput class="header-input-text" type="text" v-model.trim="searchText" placeholder="回车查询单词"
-                @keydown.enter="searchAndUpdate(searchText, selectedDict)" />
-            <FluentButton class="header-button" @click="searchAndUpdate(searchText, selectedDict)">查询</FluentButton>
-            <SettingButton @click="router.push('/settings')" />
+            <SettingButton @click="router.push('/settings')"
+                :update-available="globals.appUpdateAvailable.value || globals.templateUpdateAvailable.value" />
         </div>
         <div class="sentence-container">
             <SentencePanel :tokens="tokens" v-if="!showEdit" />
