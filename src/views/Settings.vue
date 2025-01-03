@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onActivated } from 'vue';
+import { ref, computed, onActivated, onBeforeMount } from 'vue';
 import { useRouter } from 'vue-router';
-import * as api from '@tauri-apps/api';
+import * as api from '../tauri-api';
 import { ElMessage, ElPopconfirm, ElDialog } from 'element-plus';
 import MarkdownIt from 'markdown-it';
 import 'github-markdown-css';
@@ -15,11 +15,11 @@ import OpenFilledSvg from '../assets/OpenFilled.svg';
 import GitHubSvg from '../assets/github.svg';
 
 
+/** avoid rendering before the config is loaded */
+const pageInitialized = ref(false);
 let config: cfg.Config;
 let ankiService: anki.AnkiService;
 const markdownIt = new MarkdownIt();
-/** avoid rendering before the config is loaded */
-const showContent = ref(false);
 
 // #region 设置项的保存
 const router = useRouter();
@@ -30,7 +30,7 @@ async function commitConfig() {
             await config.commit();
         } catch (error) {
             console.error(error);
-            await api.dialog.message(String(error), { title: '配置文件保存失败', type: 'error' });
+            await api.dialog.message(String(error), { title: '配置文件保存失败', kind: 'error' });
         }
     }
 }
@@ -71,7 +71,7 @@ async function handleCheckUpdateClick() {
         await globals.fetchAndSetLatestAppInfo();
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '检查更新失败', type: 'error' });
+        await api.dialog.message(String(error), { title: '检查更新失败', kind: 'error' });
         return;
     } finally {
         checkingAppUpdate.value = false;
@@ -110,7 +110,7 @@ async function handleUpdateTemplateClick() {
         await ankiService.updateMarkerModel(config.modelName);
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '笔记模板更新失败', type: 'error' });
+        await api.dialog.message(String(error), { title: '笔记模板更新失败', kind: 'error' });
         return;
     }
     ElMessage.success('笔记模板更新成功');
@@ -129,7 +129,7 @@ async function handleOpenFileClick() {
         await cfg.openFile(config.path);
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '打开文件失败', type: 'error' });
+        await api.dialog.message(String(error), { title: '打开文件失败', kind: 'error' });
     }
 }
 
@@ -139,13 +139,14 @@ async function handleShowInExplorerClick() {
         await cfg.showInExplorer(config.path);
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '打开目录失败', type: 'error' });
+        await api.dialog.message(String(error), { title: '打开目录失败', kind: 'error' });
     }
 }
 // #endregion
 
 // 由于使用了 KeepAlive 不销毁页面，所以 onMounted 只会执行一次
-onMounted(async () => {
+onBeforeMount(async () => {
+    // 为需要初始化的变量赋值
     await globals.initAtAppStart();
     [config, ankiService, appVersion, os] = await Promise.all([
         globals.getConfig(),
@@ -153,22 +154,26 @@ onMounted(async () => {
         globals.getAppVersion(),
         api.os.type()
     ]);
-    showContent.value = true;
+    pageInitialized.value = true;
 });
 
-onActivated(() => {
+onActivated(async () => {
     // 打开设置页面时获取一次笔记模板版本
-    void globals.fetchAndSetTemplateVersion(config.modelName);
+    // 由于 vue 的生命周期钩子不会等待 async 函数执行完毕，
+    // 所以即使 onActivated 在 onBeforeMount 之后执行，config 仍可能未初始化（undefined）
+    await globals.fetchAndSetTemplateVersion((await globals.getConfig()).modelName);
 });
+
+
 </script>
 
 <template>
-    <div class="main-window use-fluent-scrollbar">
+    <div class="main-window">
         <div class="title-bar">
             <ReturnButton style="margin-right: 8px;" @click="handleReturnClick" />
             <h1 style="display: inline-block;">设置</h1>
         </div>
-        <div class="content-area" v-if="showContent">
+        <div class="content-area" v-if="pageInitialized">
             <h2>应用设置</h2>
             <div class="term">
                 <span>AnkiConnect 服务</span>
@@ -304,8 +309,10 @@ onActivated(() => {
             </div>
             <div style="margin-bottom: 0px;">
                 <FluentButton class="open-file-button" @click="handleOpenFileClick">打开文件</FluentButton>
-                <FluentButton v-if="os === 'Windows_NT' || os === 'Darwin'" class="open-file-button"
-                    @click="handleShowInExplorerClick">打开目录</FluentButton>
+                <FluentButton v-if="os === 'windows' || os === 'macos'" class="open-file-button"
+                    @click="handleShowInExplorerClick">
+                    打开目录
+                </FluentButton>
             </div>
         </div>
     </div>
@@ -315,6 +322,11 @@ onActivated(() => {
 .release-note-dialog .el-dialog__body {
     height: calc(80vh - 150px);
     overflow: auto;
+    user-select: text;
+}
+
+.release-note-dialog {
+    user-select: none;
 }
 </style>
 

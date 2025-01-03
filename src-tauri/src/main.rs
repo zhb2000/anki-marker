@@ -10,17 +10,22 @@ mod application;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let portable = application::config::Portable::new()?;
             app.manage(portable);
             app.manage(application::config::ConfigPath::new(
                 portable.0,
-                app.path_resolver(),
+                app.path(),
             )?);
             app.manage(application::config::IsWatching::new());
             app.manage(application::dict::DictPath::new(
                 portable.0,
-                app.path_resolver(),
+                app.path(),
             )?);
             app.manage(Mutex::new(None::<Connection>));
             Ok(())

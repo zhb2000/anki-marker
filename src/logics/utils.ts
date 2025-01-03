@@ -1,4 +1,4 @@
-import * as api from '@tauri-apps/api';
+import * as api from '../tauri-api';
 
 export * as string from './stringutils';
 export { isWord, tokenize, escapeHTML } from './stringutils';
@@ -6,7 +6,7 @@ export * as typing from './typing';
 
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     try {
-        return await api.tauri.invoke<T>(cmd, args);
+        return await api.core.invoke<T>(cmd, args);
     } catch (error) {
         throw (typeof error === 'string') ? new Error(error) : error;
     }

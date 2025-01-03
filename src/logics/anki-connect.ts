@@ -1,4 +1,4 @@
-import { fetch, Body, ResponseType } from '@tauri-apps/api/http';
+import { fetch } from '@tauri-apps/plugin-http';
 
 import { typeAssertion } from './typing';
 
@@ -16,22 +16,30 @@ export class AnkiConnectApi {
         // 使用 Tauri 的 fetch 发送 HTTP 请求，以规避跨域问题
         const response = await fetch(this.url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: Body.json({ action, params, version: 6 }),
-            responseType: ResponseType.JSON
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                // Tauri v2 中需要设置请求头的 Origin 为 http://localhost，
+                // 或者空字符串（Tauri 会移除请求头中的 Origin），
+                // 否则 Anki Connect 会返回 HTTP 403 Forbidden。
+                // https://github.com/tauri-apps/plugins-workspace/issues/1968#issuecomment-2561164698
+                'Origin': 'http://localhost'
+            },
+            body: JSON.stringify({ action, params, version: 6 }),
+            // mode: 'no-cors' // 添加这一行以规避跨域问题
         });
         if (!response.ok) {
             throw new Error(
                 'HTTP request is not ok. ' +
                 `status: ${response.status}, ` +
-                `data: ${JSON.stringify(response.data)}, ` +
+                `data: ${await response.text()}, ` +
                 `headers: ${JSON.stringify(response.headers)}.`
             );
         }
-        if (!(response.data instanceof Object)) {
-            throw TypeError(`Expect response data to be Object but receive ${typeof response.data}: ${response.data}`);
+        const data = await response.json();
+        if (!(data instanceof Object)) {
+            throw TypeError(`Expect response data to be Object but receive ${typeof data}: ${data}`);
         }
-        const data = response.data;
         if (!('error' in data)) {
             throw new Error('response is missing required error field');
         }

@@ -2,78 +2,45 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "devPath": "http://localhost:1420",
-    "distDir": "../dist",
-    "withGlobalTauri": false
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
   },
-  "package": {
-    "productName": "Anki 划词助手",
-    "version": "../package.json"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": false,
-      "shell": {
-        "all": false,
-        "open": ".*"
-      },
-      "clipboard": {
-        "all": false,
-        "readText": true,
-        "writeText": false
-      },
-      "http": {
-        "all": false,
-        "request": true,
-        "scope": [
-          "http://*",
-          "https://*"
+  "bundle": {
+    "category": "Education",
+    "shortDescription": "Anki 划词助手",
+    "longDescription": "Anki 划词助手是一个制作 Anki 卡片的工具，你可以用它标记句子中的生词，通过“单词结合上下文”的方式更好地背单词。",
+    "active": true,
+    "targets": "all",
+    "windows": {
+      "nsis": {
+        "languages": [
+          "SimpChinese"
         ]
       },
-      "dialog": {
-        "all": false,
-        "message": true,
-        "confirm": true
-      },
-      "os": {
-        "all": true
-      },
-      "app": {
-        "all": true
+      "wix": {
+        "language": "zh-CN",
+        "upgradeCode": "b8333182-e22f-5367-8f6f-ec9d68f60947"
       }
     },
-    "bundle": {
-      "category": "Education",
-      "shortDescription": "Anki 划词助手",
-      "longDescription": "Anki 划词助手是一个制作 Anki 卡片的工具，你可以用它标记句子中的生词，通过“单词结合上下文”的方式更好地背单词。",
-      "active": true,
-      "targets": "all",
-      "identifier": "com.zhb2000.anki-marker",
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico",
-        "icons/icon.png"
-      ],
-      "resources": [
-        "resources/*"
-      ],
-      "windows": {
-        "nsis": {
-          "languages": [
-            "SimpChinese"
-          ]
-        },
-        "wix": {
-          "language": "zh-CN"
-        }
-      }
-    },
-    "security": {
-      "csp": null
-    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "resources": [
+      "resources/*"
+    ]
+  },
+  "productName": "Anki 划词助手",
+  "mainBinaryName": "Anki 划词助手",
+  "version": "../package.json",
+  "identifier": "com.zhb2000.anki-marker",
+  "plugins": {},
+  "app": {
+    "withGlobalTauri": false,
     "windows": [
       {
         "fullscreen": false,
@@ -82,6 +49,9 @@
         "width": 800,
         "height": 500
       }
-    ]
+    ],
+    "security": {
+      "csp": null
+    }
   }
 }

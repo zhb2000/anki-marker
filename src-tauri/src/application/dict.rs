@@ -12,15 +12,19 @@ use super::logics::dict::{CollinsItem, OxfordItem};
 pub struct DictPath(pub String);
 
 impl DictPath {
-    pub fn new(portable: bool, path_resolver: tauri::PathResolver) -> Result<Self, String> {
+    pub fn new(
+        portable: bool,
+        path_resolver: &tauri::path::PathResolver<impl tauri::Runtime>,
+    ) -> Result<Self, String> {
         let dict_path = if portable {
             logics::utils::current_exe_dir()?
                 .join("resources")
                 .join("dict.db")
         } else {
             path_resolver
-                .resolve_resource("resources/dict.db")
-                .ok_or("failed to resolve resource dict.db")?
+                .resource_dir()
+                .map_err(|e| format!("failed to resolve resource directory: {e}"))?
+                .join("dict.db")
         };
         return Ok(DictPath(dict_path.to_string_lossy().into_owned()));
     }

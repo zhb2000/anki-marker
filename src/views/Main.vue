@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, reactive, watch, nextTick, onMounted, onActivated } from 'vue';
+import { ref, reactive, watch, nextTick, onActivated, onBeforeMount } from 'vue';
 import { useRouter } from 'vue-router';
-import * as api from '@tauri-apps/api';
+import * as api from '../tauri-api';
 
 import * as utils from '../logics/utils';
 import * as dict from '../logics/dict';
@@ -19,6 +19,7 @@ import {
 } from '../components';
 
 
+const pageInitialized = ref(false);
 let config: cfg.Config;
 let ankiService: anki.AnkiService;
 
@@ -76,7 +77,7 @@ async function searchAndUpdate(word: string, dictionary: 'collins' | 'oxford') {
             : await dict.searchOxford(word);
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '查询失败', type: 'error' });
+        await api.dialog.message(String(error), { title: '查询失败', kind: 'error' });
         return;
     }
     wordItems[dictionary] = results.map(item => ({ item, status: 'not-added', id: null })) as any[];
@@ -173,7 +174,7 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
     try {
         await Promise.all([prepareDeck(deckName), prepareModel(modelName)]);
     } catch (error) {
-        await api.dialog.message(String(error), { title: errorTitle!, type: 'error' });
+        await api.dialog.message(String(error), { title: errorTitle!, kind: 'error' });
         throw error;
     }
 }
@@ -210,7 +211,7 @@ async function changeItemAdded(index: number) {
         } catch (error) {
             item.status = 'not-added';
             console.error(error);
-            await api.dialog.message(String(error), { title: '添加失败', type: 'error' });
+            await api.dialog.message(String(error), { title: '添加失败', kind: 'error' });
         }
     } else if (item.status === 'is-added') { // remove from Anki
         item.status = 'processing-remove';
@@ -221,7 +222,7 @@ async function changeItemAdded(index: number) {
         } catch (error) {
             item.status = 'is-added';
             console.error(error);
-            await api.dialog.message(String(error), { title: '删除失败', type: 'error' });
+            await api.dialog.message(String(error), { title: '删除失败', kind: 'error' });
         }
     }
 }
@@ -238,7 +239,7 @@ async function openEditDialog(index: number) {
         await ankiService.guiEditNote(item.id!);
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '打开编辑对话框失败', type: 'error' });
+        await api.dialog.message(String(error), { title: '打开编辑对话框失败', kind: 'error' });
     }
 }
 
@@ -272,13 +273,15 @@ function playPronunciation() {
 }
 // #endregion
 
-// 由于使用了 KeepAlive 不销毁页面，所以 onMounted 只会执行一次
-onMounted(async () => {
+// 由于使用了 KeepAlive 不销毁页面，所以只会执行一次
+onBeforeMount(async () => {
+    // 为需要初始化的变量赋值
     await globals.initAtAppStart();
     [config, ankiService] = await Promise.all([
         globals.getConfig(),
         globals.getAnkiService()
     ]);
+    pageInitialized.value = true;
     if (!utils.tauriInRelease()) {
         sentence.value = 'The quick brown fox jumps over the lazy dog.'; // test sentence in dev mode
     }
@@ -286,16 +289,17 @@ onMounted(async () => {
 </script>
 
 <template>
-    <div class="main-window">
+    <div v-if="pageInitialized" class="main-window">
         <div class="header-container">
             <FluentButton class="header-button" :accent="showEdit" @click="changeEditStatus">
                 {{ showEdit ? '完成' : '编辑' }}
             </FluentButton>
             <FluentButton class="header-button" @click="pasteToEdit">粘贴</FluentButton>
             <FluentInput class="header-input-text" type="text" v-model.trim="searchText" placeholder="回车查询单词"
-                @keydown.enter="searchAndUpdate(searchText, selectedDict)" />
-            <FluentButton class="header-button" @click="searchAndUpdate(searchText, selectedDict)">查询</FluentButton>
-            <FluentSelect class="header-select" v-model="selectedDict">
+                name="search" @keydown.enter="searchAndUpdate(searchText, selectedDict)" />
+            <FluentButton class="header-button" @click="searchAndUpdate(searchText, selectedDict)">查询
+            </FluentButton>
+            <FluentSelect class="header-select" v-model="selectedDict" name="dict">
                 <option value="collins">柯林斯词典</option>
                 <option value="oxford">新牛津英汉双解</option>
             </FluentSelect>
@@ -325,9 +329,15 @@ onMounted(async () => {
             </div>
         </div>
     </div>
+    <div v-else class="loading-screen"></div>
 </template>
 
 <style scoped>
+.loading-screen {
+    height: 100vh;
+    background-color: var(--window-background);
+}
+
 .main-window {
     display: grid;
     grid-template-columns: 1fr 1fr;

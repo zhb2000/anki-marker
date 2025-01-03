@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /** Build portable zip and bundle installer for Windows. */
 
 import { spawn } from 'child_process';
@@ -126,7 +127,7 @@ async function main() {
     const packageName = packageJson.name;
     const tauriJson = JSON.parse(await fsp.readFile(path.join(__dirname, 'src-tauri/tauri.conf.json'), 'utf8'));
     /** @type {string} */
-    const productName = tauriJson.package.productName;
+    const productName = tauriJson.productName;
     const portableName = `${packageName}_${version}_windows_x64-portable`;
 
     if (!skipBuild) {

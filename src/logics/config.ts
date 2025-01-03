@@ -1,4 +1,4 @@
-import * as api from '@tauri-apps/api';
+import * as api from '../tauri-api';
 
 import { invoke } from './utils';
 

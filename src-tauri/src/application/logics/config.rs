@@ -45,7 +45,7 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
     fn inner(config_path: &Path) -> Result<Config, String> {
         let toml_string = std::fs::read_to_string(config_path)
             .map_err(|e| format!("failed to read config file {}: {e}", config_path.display()))?;
-        let doc = toml_string.parse::<toml_edit::Document>().map_err(|e| {
+        let doc = toml_string.parse::<toml_edit::DocumentMut>().map_err(|e| {
             format!(
                 "failed to parse toml from config file {}: {e}",
                 config_path.display()
@@ -79,7 +79,7 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
     fn inner(config_path: &Path, modified: PartialConfig) -> Result<(), String> {
         let toml_string = std::fs::read_to_string(config_path)
             .map_err(|e| format!("failed to read config file {}: {e}", config_path.display()))?;
-        let mut doc = toml_string.parse::<toml_edit::Document>().map_err(|e| {
+        let mut doc = toml_string.parse::<toml_edit::DocumentMut>().map_err(|e| {
             format!(
                 "failed to parse toml from config file {}: {e}",
                 config_path.display()

@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::logics;
 use super::logics::config::{Config, PartialConfig};
@@ -25,13 +25,16 @@ impl Portable {
 pub struct ConfigPath(pub String);
 
 impl ConfigPath {
-    pub fn new(portable: bool, path_resolver: tauri::PathResolver) -> Result<Self, String> {
+    pub fn new(
+        portable: bool,
+        path_resolver: &tauri::path::PathResolver<impl tauri::Runtime>,
+    ) -> Result<Self, String> {
         let config_path = if portable {
             logics::utils::current_exe_dir()?.join("config.toml")
         } else {
             path_resolver
                 .app_config_dir()
-                .ok_or("cannot resolve app config directory")?
+                .map_err(|e| format!("failed to resolve app config directory: {e}"))?
                 .join("config.toml")
         };
         return Ok(ConfigPath(config_path.to_string_lossy().into_owned()));
@@ -55,9 +58,10 @@ pub fn read_config(
         }
         // 非便携模式下，若 config.toml 不存在，则将模板配置复制到用户配置目录
         let template_path = app
-            .path_resolver()
-            .resolve_resource("resources/config-template.toml")
-            .ok_or("failed to resolve resource config-template.toml")?;
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("failed to resolve resource directory: {e}"))?
+            .join("config-template.toml");
         logics::config::copy_template_config(template_path, config_path)?;
     }
     return logics::config::read_config(config_path);
@@ -110,7 +114,9 @@ pub fn start_config_watcher(
         return Ok(false);
     }
     let config_path: &Path = config_path.0.as_ref();
-    let window = app.get_window("main").ok_or("failed to get main window")?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or("failed to get main window")?;
     let main_window = window.clone();
     let on_change = move || {
         if main_window.emit("config-changed", ()).is_err() {

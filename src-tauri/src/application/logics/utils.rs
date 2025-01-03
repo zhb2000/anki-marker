@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use notify::{RecursiveMode, Watcher};
+use notify::RecursiveMode;
 use notify_debouncer_full::new_debouncer;
 
 pub fn show_in_explorer(path: impl AsRef<Path>) -> Result<(), String> {
@@ -66,7 +66,6 @@ pub fn watch_file_change(
         let mut debouncer = new_debouncer(timeout, None, sender)
             .map_err(|e| format!("failed to create file watcher debouncer: {e}"))?;
         debouncer
-            .watcher()
             .watch(Path::new(file_path), RecursiveMode::NonRecursive)
             .map_err(|e| {
                 format!(

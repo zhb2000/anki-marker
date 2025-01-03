@@ -1,6 +1,6 @@
 import { reactive, ref, watch, computed } from 'vue';
-import * as api from '@tauri-apps/api';
-import { fetch, ResponseType } from '@tauri-apps/api/http';
+import * as api from '../tauri-api';
+import { fetch } from '@tauri-apps/plugin-http';
 import * as semver from 'semver';
 
 import { Config } from './config';
@@ -133,7 +133,6 @@ async function getLatestAppInfoFromGitHubRelease(): Promise<LatestAppInfo> {
     const GITHUB_RELEASE_API = 'https://api.github.com/repos/zhb2000/anki-marker/releases/latest';
     const response = await fetch(GITHUB_RELEASE_API, {
         method: 'GET',
-        responseType: ResponseType.JSON,
         headers: {
             'Accept': 'application/vnd.github.v3+json', // 推荐明确声明 GitHub API 版本（GitHub API v3）
             'User-Agent': await makeUserAgent() // GitHub REST API 要求提供 User-Agent
@@ -143,14 +142,14 @@ async function getLatestAppInfoFromGitHubRelease(): Promise<LatestAppInfo> {
         throw new Error(
             'HTTP request is not ok. ' +
             `status: ${response.status}, ` +
-            `data: ${JSON.stringify(response.data)}, ` +
+            `data: ${await response.text()}, ` +
             `headers: ${JSON.stringify(response.headers)}.`
         );
     }
-    if (!(response.data instanceof Object)) {
-        throw TypeError(`Expect response data to be Object but receive ${typeof response.data}: ${response.data}`);
+    const data = await response.json() as Record<string, any>;
+    if (!(data instanceof Object)) {
+        throw TypeError(`Expect response data to be Object but receive ${typeof data}: ${data}`);
     }
-    const data = response.data as Record<string, any>;
     const version = semver.clean(data.tag_name);
     if (version == null) {
         throw new Error(`version ${version} cannot be cleaned by semver`);
@@ -273,7 +272,7 @@ export async function initAtAppStart() {
         await initConfig();
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '配置文件读取失败', type: 'error' });
+        await api.dialog.message(String(error), { title: '配置文件读取失败', kind: 'error' });
         throw error; // 配置文件读取失败时不继续后续操作
     }
     // 初始化 AnkiService 对象
@@ -283,7 +282,7 @@ export async function initAtAppStart() {
         await config.startWatcher();
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '配置文件监听失败', type: 'error' });
+        await api.dialog.message(String(error), { title: '配置文件监听失败', kind: 'error' });
         // 配置文件监听失败时仅弹窗报错，不阻止后续操作
     }
     // 获取笔记模板版本，不等待结果。
