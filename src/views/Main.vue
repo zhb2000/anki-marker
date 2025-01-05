@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, watch, nextTick, onActivated, onBeforeMount, computed } from 'vue';
+import { ref, reactive, watch, nextTick, onBeforeMount, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import * as api from '../tauri-api';
 
@@ -16,10 +16,12 @@ import {
     OxfordCard,
     YoudaoCard,
     PlayAudioButton,
-    SettingButton
+    SettingButton,
+    ScrollMemory
 } from '../components';
 
 
+const router = useRouter();
 const pageInitialized = ref(false);
 let config: cfg.Config;
 let ankiService: anki.AnkiService;
@@ -166,24 +168,6 @@ async function changeEditStatus() {
         editTextarea.value?.focus();
     }
 }
-// #endregion
-
-// #region 单词列表滚动位置的保存与恢复
-const router = useRouter();
-const wordContainer = ref<HTMLDivElement | null>(null);
-let wordContainerScrollTop = 0;
-
-router.beforeEach((_to, from) => {
-    if (from.name === 'Main') {
-        wordContainerScrollTop = wordContainer.value?.scrollTop ?? 0;
-    }
-});
-
-onActivated(() => {
-    if (router.currentRoute.value.name === 'Main' && wordContainer.value != null) {
-        wordContainer.value.scrollTop = wordContainerScrollTop;
-    }
-});
 // #endregion
 
 // #region Anki
@@ -368,32 +352,31 @@ onBeforeMount(async () => {
                 <FluentRadio v-model="selectedPronunciation" value="us" label="美式" name="pronunciation"
                     class="pronunciation-radio-box" />
             </div>
-            <div ref="wordContainer" class="words-container-inner">
-                <CollinsCard v-show="selectedDict === 'collins'" v-for="(item, index) in wordItems['collins']"
-                    :item="item.item" :index="index" :status="item.status" @add-btn-click="changeItemAdded"
-                    @edit-btn-click="openEditDialog" />
-                <OxfordCard v-show="selectedDict === 'oxford'" v-for="(item, index) in wordItems['oxford']"
-                    :item="item.item" :index="index" :status="item.status" @add-btn-click="changeItemAdded"
-                    @edit-btn-click="openEditDialog" />
+            <ScrollMemory :show="selectedDict === 'collins'" class="words-container-inner">
+                <CollinsCard v-for="(item, index) in wordItems['collins']" :item="item.item" :index="index"
+                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
+            </ScrollMemory>
+            <ScrollMemory :show="selectedDict === 'oxford'" class="words-container-inner">
+                <OxfordCard v-for="(item, index) in wordItems['oxford']" :item="item.item" :index="index"
+                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
+            </ScrollMemory>
+            <ScrollMemory :show="selectedDict === 'youdao'" class="words-container-inner">
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['concise'].length > 0" class="youdao-title">
                     简明释义
                 </div>
-                <YoudaoCard v-show="selectedDict === 'youdao'" v-for="(item, index) in wordItemsYoudao['concise']"
-                    :item="item.item" :index="index" :status="item.status" @add-btn-click="changeItemAdded"
-                    @edit-btn-click="openEditDialog" />
+                <YoudaoCard v-for="(item, index) in wordItemsYoudao['concise']" :item="item.item" :index="index"
+                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['web'].length > 0" class="youdao-title">
                     网络释义
                 </div>
-                <YoudaoCard v-show="selectedDict === 'youdao'" v-for="(item, index) in wordItemsYoudao['web']"
-                    :item="item.item" :index="index" :status="item.status" @add-btn-click="changeItemAdded"
-                    @edit-btn-click="openEditDialog" />
+                <YoudaoCard v-for="(item, index) in wordItemsYoudao['web']" :item="item.item" :index="index"
+                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['phrase'].length > 0" class="youdao-title">
                     短语
                 </div>
-                <YoudaoCard v-show="selectedDict === 'youdao'" v-for="(item, index) in wordItemsYoudao['phrase']"
-                    :item="item.item" :index="index" :status="item.status" @add-btn-click="changeItemAdded"
-                    @edit-btn-click="openEditDialog" />
-            </div>
+                <YoudaoCard v-for="(item, index) in wordItemsYoudao['phrase']" :item="item.item" :index="index"
+                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
+            </ScrollMemory>
         </div>
     </div>
     <div v-else class="loading-screen"></div>
