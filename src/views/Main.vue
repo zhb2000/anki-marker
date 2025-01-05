@@ -64,6 +64,12 @@ const searchingOrSearchedWords = {
     'oxford': '',
     'youdao': ''
 };
+/** 所选的发音 */
+const selectedPronunciation = ref<'en' | 'us'>('us');
+const pronunciationAudioSrc = computed(() => {
+    const word = searchText.value.trim();
+    return dict.makePronunciationURL(word, selectedPronunciation.value);
+});
 
 /** tokens 的选中状态改变时，更新 searchText 并搜索新单词 */
 watch(tokens, async newTokens => {
@@ -214,6 +220,7 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
 async function changeItemAdded(index: number) {
     const selected = selectedDict.value;
     const item = wordItems[selected][index];
+    const pronunciationType = selectedPronunciation.value;
     if (item.status === 'not-added') { // add to Anki
         item.status = 'processing-add';
         try {
@@ -232,8 +239,8 @@ async function changeItemAdded(index: number) {
                 config.deckName,
                 config.modelName,
                 fields,
-                makePronunciationURL(word),
-                makePronunciationFilename(word)
+                dict.makePronunciationURL(word, pronunciationType),
+                dict.makePronunciationFilename(word, pronunciationType)
             );
             if (id == null) {
                 throw new Error('addNote returns null');
@@ -284,27 +291,6 @@ function makeSentenceHTML(): string {
 }
 // #endregion
 
-// #region 发音
-/** 所选的发音 */
-const selectedPronunciation = ref<'en' | 'us'>('us');
-const audio = new Audio();
-
-function makePronunciationURL(word: string): string {
-    const type = (selectedPronunciation.value === 'en') ? 1 : 2;
-    return `https://dict.youdao.com/dictvoice?type=${type}&audio=${encodeURIComponent(word)}`;
-}
-
-function makePronunciationFilename(word: string): string {
-    return `youdao_${word}_${selectedPronunciation.value}.mp3`;
-}
-
-function playPronunciation() {
-    audio.pause();
-    audio.src = makePronunciationURL(searchText.value);
-    audio.play();
-}
-// #endregion
-
 // 由于使用了 KeepAlive 不销毁页面，所以只会执行一次
 onBeforeMount(async () => {
     // 为需要初始化的变量赋值
@@ -346,7 +332,7 @@ onBeforeMount(async () => {
         </div>
         <div class="words-container">
             <div class="pronunciation-container" v-show="searchText.length > 0">
-                <PlayAudioButton @click="playPronunciation" />
+                <PlayAudioButton :audio-src="pronunciationAudioSrc" />
                 <FluentRadio v-model="selectedPronunciation" value="en" label="英式" name="pronunciation"
                     class="pronunciation-radio-box" />
                 <FluentRadio v-model="selectedPronunciation" value="us" label="美式" name="pronunciation"

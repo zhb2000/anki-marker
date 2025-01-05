@@ -20,11 +20,18 @@ export interface OxfordItem {
 }
 
 /** 获取单词的原型 */
-export async function getWordBase(word: string): Promise<string | null> {
+async function getWordBase(word: string): Promise<string | null> {
     const base = await invoke<string | null>('get_word_base', { word });
     return base;
 }
 
+/**
+ * 尝试将单词转换为原型形式
+ * 
+ * @returns 
+ * - 若单词有原型形式，则返回一个数组，第一个元素为原单词，第二个元素为原型形式。
+ * - 否则返回一个只包含原单词的数组。
+ */
 async function convertWord(word: string): Promise<[string] | [string, string]> {
     const base = await getWordBase(word);
     if (base != null) {
@@ -131,4 +138,13 @@ export async function searchYoudao(query: string): Promise<YoudaoItem[]> {
         });
     }
     return items;
+}
+
+export function makePronunciationURL(word: string, pronunciationType: 'en' | 'us'): string {
+    const type = (pronunciationType === 'en') ? 1 : 2;
+    return `https://dict.youdao.com/dictvoice?type=${type}&audio=${encodeURIComponent(word)}`;
+}
+
+export function makePronunciationFilename(word: string, pronunciationType: 'en' | 'us'): string {
+    return `youdao_${word}_${pronunciationType}.mp3`;
 }
