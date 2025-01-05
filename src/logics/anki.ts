@@ -1,6 +1,6 @@
 import { AnkiConnectApi } from './anki-connect';
 import { typeAssertion } from './typing';
-import type { CollinsItem, OxfordItem } from './dict';
+import type { CollinsItem, OxfordItem, YoudaoItem } from './dict';
 import { escapeHTML } from './stringutils';
 
 /**
@@ -125,10 +125,27 @@ function makeMeaning(item: CollinsItem | OxfordItem): string | null {
     return (meaning.length > 0) ? meaning.join('<br>') : null;
 }
 
+function makeMeaningFromYoudao(item: YoudaoItem): string | null {
+    const meaning = [];
+    let firstLine: string | null = `<i>${escapeHTML(item.sense ?? '')}</i>`;
+    if (firstLine === '<i></i>') {
+        firstLine = null;
+    } else {
+        meaning.push(firstLine);
+    }
+    if (item.cnDef != null) {
+        if (firstLine != null) {
+            meaning[0] = `${firstLine}<br>`;
+        }
+        meaning.push(`<span class="cndef">${escapeHTML(item.cnDef)}</span>`);
+    }
+    return (meaning.length > 0) ? meaning.join('<br>') : null;
+}
+
 /** 根据单词释义和例句生成划词助手单词笔记的字段 */
 export function makeFields(
-    dict: 'collins' | 'oxford',
-    item: CollinsItem | OxfordItem,
+    dict: 'collins' | 'oxford' | 'youdao',
+    item: CollinsItem | OxfordItem | YoudaoItem,
     sentence: string
 ): Fields {
     if (dict === 'collins') {
@@ -139,7 +156,7 @@ export function makeFields(
             '释义': makeMeaning(item) ?? undefined,
             '例句': sentence
         };
-    } else {
+    } else if (dict === 'oxford') {
         typeAssertion<OxfordItem>(item);
         return {
             '单词': item.phrase ?? item.word,
@@ -147,6 +164,16 @@ export function makeFields(
             '释义': makeMeaning(item) ?? undefined,
             '例句': sentence
         };
+    } else if (dict === 'youdao') {
+        typeAssertion<YoudaoItem>(item);
+        return {
+            '单词': item.word,
+            '音标': item.phonetic ?? undefined,
+            '释义': makeMeaningFromYoudao(item) ?? undefined,
+            '例句': sentence
+        };
+    } else {
+        throw new Error(`Unknown dict: ${dict}`);
     }
 }
 

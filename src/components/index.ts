@@ -2,6 +2,7 @@ export type { CardStatus } from './CardStatus';
 export { default as AddButton } from './AddButton.vue';
 export { default as CollinsCard } from './CollinsCard.vue';
 export { default as OxfordCard } from './OxfordCard.vue';
+export { default as YoudaoCard } from './YoudaoCard.vue';
 export { default as PlayAudioButton } from './PlayAudioButton.vue';
 export { default as ResetButton } from './ResetButton.vue';
 export { default as ReturnButton } from './ReturnButton.vue';

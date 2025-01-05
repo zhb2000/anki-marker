@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, watch, nextTick, onActivated, onBeforeMount } from 'vue';
+import { ref, reactive, watch, nextTick, onActivated, onBeforeMount, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import * as api from '../tauri-api';
 
@@ -14,6 +14,7 @@ import {
     SentencePanel,
     CollinsCard,
     OxfordCard,
+    YoudaoCard,
     PlayAudioButton,
     SettingButton
 } from '../components';
@@ -34,14 +35,33 @@ interface ItemModel<T> {
 /** 划词面板的词元 */
 const tokens = ref<{ token: string, marked: boolean; }[]>([]);
 /** 所选的字典 */
-const selectedDict = ref<'collins' | 'oxford'>('collins');
+const selectedDict = ref<'collins' | 'oxford' | 'youdao'>('collins');
 /** 搜索框文本 */
 const searchText = ref('');
 /** 每本字典中的搜索结果 */
 const wordItems = reactive({
     'collins': [] as ItemModel<dict.CollinsItem>[],
-    'oxford': [] as ItemModel<dict.OxfordItem>[]
+    'oxford': [] as ItemModel<dict.OxfordItem>[],
+    'youdao': [] as ItemModel<dict.YoudaoItem>[]
 });
+/** 将有道词典的搜索结果分为 concise, web, phrase 三类 */
+const wordItemsYoudao = computed(() => {
+    const itemModels = {
+        'concise': [] as ItemModel<dict.YoudaoItem>[],
+        'web': [] as ItemModel<dict.YoudaoItem>[],
+        'phrase': [] as ItemModel<dict.YoudaoItem>[]
+    };
+    for (const wordItem of wordItems.youdao) {
+        itemModels[wordItem.item.meaningType].push(wordItem);
+    }
+    return itemModels;
+});
+/** 正在搜索或上一次成功搜索的单词 */
+const searchingOrSearchedWords = {
+    'collins': '',
+    'oxford': '',
+    'youdao': ''
+};
 
 /** tokens 的选中状态改变时，更新 searchText 并搜索新单词 */
 watch(tokens, async newTokens => {
@@ -55,37 +75,65 @@ watch(tokens, async newTokens => {
 
 /** 所选的词典改变时，在所选词典中搜索新单词 */
 watch(selectedDict, async newSelected => {
-    wordItems[newSelected] = [];
     await searchAndUpdate(searchText.value, newSelected);
 });
 
 /** 搜索框中的文字改变时，搜索新单词 */
 watch(searchText, () => {
-    throttledSearch();
+    if (selectedDict.value === 'youdao') {
+        throttledYoudaoSearch();
+    } else {
+        throttledSearch();
+    }
 });
 
+const throttledSearch = utils.throttle(async () => {
+    await searchAndUpdate(searchText.value, selectedDict.value);
+}, 200);
+
+const throttledYoudaoSearch = utils.throttle(async () => {
+    await searchAndUpdate(searchText.value, 'youdao');
+}, 400);
+
 /** 搜索单词，并用搜索结果更新 wordItems */
-async function searchAndUpdate(word: string, dictionary: 'collins' | 'oxford') {
+async function searchAndUpdate(word: string, dictionary: 'collins' | 'oxford' | 'youdao') {
+    word = word.trim();
     if (word.length === 0) {
         wordItems[dictionary] = [];
+        // 界面上的单词列表已清空，无法复用，因此对于任何单词都要重新搜索
+        searchingOrSearchedWords[dictionary] = '';
         return;
     }
-    let results: dict.CollinsItem[] | dict.OxfordItem;
+    if (word === searchingOrSearchedWords[dictionary]) {
+        // 无需重复搜索
+        // - 若 word 正在被搜索，则等待搜索结果即可
+        // - 若 word 上次已被搜索成功，则复用界面上的单词列表
+        return;
+    } else {
+        // 清空界面上的单词列表
+        wordItems[dictionary] = [];
+        searchingOrSearchedWords[dictionary] = '';
+    }
+    let results: dict.CollinsItem[] | dict.OxfordItem[] | dict.YoudaoItem[];
     try {
-        results = (dictionary === 'collins')
-            ? await dict.searchCollins(word)
-            : await dict.searchOxford(word);
+        searchingOrSearchedWords[dictionary] = word;
+        if (dictionary === 'collins') {
+            results = await dict.searchCollins(word);
+        } else if (dictionary === 'oxford') {
+            results = await dict.searchOxford(word);
+        } else if (dictionary === 'youdao') {
+            results = await dict.searchYoudao(word);
+        } else {
+            throw new Error(`Unknown dictionary: ${dictionary}`);
+        }
     } catch (error) {
+        searchingOrSearchedWords[dictionary] = '';
         console.error(error);
         await api.dialog.message(String(error), { title: '查询失败', kind: 'error' });
         return;
     }
     wordItems[dictionary] = results.map(item => ({ item, status: 'not-added', id: null })) as any[];
 }
-
-const throttledSearch = utils.throttle(async () => {
-    await searchAndUpdate(searchText.value, selectedDict.value);
-}, 200);
 // #endregion
 
 // #region 文本框句子编辑
@@ -295,13 +343,14 @@ onBeforeMount(async () => {
                 {{ showEdit ? '完成' : '编辑' }}
             </FluentButton>
             <FluentButton class="header-button" @click="pasteToEdit">粘贴</FluentButton>
-            <FluentInput class="header-input-text" type="text" v-model.trim="searchText" placeholder="回车查询单词"
-                name="search" @keydown.enter="searchAndUpdate(searchText, selectedDict)" />
+            <FluentInput class="header-input-text" type="text" v-model="searchText" placeholder="回车查询单词" name="search"
+                autocomplete="off" @keydown.enter="searchAndUpdate(searchText, selectedDict)" />
             <FluentButton class="header-button" @click="searchAndUpdate(searchText, selectedDict)">查询
             </FluentButton>
             <FluentSelect class="header-select" v-model="selectedDict" name="dict">
                 <option value="collins">柯林斯词典</option>
                 <option value="oxford">新牛津英汉双解</option>
+                <option value="youdao">有道在线词典</option>
             </FluentSelect>
             <SettingButton @click="router.push('/settings')"
                 :update-available="globals.appUpdateAvailable.value || globals.templateUpdateAvailable.value" />
@@ -319,13 +368,31 @@ onBeforeMount(async () => {
                 <FluentRadio v-model="selectedPronunciation" value="us" label="美式" name="pronunciation"
                     class="pronunciation-radio-box" />
             </div>
-            <div ref="wordContainer" class="words-container-inner" v-if="selectedDict === 'collins'">
-                <CollinsCard v-for="(item, index) in wordItems['collins']" :item="item.item" :index="index"
-                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
-            </div>
-            <div class="words-container-inner" v-else>
-                <OxfordCard v-for="(item, index) in wordItems['oxford']" :item="item.item" :index="index"
-                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
+            <div ref="wordContainer" class="words-container-inner">
+                <CollinsCard v-show="selectedDict === 'collins'" v-for="(item, index) in wordItems['collins']"
+                    :item="item.item" :index="index" :status="item.status" @add-btn-click="changeItemAdded"
+                    @edit-btn-click="openEditDialog" />
+                <OxfordCard v-show="selectedDict === 'oxford'" v-for="(item, index) in wordItems['oxford']"
+                    :item="item.item" :index="index" :status="item.status" @add-btn-click="changeItemAdded"
+                    @edit-btn-click="openEditDialog" />
+                <div v-if="selectedDict === 'youdao' && wordItemsYoudao['concise'].length > 0" class="youdao-title">
+                    简明释义
+                </div>
+                <YoudaoCard v-show="selectedDict === 'youdao'" v-for="(item, index) in wordItemsYoudao['concise']"
+                    :item="item.item" :index="index" :status="item.status" @add-btn-click="changeItemAdded"
+                    @edit-btn-click="openEditDialog" />
+                <div v-if="selectedDict === 'youdao' && wordItemsYoudao['web'].length > 0" class="youdao-title">
+                    网络释义
+                </div>
+                <YoudaoCard v-show="selectedDict === 'youdao'" v-for="(item, index) in wordItemsYoudao['web']"
+                    :item="item.item" :index="index" :status="item.status" @add-btn-click="changeItemAdded"
+                    @edit-btn-click="openEditDialog" />
+                <div v-if="selectedDict === 'youdao' && wordItemsYoudao['phrase'].length > 0" class="youdao-title">
+                    短语
+                </div>
+                <YoudaoCard v-show="selectedDict === 'youdao'" v-for="(item, index) in wordItemsYoudao['phrase']"
+                    :item="item.item" :index="index" :status="item.status" @add-btn-click="changeItemAdded"
+                    @edit-btn-click="openEditDialog" />
             </div>
         </div>
     </div>
@@ -435,5 +502,10 @@ onBeforeMount(async () => {
     background-color: var(--input-text-background-focus);
     border-bottom-width: var(--input-text-border-bottom-width-focus);
     border-bottom-color: var(--accent);
+}
+
+.youdao-title {
+    margin-bottom: 10px;
+    user-select: none;
 }
 </style>

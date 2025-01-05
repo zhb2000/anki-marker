@@ -23,7 +23,24 @@ export function tokenize(text: string): string[] {
 
 const escapeDiv = document.createElement('div');
 
+/**
+ * 转义 HTML 字符串中的特殊字符。
+ * 
+ * 示例：`escapeHTML('<script>alert("XSS")</script>')` 返回 `&lt;script&gt;alert(&quot;XSS&quot;)&lt;/script&gt;`
+ */
 export function escapeHTML(html: string): string {
     escapeDiv.textContent = html; // 使用 textContent 而不是 innerHTML 来避免 HTML 解析
     return escapeDiv.innerHTML; // 获取转义后的 HTML 字符串
+}
+
+const decodeTextarea = document.createElement('textarea');
+
+/**
+ * 解码 HTML 字符串中的实体字符。
+ * 
+ * 示例：`decodeHtmlEntities('&lt;script&gt;alert(&quot;XSS&quot;)&lt;/script&gt;')` 返回 `<script>alert("XSS")</script>`
+ */
+export function decodeHtmlEntities(content: string): string {
+    decodeTextarea.innerHTML = content;
+    return decodeTextarea.value;
 }
