@@ -3,6 +3,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::Connection;
+use tauri::path::BaseDirectory;
 use tauri::State;
 
 use super::logics;
@@ -22,9 +23,8 @@ impl DictPath {
                 .join("dict.db")
         } else {
             path_resolver
-                .resource_dir()
-                .map_err(|e| format!("failed to resolve resource directory: {e}"))?
-                .join("dict.db")
+                .resolve("resources/dict.db", BaseDirectory::Resource)
+                .map_err(|e| format!("failed to resolve resources/dict.db: {e}"))?
         };
         return Ok(DictPath(dict_path.to_string_lossy().into_owned()));
     }

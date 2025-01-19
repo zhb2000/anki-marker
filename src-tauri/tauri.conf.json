@@ -12,6 +12,9 @@
     "active": true,
     "targets": "all",
     "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
       "nsis": {
         "languages": [
           "SimpChinese"
@@ -20,6 +23,11 @@
       "wix": {
         "language": "zh-CN",
         "upgradeCode": "b8333182-e22f-5367-8f6f-ec9d68f60947"
+      }
+    },
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
       }
     },
     "icon": [
@@ -31,7 +39,8 @@
       "icons/icon.png"
     ],
     "resources": [
-      "resources/*"
+      "resources/dict.db",
+      "resources/config-template.toml"
     ]
   },
   "productName": "Anki 划词助手",

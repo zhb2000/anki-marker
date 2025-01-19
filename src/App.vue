@@ -114,6 +114,7 @@ watch(() => currentRoute.path, (newPath, _oldPath) => {
 <style>
 * {
     box-sizing: border-box;
+    font-family: sans-serif;
 }
 
 html,

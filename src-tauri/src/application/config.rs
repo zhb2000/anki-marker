@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::logics;
@@ -59,9 +60,8 @@ pub fn read_config(
         // 非便携模式下，若 config.toml 不存在，则将模板配置复制到用户配置目录
         let template_path = app
             .path()
-            .resource_dir()
-            .map_err(|e| format!("failed to resolve resource directory: {e}"))?
-            .join("config-template.toml");
+            .resolve("resources/config-template.toml", BaseDirectory::Resource)
+            .map_err(|e| format!("failed to resolve resources/config-template.toml: {e}"))?;
         logics::config::copy_template_config(template_path, config_path)?;
     }
     return logics::config::read_config(config_path);

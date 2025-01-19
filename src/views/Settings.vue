@@ -309,7 +309,7 @@ onActivated(async () => {
             </div>
             <div style="margin-bottom: 0px;">
                 <FluentButton class="open-file-button" @click="handleOpenFileClick">打开文件</FluentButton>
-                <FluentButton v-if="os === 'windows' || os === 'macos'" class="open-file-button"
+                <FluentButton v-if="os === 'windows' || os === 'macos' || os === 'linux'" class="open-file-button"
                     @click="handleShowInExplorerClick">
                     打开目录
                 </FluentButton>

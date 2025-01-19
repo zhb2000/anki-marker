@@ -6,39 +6,56 @@ use notify::RecursiveMode;
 use notify_debouncer_full::new_debouncer;
 
 pub fn show_in_explorer(path: impl AsRef<Path>) -> Result<(), String> {
-    fn inner(path: &Path) -> Result<(), String> {
-        let path = path
-            .to_str()
-            .ok_or("path is not valid utf-8")?
-            .replace('/', std::path::MAIN_SEPARATOR_STR)
-            .replace('\\', std::path::MAIN_SEPARATOR_STR);
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            std::process::Command::new("cmd")
-                .args(&["/C", "explorer", "/select,", &path])
-                .creation_flags(CREATE_NO_WINDOW)
-                .output()
-                .map_err(|e| e.to_string())?;
-        }
-        #[cfg(target_os = "macos")]
-        {
-            std::process::Command::new("open")
-                .args(&["-R", &path])
-                .output()
-                .map_err(|e| e.to_string())?;
-        }
-        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-        {
-            return Err(format!(
-                "show_in_explorer is not implemented on this platform: {}",
-                std::env::consts::OS
-            ));
-        }
+    #[cfg(target_os = "windows")]
+    fn inner(path: &str) -> Result<(), String> {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("cmd")
+            .args(&["/C", "explorer", "/select,", path])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| e.to_string())?;
         return Ok(());
     }
-    return inner(path.as_ref());
+
+    #[cfg(target_os = "macos")]
+    fn inner(path: &str) -> Result<(), String> {
+        std::process::Command::new("open")
+            .args(&["-R", path])
+            .output()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    fn inner(path: &str) -> Result<(), String> {
+        let dir_path = std::path::Path::new(path)
+            .parent()
+            .ok_or("Failed to get parent directory")?
+            .to_str()
+            .ok_or("Parent directory is not valid utf-8")?;
+        std::process::Command::new("xdg-open")
+            .arg(dir_path)
+            .output()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    fn inner(_: &str) -> Result<(), String> {
+        Err(format!(
+            "show_in_explorer is not implemented on this platform: {}",
+            std::env::consts::OS
+        ))
+    }
+
+    let path = path
+        .as_ref()
+        .to_str()
+        .ok_or("path is not valid utf-8")?
+        .replace('/', std::path::MAIN_SEPARATOR_STR)
+        .replace('\\', std::path::MAIN_SEPARATOR_STR);
+    return inner(&path);
 }
 
 pub fn current_exe_dir() -> Result<PathBuf, String> {
