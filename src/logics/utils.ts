@@ -122,3 +122,43 @@ export function rgbToHsl(r: number, g: number, b: number): { h: number; s: numbe
 
     return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
 }
+
+export function disableWebviewContextMenu(): void {
+    document.addEventListener('contextmenu', e => {
+        if (!((e.target instanceof HTMLInputElement && e.target.type === 'text')
+            || e.target instanceof HTMLTextAreaElement)) {
+            e.preventDefault();
+        }
+    });
+}
+
+/**
+ * Disable WebView keyboard shortcuts.
+ * 
+ * See https://support.google.com/chrome/answer/157179
+ */
+export function disableWebviewKeyboardShortcuts(): void {
+    document.addEventListener("keydown", e => {
+        if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) { // 禁用 F5 或 Ctrl + R 刷新
+            e.preventDefault();
+        }
+        if (e.key === 'F3' || (e.ctrlKey && e.key === 'f')) { // 禁用 F3 或 Ctrl + F 查找
+            e.preventDefault();
+        }
+        if (e.ctrlKey && e.key === 'j') { // 禁用 Ctrl + J 打开下载内容
+            e.preventDefault();
+        }
+        if (e.ctrlKey && e.key === 'h') { // 禁用 Ctrl + H 打开历史记录
+            e.preventDefault();
+        }
+        if (e.key === 'F7') { // 禁用 F7 开启光标浏览模式
+            e.preventDefault();
+        }
+        if (e.ctrlKey && e.key === 'g') { // 禁用 Ctrl + G 查找下一个
+            e.preventDefault();
+        }
+        if (e.ctrlKey && e.key === 'p') { // 禁用 Ctrl + P 打印
+            e.preventDefault();
+        }
+    });
+}

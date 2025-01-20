@@ -263,14 +263,10 @@ export async function initAtAppStart() {
     }
     // 初始化调试标志
     await initDebugFlags();
-    // 禁用右键菜单
+    // 禁用 WebView 右键菜单和快捷键
     if (await utils.rustInRelease()) {
-        document.addEventListener('contextmenu', e => {
-            if (!((e.target instanceof HTMLInputElement && e.target.type === 'text')
-                || e.target instanceof HTMLTextAreaElement)) {
-                e.preventDefault();
-            }
-        }); // disable context menu in release mode
+        utils.disableWebviewContextMenu();
+        utils.disableWebviewKeyboardShortcuts();
     }
     // 设置 element-plus 主题色
     setElementTheme();
