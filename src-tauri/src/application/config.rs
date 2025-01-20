@@ -138,3 +138,8 @@ pub fn start_config_watcher(
     *guard = true;
     return Ok(true);
 }
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn rust_in_release() -> Result<bool, String> {
+    return Ok(!cfg!(debug_assertions));
+}

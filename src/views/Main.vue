@@ -300,7 +300,7 @@ onBeforeMount(async () => {
         globals.getAnkiService()
     ]);
     pageInitialized.value = true;
-    if (!utils.tauriInRelease()) {
+    if (!await utils.rustInRelease()) {
         sentence.value = 'The quick brown fox jumps over the lazy dog.'; // test sentence in dev mode
     }
 });

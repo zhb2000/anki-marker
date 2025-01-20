@@ -37,6 +37,7 @@ fn main() {
             application::config::is_portable,
             application::config::show_in_explorer,
             application::config::start_config_watcher,
+            application::config::rust_in_release,
             application::dict::search_collins,
             application::dict::search_oxford,
             application::dict::get_word_base,

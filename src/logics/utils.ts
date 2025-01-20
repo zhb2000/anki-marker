@@ -21,6 +21,10 @@ export function tauriInRelease(): boolean {
     return window.location.hostname === 'tauri.localhost';
 }
 
+export async function rustInRelease(): Promise<boolean> {
+    return await invoke<boolean>('rust_in_release');
+}
+
 /**
  * 创建一个防抖函数
  * 

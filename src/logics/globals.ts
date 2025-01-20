@@ -9,12 +9,19 @@ import { AnkiService } from './anki';
 import * as utils from './utils';
 
 
-const IN_DEV_MODE = !utils.tauriInRelease();
-export const DEBUG_APP_UPDATE_CURRENT_LOW = IN_DEV_MODE ? false : false;
-// GitHub Release API 有请求频率限制，开发模式下不要频繁请求
-export const DEBUG_APP_UPDATE_NOT_FETCH = IN_DEV_MODE ? false : false;
-export const DEBUG_TEMPLATE_UPDATE_CURRENT_LOW = IN_DEV_MODE ? false : false;
-export const DEBUG_TEMPLATE_UPDATE_NOT_UPDATE = IN_DEV_MODE ? false : false;
+export let DEBUG_APP_UPDATE_CURRENT_LOW: boolean;
+/** GitHub Release API 有请求频率限制，开发模式下不要频繁请求 */
+export let DEBUG_APP_UPDATE_NOT_FETCH: boolean;
+export let DEBUG_TEMPLATE_UPDATE_CURRENT_LOW: boolean;
+export let DEBUG_TEMPLATE_UPDATE_NOT_UPDATE: boolean;
+
+async function initDebugFlags() {
+    const IN_DEV_MODE = !await utils.rustInRelease();
+    DEBUG_APP_UPDATE_CURRENT_LOW = IN_DEV_MODE ? false : false;
+    DEBUG_APP_UPDATE_NOT_FETCH = IN_DEV_MODE ? false : false;
+    DEBUG_TEMPLATE_UPDATE_CURRENT_LOW = IN_DEV_MODE ? false : false;
+    DEBUG_TEMPLATE_UPDATE_NOT_UPDATE = IN_DEV_MODE ? false : false;
+}
 
 // #region Config
 let config: Config;
@@ -254,8 +261,10 @@ export async function initAtAppStart() {
     if (initializedAtAppStart) {
         return;
     }
+    // 初始化调试标志
+    await initDebugFlags();
     // 禁用右键菜单
-    if (utils.tauriInRelease()) {
+    if (await utils.rustInRelease()) {
         document.addEventListener('contextmenu', e => {
             if (!((e.target instanceof HTMLInputElement && e.target.type === 'text')
                 || e.target instanceof HTMLTextAreaElement)) {
