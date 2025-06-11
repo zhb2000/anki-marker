@@ -10,21 +10,22 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.2", features = [] }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.36", features = ["bundled"] }
 toml_edit = "0.22"
-notify = "7.0"
-notify-debouncer-full = "0.4"
-tauri = { version = "2", features = [] }
-tauri-plugin-shell = "2"
-tauri-plugin-http = { version = "2", features = ["unsafe-headers"] }
-tauri-plugin-dialog = "2"
-tauri-plugin-os = "2"
-tauri-plugin-clipboard-manager = "2"
+notify = "8.0"
+notify-debouncer-full = "0.5"
+tauri = { version = "2.5", features = [] }
+tauri-plugin-opener = "2.2"
+tauri-plugin-shell = "2.2"
+tauri-plugin-http = { version = "2.4", features = ["unsafe-headers"] }
+tauri-plugin-dialog = "2.2"
+tauri-plugin-os = "2.2"
+tauri-plugin-clipboard-manager = "2.2"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

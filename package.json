@@ -10,29 +10,30 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-clipboard-manager": "^2.2.0",
-    "@tauri-apps/plugin-dialog": "^2.2.0",
-    "@tauri-apps/plugin-http": "^2.2.0",
-    "@tauri-apps/plugin-os": "^2.2.0",
-    "@tauri-apps/plugin-shell": "^2.2.1",
-    "element-plus": "^2.9.1",
+    "@tauri-apps/api": "~2.5.0",
+    "@tauri-apps/plugin-opener": "~2.2.7",
+    "@tauri-apps/plugin-clipboard-manager": "~2.2.2",
+    "@tauri-apps/plugin-dialog": "~2.2.2",
+    "@tauri-apps/plugin-http": "~2.4.4",
+    "@tauri-apps/plugin-os": "~2.2.1",
+    "@tauri-apps/plugin-shell": "~2.2.1",
+    "element-plus": "^2.10.1",
     "github-markdown-css": "^5.8.1",
     "markdown-it": "^14.1.0",
     "normalize.css": "^8.0.1",
-    "semver": "^7.6.3",
-    "vue": "^3.4.29",
-    "vue-router": "^4.4.0"
+    "semver": "^7.7.2",
+    "vue": "^3.5.16",
+    "vue-router": "^4.5.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0",
+    "@tauri-apps/cli": "~2.5.0",
     "@types/markdown-it": "^14.1.2",
-    "@types/semver": "^7.5.8",
-    "@vitejs/plugin-vue": "^5.0.5",
+    "@types/semver": "^7.7.0",
+    "@vitejs/plugin-vue": "^5.2.4",
     "archiver": "^7.0.1",
-    "typescript": "^5.5.2",
+    "typescript": "~5.6.2",
     "vite": "^6.3.5",
     "vite-svg-loader": "^5.1.0",
-    "vue-tsc": "^2.0.21"
+    "vue-tsc": "^2.2.10"
   }
 }
