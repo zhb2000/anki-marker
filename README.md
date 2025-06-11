@@ -4,9 +4,9 @@
 
 <div align="center"><h1>Anki 划词助手</h1></div>
 
-Anki 划词助手是一个制作 Anki 卡片的工具，你可以用它标记句子中的生词，通过“单词结合上下文”的方式更好地背单词。
+Anki 划词助手是一个制作 Anki 卡片的工具，你可以用划词助手标记句子中的生词，通过“**单词结合上下文**”的方式更好地背单词。
 
-本项目受到了 [mmjang / ankihelper](https://github.com/mmjang/ankihelper) 的启发。由于原项目是 Android 应用，而且已经不再维护，而我自己用电脑的时间更多，于是自己用 [Tauri](https://github.com/tauri-apps/tauri) 写了一个类似的工具。
+本项目受到了 [mmjang / ankihelper](https://github.com/mmjang/ankihelper) 的启发。由于原项目是 Android 应用，且已经不再维护，而我自己用电脑的时间更多，因此自己用 [Tauri](https://github.com/tauri-apps/tauri) 写了一个类似的工具。
 
 <p align="center">
 <img src="./docs/assets/main-screenshot.png" width="600" alt="主界面" title="主界面">
@@ -15,7 +15,7 @@ Anki 划词助手是一个制作 Anki 卡片的工具，你可以用它标记句
 # 安装
 ## 安装划词助手本体
 
-[Releases 页面](https://github.com/zhb2000/anki-marker/releases)提供了 Windows 平台的便携式应用（.zip）和安装程序（.msi/.exe），其余平台请自行编译。
+[Releases 页面](https://github.com/zhb2000/anki-marker/releases)提供了 Windows 平台的安装程序（.msi/.exe）和便携式应用（.zip），其余平台请自行编译。
 
 Anki 划词助手是一个基于 Tauri 的桌面应用，你的 Windows 系统需要带有 [Microsoft Edge WebView2](https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/) 才能运行（Windows 10 2004 及以上版本已经自带）。
 
@@ -54,7 +54,15 @@ AnkiConnect 默认会在 `localhost:8765` 上启动一个 HTTP 服务，如果�
 
 # 开发
 
-开发模式（热重载）：
+`tauri info` 检查开发环境是否满足要求：
+
+```shell
+cargo tauri info
+# 或者
+npm run tauri info
+```
+
+`tauri dev` 启动开发模式（支持热重载）：
 
 ```shell
 cargo tauri dev
@@ -62,15 +70,7 @@ cargo tauri dev
 npm run tauri dev
 ```
 
-打包成 Windows 安装程序（.msi/.exe）和便携式应用（.zip）：
-
-```shell
-node build-for-windows.js
-```
-
-打包好的安装程序和便携式应用位于 `src-tauri/target/release/release-assets` 目录下。
-
-在其他平台上构建：
+`tauri build` 构建应用：
 
 ```shell
 cargo tauri build
@@ -79,3 +79,11 @@ npm run tauri build
 ```
 
 打包好的应用位于 `src-tauri/target/release/bundle` 目录下。
+
+在 Windows 平台上可以使用 `build-for-windows.js` 这个脚本，同时将应用打包成安装程序（.msi/.exe）和便携式应用（.zip）：
+
+```shell
+node build-for-windows.js
+```
+
+打包好的安装程序和便携式应用位于 `src-tauri/target/release/release-assets` 目录下。
