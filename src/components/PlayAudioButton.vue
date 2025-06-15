@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, PropType } from 'vue';
 import { useHover } from '../fluent-controls';
+import { makePronunciationURL } from '../logics/dict';
+import { ElMessage } from 'element-plus';
 
 const props = defineProps({
-    audioSrc: {
+    word: {
         type: String,
+        required: true
+    },
+    type: {
+        type: String as PropType<'en' | 'us'>,
         required: true
     }
 });
@@ -14,11 +20,21 @@ const audio = new Audio();
 const isPlaying = ref(false);
 const title = computed(() => isPlaying.value ? '点击停止发音' : '点击以发音');
 
-function playPronunciation() {
+async function handleClick() {
     const playing = isPlaying.value;
     audio.pause();
+    isPlaying.value = false;
+    const word = props.word.trim();
+    if (word.length === 0) {
+        return;
+    }
     if (!playing) {
-        audio.src = props.audioSrc;
+        const url = (await makePronunciationURL(word, props.type))?.url;
+        if (url == null) {
+            ElMessage.error('无法获取在线发音');
+            return;
+        }
+        audio.src = url;
         audio.play();
     }
 }
@@ -37,7 +53,7 @@ audio.addEventListener('play', () => {
 
 <template>
     <button :title="title" class="play-audio-button" :class="hover.classes.value" v-on="hover.listeners"
-        @click="playPronunciation">
+        @click="handleClick">
         <slot></slot>
     </button>
 </template>

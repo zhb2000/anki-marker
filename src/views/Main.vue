@@ -66,10 +66,6 @@ const searchingOrSearchedWords = {
 };
 /** 所选的发音 */
 const selectedPronunciation = ref<'en' | 'us'>('us');
-const pronunciationAudioSrc = computed(() => {
-    const word = searchText.value.trim();
-    return dict.makePronunciationURL(word, selectedPronunciation.value);
-});
 
 /** tokens 的选中状态改变时，更新 searchText 并搜索新单词 */
 watch(tokens, async newTokens => {
@@ -235,12 +231,20 @@ async function changeItemAdded(index: number) {
             const word = ('phrase' in item.item && item.item.phrase != null)
                 ? item.item.phrase
                 : item.item.word;
+            let audioResult = await dict.makePronunciationURL(word, pronunciationType);
+            if (audioResult == null) {
+                audioResult = {
+                    url: dict.makeYoudaoDictVoiceUrl(word, pronunciationType),
+                    dict: 'youdao'
+                };
+            }
+            const audioFilename = dict.makePronunciationFilename(word, pronunciationType, audioResult.dict);
             const id = await ankiService.addMarkerNote(
                 config.deckName,
                 config.modelName,
                 fields,
-                dict.makePronunciationURL(word, pronunciationType),
-                dict.makePronunciationFilename(word, pronunciationType)
+                audioResult.url,
+                audioFilename
             );
             if (id == null) {
                 throw new Error('addNote returns null');
@@ -332,7 +336,7 @@ onBeforeMount(async () => {
         </div>
         <div class="words-container">
             <div class="pronunciation-container" v-show="searchText.length > 0">
-                <PlayAudioButton :audio-src="pronunciationAudioSrc" />
+                <PlayAudioButton :word="searchText" :type="selectedPronunciation" />
                 <FluentRadio v-model="selectedPronunciation" value="en" label="英式" name="pronunciation"
                     class="pronunciation-radio-box" />
                 <FluentRadio v-model="selectedPronunciation" value="us" label="美式" name="pronunciation"

@@ -1,5 +1,7 @@
 import { invoke } from './utils';
-import { searchYoudaoDict as searchYoudaoWebDict } from './youdao';
+import * as youdao from './youdao';
+import * as iciba from './iciba';
+export { makeYoudaoDictVoiceUrl } from './youdao';
 
 export interface CollinsItem {
     word: string;
@@ -87,7 +89,7 @@ function splitYoudaoCustomTranslationContent(content: string): [string | null, s
 }
 
 export async function searchYoudao(query: string): Promise<YoudaoItem[]> {
-    const searchResult = await searchYoudaoWebDict(query);
+    const searchResult = await youdao.searchYoudaoDict(query);
     if (searchResult.customTranslations.length === 0) {
         return [];
     }
@@ -140,11 +142,130 @@ export async function searchYoudao(query: string): Promise<YoudaoItem[]> {
     return items;
 }
 
-export function makePronunciationURL(word: string, pronunciationType: 'en' | 'us'): string {
-    const type = (pronunciationType === 'en') ? 1 : 2;
-    return `https://dict.youdao.com/dictvoice?type=${type}&audio=${encodeURIComponent(word)}`;
+/**
+ * 检查单个音频 URL 是否可播放。
+ * 
+ * @param url 要检查的音频 URL。
+ * @param timeoutMs 此检查的超时时间（毫秒）。
+ * @returns Promise，解析为 true（可播放）或 false（不可播放/错误/超时）。
+ */
+async function checkUrlPlayability(url: string, timeoutMs: number): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+        const tempAudio = document.createElement('audio');
+        tempAudio.preload = 'metadata'; // 只需要元数据来判断是否能播放
+
+        let timeoutId: number | undefined;
+
+        const cleanupAndResolve = (result: boolean) => {
+            clearTimeout(timeoutId);
+            tempAudio.removeEventListener('canplay', canPlayListener);
+            tempAudio.removeEventListener('error', errorListener);
+            tempAudio.removeEventListener('abort', errorListener);
+            tempAudio.src = ''; // 释放音频元素可能占用的资源
+            resolve(result);
+        };
+
+        const canPlayListener = () => cleanupAndResolve(true);
+        const errorListener = () => cleanupAndResolve(false); // 'error' 和 'abort' 都视为加载失败
+
+        tempAudio.addEventListener('canplay', canPlayListener, { once: true });
+        tempAudio.addEventListener('error', errorListener, { once: true });
+        tempAudio.addEventListener('abort', errorListener, { once: true });
+
+        tempAudio.src = url;
+        tempAudio.load(); // 显式开始加载资源
+
+        timeoutId = window.setTimeout(() => {
+            // console.warn(`检查音频 URL 超时: ${url}`);
+            cleanupAndResolve(false); // 超时视为不可播放
+        }, timeoutMs);
+    });
 }
 
-export function makePronunciationFilename(word: string, pronunciationType: 'en' | 'us'): string {
-    return `youdao_${word}_${pronunciationType}.mp3`;
+/**
+ * 检查 URL 数组中的音频是否可以播放，返回第一个有效的音频 URL 的索引（按数组顺序优先）。
+ * 
+ * @param urls 要检查的音频 URL 字符串数组。
+ * @param timeoutMs 每个 URL 检查的超时时间（毫秒）。
+ * @returns Promise，解析为第一个有效 URL 的索引；如果所有 URL 都无效，则为 null。
+ */
+async function findFirstValidAudio(urls: string[], timeoutMs: number): Promise<number | null> {
+    if (urls.length === 0) {
+        return null;
+    }
+    return new Promise<number | null>((resolveOuter) => {
+        /** 是否已得到结果 */
+        let isResolved = false;
+        const numUrls = urls.length;
+        /** 存储每个 URL 的检查结果: 'incomplete', 'valid', 'invalid' */
+        const results = new Array<'incomplete' | 'valid' | 'invalid'>(numUrls).fill('incomplete');
+        /** 已完成检查的 URL 数量 */
+        let completedCount = 0;
+
+        // 此函数在每次检查完成后尝试确定最终结果
+        const attemptResolve = () => {
+            if (isResolved) {
+                return; // 主 Promise 已被解析，无需再做操作
+            }
+            for (let i = 0; i < numUrls; i++) {
+                if (results[i] === 'valid') {
+                    isResolved = true;
+                    resolveOuter(i); // 找到第一个有效的 URL (按优先级)
+                    return;
+                } else if (results[i] === 'incomplete') {
+                    // 发现一个更高优先级的 URL 尚未完成检查，
+                    // 因此无法确定当前是否应宣布较低优先级的 URL 为胜者，或者是否所有都将失败。
+                    return;
+                }
+                // 如果 results[i] === 'invalid'，则继续检查下一个 URL
+            }
+            if (completedCount === numUrls) { // 所有 URL 都无效
+                isResolved = true;
+                resolveOuter(null); // 所有 URL 都已检查且均无效
+            }
+        };
+        // 并发启动所有 URL 的检查请求，而不是顺序地等待前一个请求完成
+        urls.forEach(async (url, index) => {
+            let isPlayable: boolean;
+            try {
+                isPlayable = await checkUrlPlayability(url, timeoutMs);
+            } catch (e) {
+                // checkUrlPlayability 被设计为总是 resolve(boolean)，所以理论上不会到这里。
+                // 但作为防御性编程，我们将任何意外错误视为不可播放。
+                isPlayable = false;
+                console.error(`检查音频 URL '${url}' 时发生意外错误:`, e);
+            }
+            results[index] = isPlayable ? 'valid' : 'invalid';
+            completedCount++; // 增加已完成检查的计数
+            attemptResolve(); // 每次检查完成后，尝试解析主 Promise
+        });
+    });
+}
+
+export async function makePronunciationURL(word: string, pronunciationType: 'en' | 'us'): Promise<{ url: string, dict: 'youdao' | 'iciba'; } | null> {
+    const youdaoPronunciationUrl = youdao.makeYoudaoPronounceUrl(word, { type: pronunciationType === 'en' ? '1' : '2' });
+    const youdaoDictVoiceUrl = youdao.makeYoudaoDictVoiceUrl(word, pronunciationType);
+    const icibaTtsUrl = iciba.makeIcibaTtsUrl(word);
+    const urls = [youdaoPronunciationUrl, youdaoDictVoiceUrl, icibaTtsUrl];
+    const dicts = ['youdao', 'youdao', 'iciba'] as const;
+    const timeoutMs = 5000; // 设置超时时间为 5 秒
+    const validIndex = await findFirstValidAudio(urls, timeoutMs);
+    if (validIndex == null) {
+        return null; // 所有音频 URL 都不可用
+    }
+    return {
+        url: urls[validIndex],
+        dict: dicts[validIndex]
+    };
+}
+
+export function makePronunciationFilename(
+    word: string,
+    pronunciationType: 'en' | 'us',
+    dict: 'youdao' | 'iciba'
+): string {
+    if (dict === 'iciba') {
+        pronunciationType = 'en'; // iciba only supports English pronunciation
+    }
+    return `${dict}_${word}_${pronunciationType}.mp3`;
 }

@@ -10,13 +10,13 @@ export function tokenize(text: string): string[] {
         const token = match[0];
         const start = match.index;
         if (lastEnd < start) {
-            tokens.push(text.substring(lastEnd, start)); // push previous non-word token
+            tokens.push(text.slice(lastEnd, start)); // push previous non-word token
         }
         tokens.push(token); // push current word token
         lastEnd = start + token.length;
     }
     if (lastEnd < text.length) {
-        tokens.push(text.substring(lastEnd)); // push the last non-word token if exists
+        tokens.push(text.slice(lastEnd)); // push the last non-word token if exists
     }
     return tokens;
 }
