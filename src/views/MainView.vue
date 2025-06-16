@@ -128,7 +128,7 @@ async function searchAndUpdate(word: string, dictionary: 'collins' | 'oxford' | 
         } else if (dictionary === 'youdao') {
             results = await dict.searchYoudao(word);
         } else {
-            throw new Error(`Unknown dictionary: ${dictionary}`);
+            throw new Error(`Unknown dictionary: ${String(dictionary)}`);
         }
     } catch (error) {
         searchingOrSearchedWords[dictionary] = '';
@@ -158,7 +158,7 @@ async function pasteToEdit() {
     if (text != null) {
         sentence.value = text.trim();
         if (showEdit.value) {
-            changeEditStatus();
+            await changeEditStatus();
         }
     }
 }
@@ -279,7 +279,7 @@ async function openEditDialog(index: number) {
         return;
     }
     try {
-        await ankiService.guiEditNote(item.id!);
+        await ankiService.guiEditNote(item.id);
     } catch (error) {
         console.error(error);
         await api.dialog.message(String(error), { title: '打开编辑对话框失败', kind: 'error' });
@@ -343,29 +343,32 @@ onBeforeMount(async () => {
                     class="pronunciation-radio-box" />
             </div>
             <ScrollMemory :show="selectedDict === 'collins'" class="words-container-inner">
-                <CollinsCard v-for="(item, index) in wordItems['collins']" :item="item.item" :index="index"
+                <CollinsCard v-for="(item, index) in wordItems['collins']" :key="index" :item="item.item" :index="index"
                     :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'oxford'" class="words-container-inner">
-                <OxfordCard v-for="(item, index) in wordItems['oxford']" :item="item.item" :index="index"
+                <OxfordCard v-for="(item, index) in wordItems['oxford']" :key="index" :item="item.item" :index="index"
                     :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'youdao'" class="words-container-inner">
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['concise'].length > 0" class="youdao-title">
                     简明释义
                 </div>
-                <YoudaoCard v-for="(item, index) in wordItemsYoudao['concise']" :item="item.item" :index="index"
-                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
+                <YoudaoCard v-for="(item, index) in wordItemsYoudao['concise']" :key="index" :item="item.item"
+                    :index="index" :status="item.status" @add-btn-click="changeItemAdded"
+                    @edit-btn-click="openEditDialog" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['web'].length > 0" class="youdao-title">
                     网络释义
                 </div>
-                <YoudaoCard v-for="(item, index) in wordItemsYoudao['web']" :item="item.item" :index="index"
-                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
+                <YoudaoCard v-for="(item, index) in wordItemsYoudao['web']" :key="index" :item="item.item"
+                    :index="index" :status="item.status" @add-btn-click="changeItemAdded"
+                    @edit-btn-click="openEditDialog" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['phrase'].length > 0" class="youdao-title">
                     短语
                 </div>
-                <YoudaoCard v-for="(item, index) in wordItemsYoudao['phrase']" :item="item.item" :index="index"
-                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
+                <YoudaoCard v-for="(item, index) in wordItemsYoudao['phrase']" :key="index" :item="item.item"
+                    :index="index" :status="item.status" @add-btn-click="changeItemAdded"
+                    @edit-btn-click="openEditDialog" />
             </ScrollMemory>
         </div>
     </div>

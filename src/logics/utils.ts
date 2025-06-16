@@ -16,6 +16,8 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
  * 检测是否在 release 模式下
  * 
  * https://github.com/tauri-apps/wry/issues/30
+ * 
+ * 该方法在 Linux 上可能无法正常工作。
  */
 export function tauriInRelease(): boolean {
     return window.location.hostname === 'tauri.localhost';
@@ -107,7 +109,8 @@ export function rgbToHsl(r: number, g: number, b: number): { h: number; s: numbe
 
     const max: number = Math.max(r, g, b);
     const min: number = Math.min(r, g, b);
-    let h: number = 0, s: number = 0, l: number = (max + min) / 2;
+    let h: number = 0, s: number = 0;
+    const l: number = (max + min) / 2;
 
     if (max !== min) {
         const d: number = max - min;

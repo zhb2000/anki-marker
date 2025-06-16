@@ -7,20 +7,30 @@ import { Config } from './config';
 import * as anki from './anki';
 import { AnkiService } from './anki';
 import * as utils from './utils';
+import { typeAssertion } from './typing';
 
-
+/** 模拟当前应用版本过低 */
 export let DEBUG_APP_UPDATE_CURRENT_LOW: boolean;
-/** GitHub Release API 有请求频率限制，开发模式下不要频繁请求 */
+/** 不实际请求 GitHub Release API */
 export let DEBUG_APP_UPDATE_NOT_FETCH: boolean;
+/** 模拟当前模板版本过低 */
 export let DEBUG_TEMPLATE_UPDATE_CURRENT_LOW: boolean;
+/** 不实际更新模板 */
 export let DEBUG_TEMPLATE_UPDATE_NOT_UPDATE: boolean;
 
 async function initDebugFlags() {
     const IN_DEV_MODE = !await utils.rustInRelease();
-    DEBUG_APP_UPDATE_CURRENT_LOW = IN_DEV_MODE ? false : false;
-    DEBUG_APP_UPDATE_NOT_FETCH = IN_DEV_MODE ? false : false;
-    DEBUG_TEMPLATE_UPDATE_CURRENT_LOW = IN_DEV_MODE ? false : false;
-    DEBUG_TEMPLATE_UPDATE_NOT_UPDATE = IN_DEV_MODE ? false : false;
+    if (IN_DEV_MODE) {
+        // DEBUG_APP_UPDATE_CURRENT_LOW = true;
+        // DEBUG_APP_UPDATE_NOT_FETCH = true; // GitHub Release API 有请求频率限制，开发模式下不要频繁请求
+        // DEBUG_TEMPLATE_UPDATE_CURRENT_LOW = true;
+        // DEBUG_TEMPLATE_UPDATE_NOT_UPDATE = true;
+    } else {
+        DEBUG_APP_UPDATE_CURRENT_LOW = false;
+        DEBUG_APP_UPDATE_NOT_FETCH = false;
+        DEBUG_TEMPLATE_UPDATE_CURRENT_LOW = false;
+        DEBUG_TEMPLATE_UPDATE_NOT_UPDATE = false;
+    }
 }
 
 // #region Config
@@ -153,20 +163,22 @@ async function getLatestAppInfoFromGitHubRelease(): Promise<LatestAppInfo> {
             `headers: ${JSON.stringify(response.headers)}.`
         );
     }
-    const data = await response.json() as Record<string, any>;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const data = await response.json();
     if (!(data instanceof Object)) {
-        throw TypeError(`Expect response data to be Object but receive ${typeof data}: ${data}`);
+        throw TypeError(`Expect response data to be Object but receive ${typeof data}: ${String(data)}`);
     }
+    typeAssertion<{ tag_name: string, html_url: string, name: string, body: string; }>(data);
     const version = semver.clean(data.tag_name);
     if (version == null) {
         throw new Error(`version ${version} cannot be cleaned by semver`);
     }
     return {
         version,
-        tagName: data.tag_name as string,
-        htmlURL: data.html_url as string,
-        name: data.name as string,
-        body: data.body as string
+        tagName: data.tag_name,
+        htmlURL: data.html_url,
+        name: data.name,
+        body: data.body
     };
 }
 
@@ -180,7 +192,7 @@ async function initAppVersion() {
 }
 
 export async function getAppVersion(): Promise<string> {
-    initAppVersion();
+    await initAppVersion();
     return appVersion;
 }
 // #endregion
@@ -293,8 +305,10 @@ export async function initAtAppStart() {
     // 获取笔记模板版本，不等待结果。
     // 当模板名称或 AnkiConnect URL 改变时，重新获取模板版本。
     watch(
+        // Use a getter function as the watch source to watch properties of a reactive object.
+        // See https://vuejs.org/guide/essentials/watchers.html#watch-source-types
         () => [config.modelName, config.ankiConnectURL],
-        async ([newModelName, _]) => await fetchAndSetTemplateVersion(newModelName),
+        async ([newModelName]) => await fetchAndSetTemplateVersion(newModelName),
         { immediate: true }
     );
     // 检查应用更新，在初始化代码中不等待更新检查的结果，避免阻塞应用启动

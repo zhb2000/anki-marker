@@ -8,6 +8,6 @@ export { default as ReturnButton } from './ReturnButton.vue';
 export { default as ScrollMemory } from './ScrollMemory.vue';
 export { default as SentencePanel } from './SentencePanel.vue';
 export { default as SettingButton } from './SettingButton.vue';
-export { default as Token } from './Token.vue';
+export { default as TokenItem } from './TokenItem.vue';
 export { default as WordCard } from './WordCard.vue';
 export { default as YoudaoCard } from './YoudaoCard.vue';

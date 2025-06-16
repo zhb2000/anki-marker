@@ -36,6 +36,7 @@ export class AnkiConnectApi {
                 `headers: ${JSON.stringify(response.headers)}.`
             );
         }
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const data = await response.json();
         if (!(data instanceof Object)) {
             throw TypeError(`Expect response data to be Object but receive ${typeof data}: ${data}`);

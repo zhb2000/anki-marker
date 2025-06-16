@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { PropType } from 'vue';
 
-import Token from "./Token.vue";
+import TokenItem from "./TokenItem.vue";
 
 defineProps({
     tokens: {
@@ -17,7 +17,7 @@ defineProps({
 
 <template>
     <div class="sentence-panel">
-        <Token v-for="token in tokens" :token="token.token" v-model:marked="token.marked" />
+        <TokenItem v-for="(token, index) in tokens" :key="index" :token="token.token" v-model:marked="token.marked" />
     </div>
 </template>
 

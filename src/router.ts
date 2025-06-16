@@ -1,20 +1,20 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
-import Main from './views/Main.vue';
-import Settings from './views/Settings.vue';
+import MainView from './views/MainView.vue';
+import SettingsView from './views/SettingsView.vue';
 
 export const router = createRouter({
     history: createWebHistory(),
     routes: [
         {
             path: '/',
-            name: 'Main',
-            component: Main
+            name: MainView.name,
+            component: MainView
         },
         {
             path: '/settings',
-            name: 'Settings',
-            component: Settings
+            name: SettingsView.name,
+            component: SettingsView
         }
     ]
 });

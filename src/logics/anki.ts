@@ -173,7 +173,7 @@ export function makeFields(
             '例句': sentence
         };
     } else {
-        throw new Error(`Unknown dict: ${dict}`);
+        throw new Error(`Unknown dict: ${String(dict)}`);
     }
 }
 
@@ -191,7 +191,7 @@ function extractCardTemplateInfo(html: string): Record<string, any> | null {
         const jsonString = scriptElement.textContent;
         if (jsonString != null) {
             // 解析 JSON 字符串为对象并返回
-            return JSON.parse(jsonString);
+            return JSON.parse(jsonString) as Record<string, any>;
         } else {
             return null;
         }

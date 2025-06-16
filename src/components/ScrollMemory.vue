@@ -14,7 +14,7 @@ const props = defineProps({
     }
 });
 
-const container = ref<HTMLElement>(null as any);
+const container = ref<HTMLElement>(null as unknown as HTMLElement);
 let savedScrollTop: number | null = null;
 
 onDeactivated(() => {

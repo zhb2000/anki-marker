@@ -6,7 +6,7 @@ import { ElConfigProvider } from 'element-plus';
 const currentRoute = useRoute();
 const transitionName = ref<string | undefined>(undefined);
 
-watch(() => currentRoute.path, (newPath, _oldPath) => {
+watch(() => currentRoute.path, (newPath) => {
     const isBack = newPath === '/'; // 简单判断是否是“后退”操作
     transitionName.value = isBack ? 'slide-right' : 'slide-left';
 });

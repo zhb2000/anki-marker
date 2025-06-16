@@ -21,7 +21,7 @@ const emit = defineEmits<{
     'edit-btn-click': [index: number];
 }>();
 
-const boxShadowAnimation = ref<string | undefined>(undefined);
+const boxShadowAnimation = ref<string | null>(null);
 
 const editButtonHover = useHover();
 
@@ -39,7 +39,7 @@ function emitEditBtnClick() {
 }
 
 function handleAnimationEnd() {
-    boxShadowAnimation.value = undefined;
+    boxShadowAnimation.value = null;
 }
 </script>
 

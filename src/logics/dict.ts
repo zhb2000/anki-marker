@@ -154,7 +154,7 @@ async function checkUrlPlayability(url: string, timeoutMs: number): Promise<bool
         const tempAudio = document.createElement('audio');
         tempAudio.preload = 'metadata'; // 只需要元数据来判断是否能播放
 
-        let timeoutId: number | undefined;
+        let timeoutId: number | undefined = undefined;
 
         const cleanupAndResolve = (result: boolean) => {
             clearTimeout(timeoutId);
@@ -224,21 +224,24 @@ async function findFirstValidAudio(urls: string[], timeoutMs: number): Promise<n
                 resolveOuter(null); // 所有 URL 都已检查且均无效
             }
         };
-        // 并发启动所有 URL 的检查请求，而不是顺序地等待前一个请求完成
-        urls.forEach(async (url, index) => {
-            let isPlayable: boolean;
-            try {
-                isPlayable = await checkUrlPlayability(url, timeoutMs);
-            } catch (e) {
-                // checkUrlPlayability 被设计为总是 resolve(boolean)，所以理论上不会到这里。
-                // 但作为防御性编程，我们将任何意外错误视为不可播放。
-                isPlayable = false;
-                console.error(`检查音频 URL '${url}' 时发生意外错误:`, e);
-            }
-            results[index] = isPlayable ? 'valid' : 'invalid';
-            completedCount++; // 增加已完成检查的计数
-            attemptResolve(); // 每次检查完成后，尝试解析主 Promise
-        });
+
+        for (let index = 0; index < urls.length; index++) {
+            void (async () => {
+                const url = urls[index];
+                let isPlayable: boolean;
+                try {
+                    isPlayable = await checkUrlPlayability(url, timeoutMs);
+                } catch (error) {
+                    // checkUrlPlayability 被设计为总是 resolve(boolean)，所以理论上不会到这里。
+                    // 但作为防御性编程，我们将任何意外错误视为不可播放。
+                    isPlayable = false;
+                    console.error(`检查音频 URL '${url}' 时发生意外错误:`, error);
+                }
+                results[index] = isPlayable ? 'valid' : 'invalid';
+                completedCount++; // 增加已完成检查的计数
+                attemptResolve(); // 每次检查完成后，尝试解析主 Promise
+            })();
+        }
     });
 }
 

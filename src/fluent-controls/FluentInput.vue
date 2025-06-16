@@ -6,6 +6,7 @@ const [model, modifiers] = defineModel({
         if (value == null) {
             return value;
         }
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         let stringValue = String(value);
         if (modifiers.trim) {
             stringValue = stringValue.trim();
@@ -18,8 +19,7 @@ const hover = useHover();
 </script>
 
 <template>
-    <input v-on="{ ...hover.listeners }" v-model="model" class="fluent-input"
-        :class="hover.classes.value" />
+    <input v-on="{ ...hover.listeners }" v-model="model" class="fluent-input" :class="hover.classes.value" />
 </template>
 
 <style scoped>

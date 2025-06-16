@@ -35,7 +35,7 @@ async function handleClick() {
             return;
         }
         audio.src = url;
-        audio.play();
+        await audio.play();
     }
 }
 

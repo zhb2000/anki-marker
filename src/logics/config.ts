@@ -50,10 +50,10 @@ export class Config implements ConfigModel {
 
     private defineAccessor(propertyName: keyof ConfigModel): void {
         Object.defineProperty(this, propertyName, {
-            get(this: Config) {
+            get(this: Config): ConfigModel[typeof propertyName] {
                 return this.config[propertyName];
             },
-            set(this: Config, value) {
+            set(this: Config, value: ConfigModel[typeof propertyName]) {
                 if (value !== this.config[propertyName]) {
                     this.config[propertyName] = value;
                     this.modified[propertyName] = value;
@@ -115,8 +115,8 @@ export async function startConfigWatcher(config: Config): Promise<boolean> {
     // listeners set in the front-end will be removed after the page is reloaded
     if (config.__unlistenConfigChanged == null) {
         // 监听 'config-changed' 事件，以便在配置文件被修改时重新加载配置
-        config.__unlistenConfigChanged = await api.event.listen('config-changed', async () => {
-            await config.reload();
+        config.__unlistenConfigChanged = await api.event.listen('config-changed', () => {
+            config.reload().catch(console.error);
         });
     }
     if (config.__unlistenConfigWatcherError == null) {
