@@ -58,7 +58,7 @@ const wordItemsYoudao = computed(() => {
     }
     return itemModels;
 });
-/** 正在搜索或上一次成功搜索的单词 */
+/** 正在搜索或上一次成功搜索的单词，用于防止重复搜索 */
 const searchingOrSearchedWords = {
     'collins': '',
     'oxford': '',
@@ -91,6 +91,7 @@ watch(searchText, () => {
     }
 });
 
+/** 输入框内容改变时调用节流版搜索函数，避免过于频繁地搜索 */
 const throttledSearch = utils.throttle(async () => {
     await searchAndUpdate(searchText.value, selectedDict.value);
 }, 200);
@@ -99,7 +100,11 @@ const throttledYoudaoSearch = utils.throttle(async () => {
     await searchAndUpdate(searchText.value, 'youdao');
 }, 400);
 
-/** 搜索单词，并用搜索结果更新 wordItems */
+/**
+ * 搜索单词，并用搜索结果更新 wordItems。
+ * 
+ * 点击“查询”按钮或按下回车键时直接调用此函数。
+ */
 async function searchAndUpdate(word: string, dictionary: 'collins' | 'oxford' | 'youdao') {
     word = word.trim();
     if (word.length === 0) {
@@ -113,14 +118,14 @@ async function searchAndUpdate(word: string, dictionary: 'collins' | 'oxford' | 
         // - 若 word 正在被搜索，则等待搜索结果即可
         // - 若 word 上次已被搜索成功，则复用界面上的单词列表
         return;
-    } else {
-        // 清空界面上的单词列表
-        wordItems[dictionary] = [];
-        searchingOrSearchedWords[dictionary] = '';
     }
+    // 新单词的搜索请求，清空界面上的已有的搜索结果
+    wordItems[dictionary] = [];
+    // 函数体此前无 await，因此此处更新 searchingOrSearchedWords 遵循 searchAndUpdate 的调用顺序
+    // 即，后续的 searchAndUpdate 调用会覆盖前面的 searchingOrSearchedWords
+    searchingOrSearchedWords[dictionary] = word;
     let results: dict.CollinsItem[] | dict.OxfordItem[] | dict.YoudaoItem[];
     try {
-        searchingOrSearchedWords[dictionary] = word;
         if (dictionary === 'collins') {
             results = await dict.searchCollins(word);
         } else if (dictionary === 'oxford') {
@@ -130,13 +135,22 @@ async function searchAndUpdate(word: string, dictionary: 'collins' | 'oxford' | 
         } else {
             throw new Error(`Unknown dictionary: ${String(dictionary)}`);
         }
+        // 由于每次搜索的网络延迟不等长，await 后控制流可能晚于后续的 searchAndUpdate调用，那么本次搜索结果将无效
+        // 根据 searchingOrSearchedWords[dictionary] 是否被覆盖即可判断本次搜索结果是否仍然有效
     } catch (error) {
-        searchingOrSearchedWords[dictionary] = '';
-        console.error(error);
-        await api.dialog.message(String(error), { title: '查询失败', kind: 'error' });
+        // 仅在本次搜索单词与当前 searchingOrSearchedWords 相同时才显示错误
+        // 否则，说明存在新的 searchAndUpdate 调用（它覆盖了 searchingOrSearchedWords），本次搜索结果无效
+        if (searchingOrSearchedWords[dictionary] === word) {
+            searchingOrSearchedWords[dictionary] = '';
+            console.error(error);
+            await api.dialog.message(String(error), { title: '查询失败', kind: 'error' });
+        }
         return;
     }
-    wordItems[dictionary] = results.map(item => ({ item, status: 'not-added', id: null })) as any[];
+    // 仅在本次搜索结果有效时更新搜索结果单词列表
+    if (searchingOrSearchedWords[dictionary] === word) {
+        wordItems[dictionary] = results.map(item => ({ item, status: 'not-added', id: null }) as ItemModel<any>);
+    }
 }
 // #endregion
 
