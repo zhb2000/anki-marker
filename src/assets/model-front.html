@@ -213,9 +213,9 @@
                 try {
                     isPlayable = await checkUrlPlayability(url, timeoutMs);
                 }
-                catch (e) {
+                catch (error) {
                     isPlayable = false;
-                    console.error(`检查音频 URL '${url}' 时发生意外错误:`, e);
+                    console.error(`检查音频 URL '${url}' 时发生意外错误:`, error);
                 }
                 results[index] = isPlayable ? 'valid' : 'invalid';
                 completedCount++;

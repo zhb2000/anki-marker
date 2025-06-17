@@ -9,27 +9,33 @@ import { AnkiService } from './anki';
 import * as utils from './utils';
 import { typeAssertion } from './typing';
 
+/**
+ * 禁用应用启动时的应用版本检查
+ * （GitHub Release API 有请求频率限制，开发模式下不要频繁请求）
+ */
+export let DEBUG_DISABLE_ONSTART_APP_CHECK: boolean;
 /** 模拟当前应用版本过低 */
-export let DEBUG_APP_UPDATE_CURRENT_LOW: boolean;
-/** 不实际请求 GitHub Release API */
-export let DEBUG_APP_UPDATE_NOT_FETCH: boolean;
+export let DEBUG_CURRENT_LOW_APP_VERSION: boolean;
+/**
+ * 不实际请求 GitHub Release API
+ * （GitHub Release API 有请求频率限制，开发模式下不要频繁请求）
+ */
+export let DEBUG_NOT_REAL_APP_CHECK: boolean;
 /** 模拟当前模板版本过低 */
-export let DEBUG_TEMPLATE_UPDATE_CURRENT_LOW: boolean;
-/** 不实际更新模板 */
-export let DEBUG_TEMPLATE_UPDATE_NOT_UPDATE: boolean;
+export let DEBUG_CURRENT_LOW_TEMPLATE_VERSION: boolean;
 
 async function initDebugFlags() {
     const IN_DEV_MODE = !await utils.rustInRelease();
     if (IN_DEV_MODE) {
-        // DEBUG_APP_UPDATE_CURRENT_LOW = true;
-        // DEBUG_APP_UPDATE_NOT_FETCH = true; // GitHub Release API 有请求频率限制，开发模式下不要频繁请求
-        // DEBUG_TEMPLATE_UPDATE_CURRENT_LOW = true;
-        // DEBUG_TEMPLATE_UPDATE_NOT_UPDATE = true;
+        DEBUG_DISABLE_ONSTART_APP_CHECK = true;
+        // DEBUG_CURRENT_LOW_APP_VERSION = true;
+        // DEBUG_NOT_REAL_APP_CHECK = true;
+        // DEBUG_CURRENT_LOW_TEMPLATE_VERSION = true;
     } else {
-        DEBUG_APP_UPDATE_CURRENT_LOW = false;
-        DEBUG_APP_UPDATE_NOT_FETCH = false;
-        DEBUG_TEMPLATE_UPDATE_CURRENT_LOW = false;
-        DEBUG_TEMPLATE_UPDATE_NOT_UPDATE = false;
+        DEBUG_DISABLE_ONSTART_APP_CHECK = false;
+        DEBUG_CURRENT_LOW_APP_VERSION = false;
+        DEBUG_NOT_REAL_APP_CHECK = false;
+        DEBUG_CURRENT_LOW_TEMPLATE_VERSION = false;
     }
 }
 
@@ -103,8 +109,8 @@ export const appUpdateAvailable = computed(() => {
     return semver.gt(latestAppVersion.value, appVersion);
 });
 
-/** 检查是否需要发送网络请求，距离上次成功请求超过 1 分钟则需要发送 */
-function shouldFetchLatestAppInfo(): boolean {
+/** 是否距离上次成功请求超过 1 分钟 */
+function farFromLastAppInfoFetch(): boolean {
     const now = Date.now(); // 当前时间戳（毫秒）
     if (lastFetchTimestamp == null) {
         // 如果从未发送过请求，则需要发送
@@ -116,15 +122,10 @@ function shouldFetchLatestAppInfo(): boolean {
 }
 
 export async function fetchAndSetLatestAppInfo() {
-    if (latestAppInfo.value == null || shouldFetchLatestAppInfo()) {
+    if (latestAppInfo.value == null || farFromLastAppInfoFetch()) {
         latestAppInfo.value = await getLatestAppInfoFromGitHubRelease();
         lastFetchTimestamp = Date.now();
     }
-}
-
-export async function getLatestAppInfo(): Promise<LatestAppInfo> {
-    await fetchAndSetLatestAppInfo();
-    return latestAppInfo.value!;
 }
 
 async function makeUserAgent(): Promise<string> {
@@ -136,13 +137,13 @@ async function makeUserAgent(): Promise<string> {
 }
 
 async function getLatestAppInfoFromGitHubRelease(): Promise<LatestAppInfo> {
-    if (DEBUG_APP_UPDATE_NOT_FETCH) {
+    if (DEBUG_NOT_REAL_APP_CHECK) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         return {
-            version: '100.0.1',
-            tagName: 'v100.0.1',
+            version: '0.0.1',
+            tagName: 'v0.0.1',
             htmlURL: 'https://github.com/zhb2000/anki-marker/releases/tag/v0.0.1',
-            name: 'Anki Marker v100.0.1',
+            name: 'Anki Marker v0.0.1',
             body: '## [0.0.1] - 2024-03-17\r\n第一个版本。\n\n开发测试显示效果用，' +
                 '将 `src/logics/globals.ts` 中的 `DEBUG_APP_UPDATE_NOT_FETCH` 设置为 `false` 后可正常获取最新版本。'
         };
@@ -185,7 +186,7 @@ async function getLatestAppInfoFromGitHubRelease(): Promise<LatestAppInfo> {
 async function initAppVersion() {
     if (appVersion == null) {
         appVersion = await api.app.getVersion();
-        if (DEBUG_APP_UPDATE_CURRENT_LOW) {
+        if (DEBUG_CURRENT_LOW_APP_VERSION) {
             appVersion = '0.0.0';
         }
     }
@@ -210,14 +211,21 @@ export const templateUpdateAvailable = computed(() => {
     if (templateVersion.value == null) {
         return true; // “未知”状态下默认为可更新
     } else if (typeof templateVersion.value === 'string') {
-        return semver.gt(anki.CARD_TEMPLATE_VERSION, templateVersion.value);
+        try {
+            return semver.gt(anki.CARD_TEMPLATE_VERSION, templateVersion.value);
+        } catch (error) {
+            console.error('Error comparing template versions.\n', error);
+            // 如果比较版本时出错，认为是可更新
+            return true;
+        }
     }
+    // 获取模板版本时出错，认为是不可更新
     return false;
 });
 
 /** 获取 Anki 中的笔记模板版本，出错时不抛出异常，而是将异常信息存入 templateVersion */
 export async function fetchAndSetTemplateVersion(modelName: string) {
-    if (DEBUG_TEMPLATE_UPDATE_CURRENT_LOW) {
+    if (DEBUG_CURRENT_LOW_TEMPLATE_VERSION) {
         templateVersion.value = '0.0.0';
         return;
     }
@@ -313,6 +321,9 @@ export async function initAtAppStart() {
     );
     // 检查应用更新，在初始化代码中不等待更新检查的结果，避免阻塞应用启动
     void (async () => {
+        if (DEBUG_DISABLE_ONSTART_APP_CHECK) {
+            return;
+        }
         try {
             await fetchAndSetLatestAppInfo();
         } catch (error) {

@@ -200,7 +200,10 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
         }
     }
 
-    async function prepareModel(modelName: string) {
+    /**
+     * @returns 是否创建了新的笔记模板
+     */
+    async function prepareModel(modelName: string): Promise<boolean> {
         let modelExists: boolean;
         try {
             const modelNames = await ankiService.modelNames();
@@ -216,14 +219,25 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
                 errorTitle = `笔记模板 ${modelName} 创建失败`;
                 throw error;
             }
+            return true;
         }
+        return false;
     }
 
+    let newModelCreated = false;
     try {
-        await Promise.all([prepareDeck(deckName), prepareModel(modelName)]);
+        newModelCreated = (await Promise.all([prepareDeck(deckName), prepareModel(modelName)]))[1];
     } catch (error) {
         await api.dialog.message(String(error), { title: errorTitle!, kind: 'error' });
         throw error;
+    }
+    if (newModelCreated) {
+        globals.templateVersion.value = anki.CARD_TEMPLATE_VERSION;
+    } else {
+        // 若模板版本号未获取，则此时尝试获取一次
+        if (typeof globals.templateVersion.value !== 'string') {
+            void globals.fetchAndSetTemplateVersion(modelName);
+        }
     }
 }
 

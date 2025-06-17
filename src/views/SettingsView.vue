@@ -101,11 +101,6 @@ import TEMPLATE_RELEASE_NOTE from '../assets/model-template-release-note.md?raw'
 const renderedTemplateReleaseNote = markdownIt.render(TEMPLATE_RELEASE_NOTE);
 
 async function handleUpdateTemplateClick() {
-    if (globals.DEBUG_TEMPLATE_UPDATE_NOT_UPDATE) {
-        ElMessage.success('笔记模板更新成功');
-        templateReleaseNoteDialogVisible.value = false;
-        return;
-    }
     try {
         await ankiService.updateMarkerModel(config.modelName);
     } catch (error) {
@@ -115,7 +110,7 @@ async function handleUpdateTemplateClick() {
     }
     ElMessage.success('笔记模板更新成功');
     templateReleaseNoteDialogVisible.value = false;
-    await globals.fetchAndSetTemplateVersion(config.modelName);
+    await globals.fetchAndSetTemplateVersion(config.modelName); // 刷新笔记模板版本
 }
 // #endregion
 
@@ -158,9 +153,9 @@ onBeforeMount(async () => {
 });
 
 onActivated(async () => {
-    // 打开设置页面时获取一次笔记模板版本
+    // 打开设置页面时获取/刷新一次笔记模板版本
     // 由于 vue 的生命周期钩子不会等待 async 函数执行完毕，
-    // 所以即使 onActivated 在 onBeforeMount 之后执行，config 仍可能未初始化（undefined）
+    // 所以即使 onActivated 在 onBeforeMount 之后执行，页面的 config 变量仍可能未初始化（undefined）
     await globals.fetchAndSetTemplateVersion((await globals.getConfig()).modelName);
 });
 
