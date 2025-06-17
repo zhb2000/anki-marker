@@ -1,6 +1,8 @@
-import { invoke } from './utils';
+import { invoke, sanitizeFilename } from './utils';
 import * as youdao from './youdao';
 import * as iciba from './iciba';
+import { MD5 } from './md5';
+
 export { makeYoudaoDictVoiceUrl } from './youdao';
 
 export interface CollinsItem {
@@ -262,13 +264,16 @@ export async function makePronunciationURL(word: string, pronunciationType: 'en'
     };
 }
 
-export function makePronunciationFilename(
+export async function makePronunciationFilename(
     word: string,
     pronunciationType: 'en' | 'us',
     dict: 'youdao' | 'iciba'
-): string {
+): Promise<string> {
     if (dict === 'iciba') {
         pronunciationType = 'en'; // iciba only supports English pronunciation
     }
-    return `${dict}_${word}_${pronunciationType}.mp3`;
+    const originalPrefix = `${word}_${dict}_${pronunciationType}`;
+    const hash = new MD5(new TextEncoder().encode(originalPrefix)).hexdigest();
+    const originalFilename = `${originalPrefix}_${hash.slice(0, 7)}.mp3`;
+    return await sanitizeFilename(originalFilename);
 }

@@ -27,6 +27,10 @@ export async function rustInRelease(): Promise<boolean> {
     return await invoke<boolean>('rust_in_release');
 }
 
+export async function sanitizeFilename(filename: string): Promise<string> {
+    return await invoke<string>('sanitize_filename', { filename });
+}
+
 /**
  * 创建一个防抖函数
  * 

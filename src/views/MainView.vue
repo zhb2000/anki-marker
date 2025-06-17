@@ -266,7 +266,7 @@ async function changeItemAdded(index: number) {
                     dict: 'youdao'
                 };
             }
-            const audioFilename = dict.makePronunciationFilename(word, pronunciationType, audioResult.dict);
+            const audioFilename = await dict.makePronunciationFilename(word, pronunciationType, audioResult.dict);
             const id = await ankiService.addMarkerNote(
                 config.deckName,
                 config.modelName,

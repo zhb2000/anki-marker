@@ -90,3 +90,8 @@ pub fn get_word_base(
     let conn = guard.connection(dict_path)?;
     return logics::dict::get_word_base(conn, word);
 }
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn sanitize_filename(filename: String) -> Result<String, String> {
+    return Ok(sanitise_file_name::sanitise(&filename));
+}

@@ -41,6 +41,7 @@ fn main() {
             application::dict::search_collins,
             application::dict::search_oxford,
             application::dict::get_word_base,
+            application::dict::sanitize_filename,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
