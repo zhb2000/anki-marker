@@ -103,7 +103,7 @@ export async function showInExplorer(path: string) {
 }
 
 export async function openFile(path: string) {
-    await api.shell.open(path);
+    await invoke('open_filepath', { path });
 }
 
 /**

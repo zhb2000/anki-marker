@@ -20,8 +20,6 @@ toml_edit = "0.22"
 notify = "8.0"
 notify-debouncer-full = "0.5"
 tauri = { version = "2.5", features = [] }
-tauri-plugin-opener = "2.2"
-tauri-plugin-shell = "2.2"
 tauri-plugin-http = { version = "2.4", features = ["unsafe-headers"] }
 tauri-plugin-dialog = "2.2"
 tauri-plugin-os = "2.2"

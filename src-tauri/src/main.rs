@@ -14,7 +14,6 @@ fn main() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let portable = application::config::Portable::new()?;
             app.manage(portable);
@@ -23,10 +22,7 @@ fn main() {
                 app.path(),
             )?);
             app.manage(application::config::IsWatching::new());
-            app.manage(application::dict::DictPath::new(
-                portable.0,
-                app.path(),
-            )?);
+            app.manage(application::dict::DictPath::new(portable.0, app.path())?);
             app.manage(Mutex::new(None::<Connection>));
             Ok(())
         })
@@ -36,6 +32,7 @@ fn main() {
             application::config::config_path,
             application::config::is_portable,
             application::config::show_in_explorer,
+            application::config::open_filepath,
             application::config::start_config_watcher,
             application::config::rust_in_release,
             application::dict::search_collins,

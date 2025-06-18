@@ -58,6 +58,54 @@ pub fn show_in_explorer(path: impl AsRef<Path>) -> Result<(), String> {
     return inner(&path);
 }
 
+pub fn open_filepath(path: impl AsRef<Path>) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    fn inner(path: &str) -> Result<(), String> {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("cmd")
+            .args(&["/C", "start", "", path])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    fn inner(path: &str) -> Result<(), String> {
+        std::process::Command::new("open")
+            .arg(path)
+            .output()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    fn inner(path: &str) -> Result<(), String> {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .output()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    fn inner(_: &str) -> Result<(), String> {
+        Err(format!(
+            "open_filepath is not implemented on this platform: {}",
+            std::env::consts::OS
+        ))
+    }
+
+    let path = path
+        .as_ref()
+        .to_str()
+        .ok_or("path is not valid utf-8")?
+        .replace('/', std::path::MAIN_SEPARATOR_STR)
+        .replace('\\', std::path::MAIN_SEPARATOR_STR);
+    return inner(&path);
+}
+
 pub fn current_exe_dir() -> Result<PathBuf, String> {
     let exe_path = std::env::current_exe()
         .map_err(|e| format!("failed to get current exe path: {}", e.to_string()))?;

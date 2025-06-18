@@ -7,7 +7,6 @@
   ],
   "permissions": [
     "core:default",
-    "shell:allow-open",
     "dialog:allow-message",
     "dialog:allow-confirm",
     {
@@ -38,8 +37,6 @@
     "clipboard-manager:allow-read-text",
     "core:app:allow-app-show",
     "core:app:allow-app-hide",
-    "shell:default",
-    "http:default",
     "dialog:default",
     "os:default",
     "clipboard-manager:default"

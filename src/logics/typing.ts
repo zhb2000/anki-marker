@@ -1,9 +1,9 @@
 /** 
  * 用于在 TypeScript 中进行类型断言。
  * 
- * @param obj 需要进行类型断言的对象。
+ * @param _obj 需要进行类型断言的对象。
  * @template T 断言后的类型。
- * @returns 断言 obj 的类型为 T。
+ * @returns 断言 _obj 的类型为 T。
  * 
  * @example
  * ```typescript
@@ -18,7 +18,7 @@
  * 
  * @remarks 该函数不会执行任何运行时检查，它仅用于类型系统的静态分析。
 */
-export function typeAssertion<T>(obj: any): asserts obj is T { }
+export function typeAssertion<T>(_obj: any): asserts _obj is T { }
 
 /** 辅助类型，用于条件类型检查。*/
 type IfEquals<X, Y, A = X, B = never> =
