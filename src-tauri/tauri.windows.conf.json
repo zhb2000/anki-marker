@@ -1,0 +1,20 @@
+{
+  "identifier": "com.zhb2000.anki-marker",
+  "bundle": {
+    "targets": ["nsis", "msi"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "languages": [
+          "SimpChinese"
+        ]
+      },
+      "wix": {
+        "language": "zh-CN",
+        "upgradeCode": "b8333182-e22f-5367-8f6f-ec9d68f60947"
+      }
+    }
+  }
+}

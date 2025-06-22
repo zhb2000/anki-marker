@@ -10,26 +10,6 @@
     "shortDescription": "Anki 划词助手",
     "longDescription": "Anki 划词助手是一个制作 Anki 卡片的工具，你可以用它标记句子中的生词，通过“单词结合上下文”的方式更好地背单词。",
     "active": true,
-    "targets": ["nsis", "msi", "deb", "rpm"],
-    "windows": {
-      "webviewInstallMode": {
-        "type": "embedBootstrapper"
-      },
-      "nsis": {
-        "languages": [
-          "SimpChinese"
-        ]
-      },
-      "wix": {
-        "language": "zh-CN",
-        "upgradeCode": "b8333182-e22f-5367-8f6f-ec9d68f60947"
-      }
-    },
-    "linux": {
-      "appimage": {
-        "bundleMediaFramework": true
-      }
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

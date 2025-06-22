@@ -1,5 +1,13 @@
 {
   "identifier": "com.zhb2000.anki-marker",
   "productName": "anki-marker",
-  "mainBinaryName": "anki-marker"
+  "mainBinaryName": "anki-marker",
+  "bundle": {
+    "targets": ["deb", "rpm", "appimage"],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    }
+  }
 }
