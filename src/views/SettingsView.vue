@@ -115,9 +115,6 @@ async function handleUpdateTemplateClick() {
 // #endregion
 
 // #region 打开配置文件
-/** 操作系统类型 */
-let os: api.os.OsType;
-
 /** 点击打开配置文件按钮 */
 async function handleOpenFileClick() {
     try {
@@ -143,7 +140,7 @@ async function handleShowInExplorerClick() {
 onBeforeMount(async () => {
     // 为需要初始化的变量赋值
     await globals.initAtAppStart();
-    [config, ankiService, appVersion, os] = await Promise.all([
+    [config, ankiService, appVersion] = await Promise.all([
         globals.getConfig(),
         globals.getAnkiService(),
         globals.getAppVersion(),
@@ -304,8 +301,8 @@ onActivated(async () => {
             </div>
             <div style="margin-bottom: 0px;">
                 <FluentButton class="open-file-button" @click="handleOpenFileClick">打开文件</FluentButton>
-                <FluentButton v-if="os === 'windows' || os === 'macos' || os === 'linux'" class="open-file-button"
-                    @click="handleShowInExplorerClick">
+                <FluentButton v-if="(['windows', 'macos', 'linux'] as api.os.OsType[]).includes(api.os.type())"
+                    class="open-file-button" @click="handleShowInExplorerClick">
                     打开目录
                 </FluentButton>
             </div>

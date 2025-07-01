@@ -160,7 +160,15 @@ const sentence = ref('');
 /** 是否显示文本框 */
 const showEdit = ref(false);
 /** 文本框控件 */
-const editTextarea = ref<HTMLTextAreaElement | null>(null);
+const editTextArea = ref<HTMLTextAreaElement | null>(null);
+const isMacOS = computed(() => api.os.type() === 'macos');
+
+/** 根据平台显示不同的快捷键提示 */
+const editPlaceholder = computed(() => {
+    return isMacOS.value
+        ? '⌘ + Enter 完成编辑'
+        : 'Ctrl + Enter 完成编辑';
+});
 
 /** 文本框中的句子被更改时，更新 tokens */
 watch(sentence, newSentence => {
@@ -181,7 +189,16 @@ async function changeEditStatus() {
     showEdit.value = !showEdit.value;
     if (showEdit.value) {
         await nextTick();
-        editTextarea.value?.focus();
+        editTextArea.value?.focus();
+    }
+}
+
+/** 处理键盘事件，支持 macOS 的 Cmd + Enter 和其他平台的 Ctrl + Enter */
+async function handleEditTextAreaKeydown(event: KeyboardEvent) {
+    const isCorrectModifier = isMacOS.value ? event.metaKey : event.ctrlKey;
+    if (isCorrectModifier && event.key === 'Enter') {
+        event.preventDefault();
+        await changeEditStatus();
     }
 }
 // #endregion
@@ -359,8 +376,8 @@ onBeforeMount(async () => {
         </div>
         <div class="sentence-container">
             <SentencePanel :tokens="tokens" v-if="!showEdit" />
-            <textarea class="fluent-textarea" v-model.trim="sentence" v-if="showEdit" ref="editTextarea"
-                placeholder="Ctrl + Enter 完成编辑" @keydown.ctrl.enter="changeEditStatus"></textarea>
+            <textarea class="fluent-textarea" v-model.trim="sentence" v-if="showEdit" ref="editTextArea"
+                :placeholder="editPlaceholder" @keydown="handleEditTextAreaKeydown"></textarea>
         </div>
         <div class="words-container">
             <div class="pronunciation-container" v-show="searchText.length > 0">

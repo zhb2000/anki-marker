@@ -129,10 +129,8 @@ export async function fetchAndSetLatestAppInfo() {
 }
 
 async function makeUserAgent(): Promise<string> {
-    const [appVersion, osType] = await Promise.all([
-        api.app.getVersion(),
-        api.os.type()
-    ]);
+    const appVersion = await api.app.getVersion();
+    const osType = api.os.type();
     return `$Anki-Marker/${appVersion} (${osType}; Tauri)`;
 }
 
@@ -184,12 +182,14 @@ async function getLatestAppInfoFromGitHubRelease(): Promise<LatestAppInfo> {
 }
 
 async function initAppVersion() {
-    if (appVersion == null) {
-        appVersion = await api.app.getVersion();
-        if (DEBUG_CURRENT_LOW_APP_VERSION) {
-            appVersion = '0.0.0';
-        }
+    if (appVersion != null) {
+        return;
     }
+    appVersion = await api.app.getVersion();
+    if (DEBUG_CURRENT_LOW_APP_VERSION) {
+        appVersion = '0.0.0';
+    }
+
 }
 
 export async function getAppVersion(): Promise<string> {
