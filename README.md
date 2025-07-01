@@ -52,29 +52,29 @@ AnkiConnect 默认会在 `localhost:8765` 上启动一个 HTTP 服务，如果�
 <img src="./docs/assets/anki-card-back.png" alt="Anki 卡片背面" title="Anki 卡片背面" width="300">
 </p>
 
+# 克隆本仓库
+
+本项目使用 Git LFS 管理资源文件，请在克隆前先安装 Git LFS，否则部分资源文件无法正常下载。安装教程参见 [Git LFS 官网](https://git-lfs.com/)。
+
+Git LFS 安装成功后，像平常的 Git 仓库那样运行 `git clone` 命令即可。
+
 # 开发
 
 `tauri info` 检查开发环境是否满足要求：
 
 ```shell
-cargo tauri info
-# 或者
 npm run tauri info
 ```
 
 `tauri dev` 启动开发模式（支持热重载）：
 
 ```shell
-cargo tauri dev
-# 或者
 npm run tauri dev
 ```
 
 `tauri build` 构建应用：
 
 ```shell
-cargo tauri build
-# 或者
 npm run tauri build
 ```
 
