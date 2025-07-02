@@ -12,31 +12,26 @@ export const HoverWrapper = defineComponent({
         const TIMEOUT = 500;
         const listeners = {
             onTouchstart() {
-                console.log(`onTouchstart, current ignoreMouse: ${ignoreMouse}`);
                 hovered.value = true;
                 ignoreMouse = true;
                 setTimeout(() => ignoreMouse = false, TIMEOUT);
             },
             onTouchend() {
-                console.log(`onTouchend, current ignoreMouse: ${ignoreMouse}`);
                 hovered.value = false;
                 ignoreMouse = true;
                 setTimeout(() => ignoreMouse = false, TIMEOUT);
             },
             onTouchcancel() {
-                console.log(`onTouchcancel, current ignoreMouse: ${ignoreMouse}`);
                 hovered.value = false;
                 ignoreMouse = true;
                 setTimeout(() => ignoreMouse = false, TIMEOUT);
             },
             onMouseenter() {
-                console.log(`onMouseenter, current ignoreMouse: ${ignoreMouse}`);
                 if (!ignoreMouse) {
                     hovered.value = true;
                 }
             },
             onMouseleave() {
-                console.log(`onMouseleave, current ignoreMouse: ${ignoreMouse}`);
                 if (!ignoreMouse) {
                     hovered.value = false;
                 }
@@ -44,7 +39,6 @@ export const HoverWrapper = defineComponent({
         };
 
         watch(() => route.name, () => {
-            console.log(`Route changede, resetting hover state.`);
             hovered.value = false; // reset hover state when changing pages
         });
 

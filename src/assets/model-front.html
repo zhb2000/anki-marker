@@ -19,13 +19,13 @@
 </div>
 
 {{#例句}}
-<div class="section">
+<div class="section" id="sentenceSection">
     <div class="bar sentence-icon" onclick="toggle('sentence-grid')" title="点击展开/折叠例句">例句</div>
     <div id="sentence-grid" class="items-grid">
         <div class="items-overflow-hidden">
             <div class="items">
                 <span id="sentence-content">{{例句}}</span>
-                <div onclick="clickSentenceButton()" id="sentenceButton" class="audio-button tappable" title="例句发音">
+                <div onclick="clickSentenceButton()" id="sentenceButton" class="audio-button" title="例句发音">
                 </div>
             </div>
         </div>
@@ -47,6 +47,46 @@
     }
 
     const __sentenceAudio = new Audio();
+
+    /** Observer to pause audio when sentenceSection becomes invisible. */
+    function setupSentenceButtonVisibilityObserver() {
+        const sentenceSection = document.getElementById('sentenceSection');
+        if (sentenceSection == null) {
+            return;
+        }
+        // Create mutation observer to detect when element becomes hidden
+        const mutationObserver = new MutationObserver((mutations) => {
+            mutations.forEach(mutation => {
+                if (mutation.type === 'attributes' &&
+                    (mutation.attributeName === 'style' || mutation.attributeName === 'class')) {
+                    const target = mutation.target;
+                    const computedStyle = window.getComputedStyle(target);
+                    if (computedStyle.display === 'none' ||
+                        computedStyle.visibility === 'hidden' ||
+                        computedStyle.opacity === '0') {
+                        __sentenceAudio.pause();
+                    }
+                }
+            });
+        });
+        // Start observing
+        mutationObserver.observe(sentenceSection, {
+            attributes: true,
+            attributeFilter: ['style', 'class']
+        });
+        // Also observe parent elements for visibility changes
+        for (
+            let parent = sentenceSection.parentElement;
+            parent != null;
+            parent = parent.parentElement
+        ) {
+            mutationObserver.observe(parent, {
+                attributes: true,
+                attributeFilter: ['style', 'class']
+            });
+        }
+    }
+
     async function clickSentenceButton() {
         const isPlaying = !__sentenceAudio.paused;
         __sentenceAudio.pause();
@@ -390,4 +430,11 @@
         }
         return k;
     })();
+
+    // Initialize observer when DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', setupSentenceButtonVisibilityObserver);
+    } else {
+        setupSentenceButtonVisibilityObserver();
+    }
 </script>
