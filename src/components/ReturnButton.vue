@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { useHover } from '../fluent-controls';
-
-const hover = useHover();
+import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 </script>
 
 <template>
-    <button class="return-button" :class="hover.classes.value" title="返回" v-on="hover.listeners">
-        <slot></slot>
-    </button>
+    <HoverWrapper>
+        <button class="return-button" title="返回">
+            <slot></slot>
+        </button>
+    </HoverWrapper>
 </template>
 
 <style scoped>
@@ -26,7 +26,7 @@ const hover = useHover();
     background-color: var(--window-background);
 }
 
-.return-button.hover {
+.return-button[fluent-hovered] {
     filter: brightness(90%);
 }
 

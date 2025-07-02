@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useHover } from './useHover';
+import { HoverWrapper } from './HoverWrapper';
 import { generateUniqueId } from './generateUniqueId';
 
 const props = defineProps<{
@@ -10,20 +10,18 @@ const props = defineProps<{
 
 const model = defineModel<string>();
 
-const radioHover = useHover();
-const labelHover = useHover();
-
 const radioId = generateUniqueId('fluent-radio');
 </script>
 
 <template>
-    <span class="fluent-radio-container">
-        <input :id="radioId" type="radio" class="fluent-radio" :name="props.name" :value="props.value"
-            :class="{ hover: radioHover.hovered.value || labelHover.hovered.value }" v-model="model"
-            v-on="radioHover.listeners" />
-        <label v-if="props.label != null" :for="radioId" class="fluent-radio-label" v-on="labelHover.listeners">{{
-            props.label }}</label>
-    </span>
+    <HoverWrapper>
+        <span class="fluent-radio-container">
+            <input :id="radioId" type="radio" class="fluent-radio" :name="props.name" :value="props.value"
+                v-model="model" />
+            <label v-if="props.label != null" :for="radioId" class="fluent-radio-label">{{
+                props.label }}</label>
+        </span>
+    </HoverWrapper>
 </template>
 
 <style scoped>
@@ -53,11 +51,11 @@ const radioId = generateUniqueId('fluent-radio');
     background-color: var(--radio-background);
 }
 
-.fluent-radio.hover {
+.fluent-radio-container[fluent-hovered] .fluent-radio {
     background-color: var(--radio-background-hover);
 }
 
-.fluent-radio:active {
+.fluent-radio-container[fluent-hovered] .fluent-radio:active {
     background-color: var(--radio-background-active);
 }
 
@@ -66,11 +64,12 @@ const radioId = generateUniqueId('fluent-radio');
     border-width: 0;
 }
 
-.fluent-radio:checked.hover {
+.fluent-radio-container[fluent-hovered] .fluent-radio:checked {
     background-color: var(--control-accent-background-hover);
 }
 
-.fluent-radio:checked:active {
+.fluent-radio:checked:active,
+.fluent-radio-container[fluent-hovered] .fluent-radio:checked:active {
     background-color: var(--control-accent-background-active);
 }
 
@@ -91,24 +90,19 @@ const radioId = generateUniqueId('fluent-radio');
     pointer-events: none;
 }
 
-/* .fluent-radio:active::after {
-    width: calc(16px - 8px);
-    height: calc(16px - 8px);
-    opacity: 1;
-} */
-
 .fluent-radio:checked:after {
     width: calc(16px - 8px);
     height: calc(16px - 8px);
     opacity: 1;
 }
 
-.fluent-radio:checked.hover:after {
+.fluent-radio-container[fluent-hovered] .fluent-radio:checked:after {
     width: calc(16px - 6px);
     height: calc(16px - 6px);
 }
 
-.fluent-radio:checked:active:after {
+.fluent-radio:checked:active:after,
+.fluent-radio-container[fluent-hovered] .fluent-radio:checked:active:after {
     width: calc(16px - 8px);
     height: calc(16px - 8px);
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, PropType } from 'vue';
 
-import { useHover } from '../fluent-controls';
+import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 import AddButton from './AddButton.vue';
 import type { CardStatus } from './CardStatus';
 
@@ -22,8 +22,6 @@ const emit = defineEmits<{
 }>();
 
 const boxShadowAnimation = ref<string | null>(null);
-
-const editButtonHover = useHover();
 
 function emitAddBtnClick() {
     if (props.status === 'not-added') {
@@ -55,9 +53,9 @@ function handleAnimationEnd() {
             </div>
             <div class="flex-shrink-0">
                 <AddButton :status="status" class="card-button" @click="emitAddBtnClick" />
-                <button class="card-button edit-button" :class="editButtonHover.classes.value"
-                    v-on="editButtonHover.listeners" title="编辑笔记" @click="emitEditBtnClick"
-                    v-show="status === 'is-added'"></button>
+                <HoverWrapper v-show="status === 'is-added'">
+                    <button class="card-button edit-button" title="编辑笔记" @click="emitEditBtnClick"></button>
+                </HoverWrapper>
             </div>
         </div>
     </div>
@@ -149,7 +147,7 @@ function handleAnimationEnd() {
     mask-image: url('../assets/edit.svg');
 }
 
-.edit-button.hover {
+.edit-button[fluent-hovered] {
     background-color: var(--accent);
 }
 

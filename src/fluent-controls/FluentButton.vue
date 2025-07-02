@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useHover } from './useHover';
+import { HoverWrapper } from './HoverWrapper';
 
 const props = defineProps({
     accent: {
@@ -11,18 +11,15 @@ const props = defineProps({
 const emit = defineEmits<{
     'click': [payload: MouseEvent];
 }>();
-
-const hover = useHover();
 </script>
 
 <template>
-    <button class="fluent-button" :class="{
-        ...hover.classes.value,
-        accent: props.accent
-    }" v-on="hover.listeners" @click="emit('click', $event)">
-        <!-- 插槽内容允许父组件定制按钮文本或内容 -->
-        <slot></slot>
-    </button>
+    <HoverWrapper>
+        <button class="fluent-button" :class="{ accent: props.accent }" @click="emit('click', $event)">
+            <!-- 插槽内容允许父组件定制按钮文本或内容 -->
+            <slot></slot>
+        </button>
+    </HoverWrapper>
 </template>
 
 <style scoped>
@@ -39,7 +36,7 @@ const hover = useHover();
     user-select: none;
 }
 
-.fluent-button.hover {
+.fluent-button[fluent-hovered] {
     background-color: var(--control-background-hover);
 }
 
@@ -62,7 +59,7 @@ const hover = useHover();
     border-bottom-color: var(--border-accent-bottom-color);
 }
 
-.fluent-button.accent.hover {
+.fluent-button.accent[fluent-hovered] {
     background-color: var(--control-accent-background-hover);
 }
 

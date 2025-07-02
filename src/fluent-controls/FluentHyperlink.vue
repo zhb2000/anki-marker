@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { useHover } from './useHover';
-
-const hover = useHover();
+import { HoverWrapper } from './HoverWrapper';
 </script>
 
 <template>
-    <a class="fluent-hyperlink" :class="hover.classes.value" v-on="hover.listeners">
-        <slot></slot>
-    </a>
+    <HoverWrapper>
+        <a class="fluent-hyperlink">
+            <slot></slot>
+        </a>
+    </HoverWrapper>
 </template>
 
 <style scoped>
@@ -22,7 +22,7 @@ const hover = useHover();
     color: var(--accent);
 }
 
-.fluent-hyperlink.hover {
+.fluent-hyperlink[fluent-hovered] {
     color: var(--control-accent-background-hover);
     background-color: rgb(0, 0, 0, 0.1);
 }

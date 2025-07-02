@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { ElBadge } from 'element-plus';
 
-import { useHover } from '../fluent-controls';
+import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 
 const props = defineProps({
     updateAvailable: {
@@ -11,15 +11,16 @@ const props = defineProps({
     }
 });
 
-const hover = useHover();
 const tooltipTitle = computed(() => props.updateAvailable ? '设置（更新可用）' : '设置');
 </script>
 
 <template>
     <ElBadge is-dot :offset="[-2, 2]" :hidden="!props.updateAvailable">
-        <button class="setting-button" :class="hover.classes.value" :title="tooltipTitle" v-on="hover.listeners">
-            <slot></slot>
-        </button>
+        <HoverWrapper>
+            <button class="setting-button" :title="tooltipTitle">
+                <slot></slot>
+            </button>
+        </HoverWrapper>
     </ElBadge>
 </template>
 
@@ -39,7 +40,7 @@ const tooltipTitle = computed(() => props.updateAvailable ? '设置（更新可�
     border-radius: var(--border-radius);
 }
 
-.setting-button.hover {
+.setting-button[fluent-hovered] {
     filter: brightness(90%);
 }
 

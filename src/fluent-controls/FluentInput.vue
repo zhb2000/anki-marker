@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useHover } from './useHover';
+import { HoverWrapper } from './HoverWrapper';
 
 const [model, modifiers] = defineModel({
     set(value: unknown) {
@@ -14,12 +14,12 @@ const [model, modifiers] = defineModel({
         return stringValue;
     }
 });
-
-const hover = useHover();
 </script>
 
 <template>
-    <input v-on="{ ...hover.listeners }" v-model="model" class="fluent-input" :class="hover.classes.value" />
+    <HoverWrapper>
+        <input v-model="model" class="fluent-input" />
+    </HoverWrapper>
 </template>
 
 <style scoped>
@@ -38,7 +38,7 @@ const hover = useHover();
     border-radius: var(--border-radius);
 }
 
-.fluent-input.hover {
+.fluent-input[fluent-hovered] {
     background-color: var(--control-background-hover);
 }
 

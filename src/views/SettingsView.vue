@@ -189,8 +189,7 @@ onActivated(async () => {
             <h2>关于</h2>
             <div class="term">
                 <span style="margin-right: 8px;">应用版本：{{ appVersion }}</span>
-                <FluentButton :class="{ 'update-button': true, 'cursor-not-allowed': false }"
-                    @click="handleCheckUpdateClick" :disabled="checkingAppUpdate">
+                <FluentButton class="update-button" @click="handleCheckUpdateClick" :disabled="checkingAppUpdate">
                     {{ checkingAppUpdate ? '检查中...' : '检查更新' }}
                 </FluentButton>
                 <a :href="globals.latestAppHtmlURL.value" target="_blank" v-if="globals.appUpdateAvailable.value"
@@ -389,10 +388,6 @@ h2 {
     height: 28px;
     padding-left: 8px;
     padding-right: 8px;
-}
-
-.cursor-not-allowed {
-    cursor: not-allowed;
 }
 
 .file-path {

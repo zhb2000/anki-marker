@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import { useHover } from '../fluent-controls';
+import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 import * as utils from '../logics/utils';
 
 const props = defineProps({
@@ -14,8 +14,6 @@ const props = defineProps({
 const marked = defineModel<boolean>('marked', { required: true });
 
 const isWord = computed(() => utils.string.isWord(props.token));
-
-const hover = useHover();
 
 const title = computed(() => {
     if (isWord.value) {
@@ -34,12 +32,13 @@ function handleClick() {
 </script>
 
 <template>
-    <span class="token" :class="{
-        marked: marked,
-        'is-word': isWord,
-        'not-word': !isWord,
-        ...hover.classes.value
-    }" :title="title" @click="handleClick" v-on="hover.listeners">{{ token }}</span>
+    <HoverWrapper>
+        <span class="token" :class="{
+            marked: marked,
+            'is-word': isWord,
+            'not-word': !isWord
+        }" :title="title" @click="handleClick">{{ token }}</span>
+    </HoverWrapper>
 </template>
 
 <style scoped>
@@ -61,7 +60,7 @@ function handleClick() {
     font-weight: bold;
 }
 
-.token.is-word.hover {
+.token.is-word[fluent-hovered] {
     outline-style: solid;
     outline-width: 1px;
     outline-color: var(--accent);

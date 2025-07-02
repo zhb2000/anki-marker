@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, PropType } from 'vue';
-import { useHover } from '../fluent-controls';
+import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 import { makePronunciationURL } from '../logics/dict';
 import { ElMessage } from 'element-plus';
 
@@ -15,7 +15,6 @@ const props = defineProps({
     }
 });
 
-const hover = useHover();
 const audio = new Audio();
 const isPlaying = ref(false);
 const title = computed(() => isPlaying.value ? '点击停止发音' : '点击以发音');
@@ -52,10 +51,11 @@ audio.addEventListener('play', () => {
 </script>
 
 <template>
-    <button :title="title" class="play-audio-button" :class="hover.classes.value" v-on="hover.listeners"
-        @click="handleClick">
-        <slot></slot>
-    </button>
+    <HoverWrapper>
+        <button :title="title" class="play-audio-button" @click="handleClick">
+            <slot></slot>
+        </button>
+    </HoverWrapper>
 </template>
 
 <style scoped>
@@ -75,7 +75,7 @@ audio.addEventListener('play', () => {
     border-radius: 2px;
 }
 
-.play-audio-button.hover {
+.play-audio-button[fluent-hovered] {
     filter: brightness(90%);
 }
 

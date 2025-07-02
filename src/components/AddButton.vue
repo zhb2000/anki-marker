@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { PropType } from 'vue';
 
-import { useHover } from '../fluent-controls';
+import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 import type { CardStatus } from './CardStatus';
 
 const props = defineProps({
@@ -22,16 +22,15 @@ const statusToTitle = {
     'processing-remove': '处理中',
     'is-added': '已添加，点击可撤销'
 };
-
-const hover = useHover();
 </script>
 
 <template>
-    <button :title="statusToTitle[props.status]" class="add-btn" :class="{
-        'is-added': props.status === 'is-added',
-        'processing': props.status === 'processing-add' || props.status === 'processing-remove',
-        ...hover.classes.value
-    }" v-on="hover.listeners"></button>
+    <HoverWrapper>
+        <button :title="statusToTitle[props.status]" class="add-btn" :class="{
+            'is-added': props.status === 'is-added',
+            'processing': props.status === 'processing-add' || props.status === 'processing-remove'
+        }"></button>
+    </HoverWrapper>
 </template>
 
 <style scoped>
@@ -44,7 +43,7 @@ const hover = useHover();
     position: relative;
 }
 
-.add-btn.hover {
+.add-btn[fluent-hovered] {
     background-color: var(--control-accent-background-hover);
 }
 
@@ -86,7 +85,7 @@ const hover = useHover();
     background-color: var(--accent);
 }
 
-.add-btn.is-added.hover {
+.add-btn.is-added[fluent-hovered] {
     background-color: var(--control-accent-background-hover);
 }
 

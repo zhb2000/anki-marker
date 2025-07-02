@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { useHover } from './useHover';
+import { HoverWrapper } from './HoverWrapper';
 
 const model = defineModel();
-
-const hover = useHover();
 </script>
 
 <template>
-    <select class="fluent-select" :class="hover.classes.value" v-on="hover.listeners" v-model="model">
-        <slot></slot>
-    </select>
+    <HoverWrapper>
+        <select class="fluent-select" v-model="model">
+            <slot></slot>
+        </select>
+    </HoverWrapper>
 </template>
 
 <style scoped>
@@ -27,7 +27,7 @@ const hover = useHover();
     user-select: none;
 }
 
-.fluent-select.hover {
+.fluent-select[fluent-hovered] {
     background-color: var(--control-background-hover);
 }
 
