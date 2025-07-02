@@ -8,12 +8,12 @@ export const router = createRouter({
     routes: [
         {
             path: '/',
-            name: MainView.name,
+            name: 'MainView',
             component: MainView
         },
         {
             path: '/settings',
-            name: SettingsView.name,
+            name: 'SettingsView',
             component: SettingsView
         }
     ]
