@@ -8,6 +8,7 @@ import * as dict from '../logics/dict';
 import * as anki from '../logics/anki';
 import * as cfg from '../logics/config';
 import * as globals from '../logics/globals';
+import * as preference from '../logics/preference';
 import { FluentButton, FluentSelect, FluentInput, FluentRadio } from '../fluent-controls';
 import {
     CardStatus,
@@ -89,6 +90,16 @@ watch(searchText, () => {
     } else {
         throttledSearch();
     }
+});
+
+/** 保存所选的字典 */
+watch(selectedDict, newDict => {
+    preference.set('selectedDict', newDict);
+});
+
+/** 保存所选的发音 */
+watch(selectedPronunciation, newPronunciation => {
+    preference.set('selectedPronunciation', newPronunciation);
 });
 
 /** 输入框内容改变时调用节流版搜索函数，避免过于频繁地搜索 */
@@ -348,6 +359,15 @@ onBeforeMount(async () => {
         globals.getConfig(),
         globals.getAnkiService()
     ]);
+    // 恢复用户选项
+    const cachedDict = preference.get('selectedDict') as 'collins' | 'oxford' | 'youdao';
+    if (cachedDict != null && ['collins', 'oxford', 'youdao'].includes(cachedDict)) {
+        selectedDict.value = cachedDict;
+    }
+    const cachedPronunciation = preference.get('selectedPronunciation') as 'en' | 'us';
+    if (cachedPronunciation != null && (['en', 'us'] as const).includes(cachedPronunciation)) {
+        selectedPronunciation.value = cachedPronunciation;
+    }
     pageInitialized.value = true;
     if (!await utils.rustInRelease()) {
         sentence.value = 'The quick brown fox jumps over the lazy dog.'; // test sentence in dev mode
