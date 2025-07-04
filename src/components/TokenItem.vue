@@ -52,6 +52,7 @@ function handleClick() {
     border-radius: 2px;
     user-select: none;
     transition: background-color 0.2s, color 0.2s, font-weight 0.2s;
+    cursor: default;
 }
 
 .token.is-word.marked {
