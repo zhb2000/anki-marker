@@ -60,6 +60,12 @@ Git LFS 安装成功后，像平常的 Git 仓库那样运行 `git clone` 命令
 
 # 开发
 
+在项目的根目录下运行 `npm install` 安装依赖：
+
+```shell
+npm install
+```
+
 `tauri info` 检查开发环境是否满足要求：
 
 ```shell
