@@ -13,7 +13,7 @@ pub fn show_in_explorer(path: impl AsRef<Path>) -> Result<(), String> {
         std::process::Command::new("cmd")
             .args(&["/C", "explorer", "/select,", path])
             .creation_flags(CREATE_NO_WINDOW)
-            .output()
+            .spawn()
             .map_err(|e| e.to_string())?;
         return Ok(());
     }
@@ -22,7 +22,7 @@ pub fn show_in_explorer(path: impl AsRef<Path>) -> Result<(), String> {
     fn inner(path: &str) -> Result<(), String> {
         std::process::Command::new("open")
             .args(&["-R", path])
-            .output()
+            .spawn()
             .map_err(|e| e.to_string())?;
         return Ok(());
     }
@@ -36,7 +36,7 @@ pub fn show_in_explorer(path: impl AsRef<Path>) -> Result<(), String> {
             .ok_or("Parent directory is not valid utf-8")?;
         std::process::Command::new("xdg-open")
             .arg(dir_path)
-            .output()
+            .spawn()
             .map_err(|e| e.to_string())?;
         return Ok(());
     }
@@ -66,7 +66,7 @@ pub fn open_filepath(path: impl AsRef<Path>) -> Result<(), String> {
         std::process::Command::new("cmd")
             .args(&["/C", "start", "", path])
             .creation_flags(CREATE_NO_WINDOW)
-            .output()
+            .spawn()
             .map_err(|e| e.to_string())?;
         return Ok(());
     }
@@ -75,7 +75,7 @@ pub fn open_filepath(path: impl AsRef<Path>) -> Result<(), String> {
     fn inner(path: &str) -> Result<(), String> {
         std::process::Command::new("open")
             .arg(path)
-            .output()
+            .spawn()
             .map_err(|e| e.to_string())?;
         return Ok(());
     }
@@ -84,7 +84,7 @@ pub fn open_filepath(path: impl AsRef<Path>) -> Result<(), String> {
     fn inner(path: &str) -> Result<(), String> {
         std::process::Command::new("xdg-open")
             .arg(path)
-            .output()
+            .spawn()
             .map_err(|e| e.to_string())?;
         return Ok(());
     }
@@ -114,7 +114,7 @@ pub fn open_in_browser(url: &str) -> Result<(), String> {
         std::process::Command::new("cmd")
             .args(&["/C", "start", "", url])
             .creation_flags(CREATE_NO_WINDOW)
-            .output()
+            .spawn()
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -123,7 +123,7 @@ pub fn open_in_browser(url: &str) -> Result<(), String> {
     fn inner(url: &str) -> Result<(), String> {
         std::process::Command::new("open")
             .arg(url)
-            .output()
+            .spawn()
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -132,7 +132,7 @@ pub fn open_in_browser(url: &str) -> Result<(), String> {
     fn inner(url: &str) -> Result<(), String> {
         std::process::Command::new("xdg-open")
             .arg(url)
-            .output()
+            .spawn()
             .map_err(|e| e.to_string())?;
         Ok(())
     }
