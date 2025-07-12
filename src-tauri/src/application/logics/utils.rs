@@ -106,6 +106,48 @@ pub fn open_filepath(path: impl AsRef<Path>) -> Result<(), String> {
     return inner(&path);
 }
 
+pub fn open_in_browser(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    fn inner(url: &str) -> Result<(), String> {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("cmd")
+            .args(&["/C", "start", "", url])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn inner(url: &str) -> Result<(), String> {
+        std::process::Command::new("open")
+            .arg(url)
+            .output()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn inner(url: &str) -> Result<(), String> {
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .output()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    fn inner(_: &str) -> Result<(), String> {
+        Err(format!(
+            "open_in_browser is not implemented on this platform: {}",
+            std::env::consts::OS
+        ))
+    }
+
+    inner(url)
+}
+
 pub fn current_exe_dir() -> Result<PathBuf, String> {
     let exe_path = std::env::current_exe()
         .map_err(|e| format!("failed to get current exe path: {}", e.to_string()))?;

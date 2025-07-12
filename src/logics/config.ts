@@ -106,6 +106,12 @@ export async function openFile(path: string) {
     await invoke('open_filepath', { path });
 }
 
+export async function openInBrowser(url: string | null | undefined) {
+    if (url != null) {
+        await invoke('open_in_browser', { url });
+    }
+}
+
 /**
  * 启动配置文件监视器。
  * Return true if the watcher is started successfully, false if it's already started.

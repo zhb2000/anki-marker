@@ -33,6 +33,7 @@ fn main() {
             application::config::is_portable,
             application::config::show_in_explorer,
             application::config::open_filepath,
+            application::config::open_in_browser,
             application::config::start_config_watcher,
             application::config::rust_in_release,
             application::dict::search_collins,

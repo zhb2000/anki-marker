@@ -192,17 +192,16 @@ onActivated(async () => {
                 <FluentButton class="update-button" @click="handleCheckUpdateClick" :disabled="checkingAppUpdate">
                     {{ checkingAppUpdate ? '检查中...' : '检查更新' }}
                 </FluentButton>
-                <a :href="globals.latestAppHtmlURL.value" target="_blank" v-if="globals.appUpdateAvailable.value"
-                    style="text-decoration: none;">
-                    <FluentButton :accent="true" class="update-button" style="cursor: pointer;">
-                        <span style="display: flex; align-items: center;">
-                            <OpenFilledSvg style="width: 16px; height: 16px; margin-right: 4px;" />
-                            <span style="padding-bottom: 2px;">下载更新</span>
-                        </span>
-                    </FluentButton>
-                </a>
-                <FluentHyperlink v-if="globals.appUpdateAvailable.value" style="padding: 2px 2px;" title="查看应用更新说明"
-                    @click="appReleaseNoteDialogVisible = true">
+                <FluentButton :accent="true" class="update-button" style="cursor: pointer;"
+                    v-if="globals.appUpdateAvailable.value" @click="cfg.openInBrowser(globals.latestAppHtmlURL.value)"
+                    :title="globals.latestAppHtmlURL.value">
+                    <span style="display: flex; align-items: center;">
+                        <OpenFilledSvg style="width: 16px; height: 16px; margin-right: 4px;" />
+                        <span style="padding-bottom: 2px;">下载更新</span>
+                    </span>
+                </FluentButton>
+                <FluentHyperlink v-if="globals.appUpdateAvailable.value" style="padding: 2px 2px; cursor: default;"
+                    title="查看应用更新说明" @click="appReleaseNoteDialogVisible = true">
                     新版本：{{ globals.latestAppVersion }}
                 </FluentHyperlink>
             </div>
@@ -211,15 +210,15 @@ onActivated(async () => {
                 <div style="padding: 0px 16px 0px 16px;" class="markdown-body" v-html="renderedAppReleaseNote"></div>
                 <template #footer>
                     <div style="display: flex; align-items: center; justify-content: center;">
-                        <a :href="globals.latestAppHtmlURL.value" target="_blank"
-                            v-if="globals.appUpdateAvailable.value" style="text-decoration: none;">
-                            <FluentButton :accent="true" class="update-button" style="cursor: pointer;">
-                                <span style="display: flex; align-items: center;">
-                                    <OpenFilledSvg style="width: 16px; height: 16px; margin-right: 4px;" />
-                                    <span style="padding-bottom: 2px;">下载更新</span>
-                                </span>
-                            </FluentButton>
-                        </a>
+                        <FluentButton :accent="true" class="update-button" style="cursor: pointer;"
+                            v-if="globals.appUpdateAvailable.value"
+                            @click="cfg.openInBrowser(globals.latestAppHtmlURL.value)"
+                            :title="globals.latestAppHtmlURL.value">
+                            <span style="display: flex; align-items: center;">
+                                <OpenFilledSvg style="width: 16px; height: 16px; margin-right: 4px;" />
+                                <span style="padding-bottom: 2px;">下载更新</span>
+                            </span>
+                        </FluentButton>
                         <FluentButton @click="appReleaseNoteDialogVisible = false" class="update-button">
                             关闭
                         </FluentButton>
@@ -239,8 +238,8 @@ onActivated(async () => {
                         </FluentButton>
                     </template>
                 </ElPopconfirm>
-                <FluentHyperlink v-if="globals.templateUpdateAvailable.value" style="padding: 2px 2px;" title="查看模板更新说明"
-                    @click="templateReleaseNoteDialogVisible = true">
+                <FluentHyperlink v-if="globals.templateUpdateAvailable.value" style="padding: 2px 2px; cursor: default;"
+                    title="查看模板更新说明" @click="templateReleaseNoteDialogVisible = true">
                     新版本：{{ anki.CARD_TEMPLATE_VERSION }}
                 </FluentHyperlink>
             </div>
@@ -266,8 +265,8 @@ onActivated(async () => {
             </ElDialog>
             <div class="term">
                 作者：
-                <FluentHyperlink href="https://github.com/zhb2000" target="_blank"
-                    style="display: flex; align-items: center;">
+                <FluentHyperlink @click="cfg.openInBrowser('https://github.com/zhb2000')"
+                    title="https://github.com/zhb2000" style="display: flex; align-items: center; cursor: pointer;">
                     <img src="../assets/zhb-avatar.png" alt="ZHB"
                         style="width: 28px; height: 28px; margin-right: 8px; border-radius: 50%; border: 1px solid var(--border-bottom-color);">
                     <span>ZHB</span>
@@ -276,8 +275,9 @@ onActivated(async () => {
             </div>
             <div class="term">
                 项目地址：
-                <FluentHyperlink href="https://github.com/zhb2000/anki-marker" target="_blank"
-                    style="display: flex; align-items: center;">
+                <FluentHyperlink @click="cfg.openInBrowser('https://github.com/zhb2000/anki-marker')"
+                    title="https://github.com/zhb2000/anki-marker"
+                    style="display: flex; align-items: center; cursor: pointer;">
                     <GitHubSvg style="width: 20px; height: 20px; margin-right: 8px;" />
                     <span>zhb2000/anki-marker</span>
                     <OpenFilledSvg style="width: 16px; height: 16px; margin-left: 4px;" />

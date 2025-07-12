@@ -96,6 +96,11 @@ pub fn open_filepath(path: String) -> Result<(), String> {
     return logics::utils::open_filepath(&path);
 }
 
+#[tauri::command(rename_all = "snake_case")]
+pub fn open_in_browser(url: String) -> Result<(), String> {
+    return logics::utils::open_in_browser(&url);
+}
+
 pub struct IsWatching(pub Mutex<bool>);
 
 impl IsWatching {
