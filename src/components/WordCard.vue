@@ -63,6 +63,8 @@ function handleAnimationEnd() {
 
 <style scoped>
 .card {
+    user-select: text;
+    cursor: text;
     padding: 10px;
     margin-bottom: 10px;
     font-family: var(--font-family);

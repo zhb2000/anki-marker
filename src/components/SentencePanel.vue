@@ -27,6 +27,7 @@ defineProps({
     height: 100%;
     padding: 8px 12px;
     user-select: none;
+    cursor: default;
     background-color: var(--input-text-background-focus);
     border-style: solid;
     border-color: var(--border-color);

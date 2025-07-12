@@ -314,10 +314,12 @@ onActivated(async () => {
     height: calc(80vh - 150px);
     overflow: auto;
     user-select: text;
+    cursor: text;
 }
 
 .release-note-dialog {
     user-select: none;
+    cursor: default;
 }
 </style>
 
@@ -327,6 +329,7 @@ onActivated(async () => {
     overflow: auto;
     background-color: var(--window-background);
     height: 100vh;
+    user-select: none;
 }
 
 .title-bar {
@@ -350,6 +353,7 @@ h1 {
     font-weight: normal;
     line-height: 32px;
     user-select: none;
+    cursor: default;
 }
 
 h2 {
@@ -360,6 +364,7 @@ h2 {
     font-weight: normal;
     line-height: 24px;
     user-select: none;
+    cursor: default;
 }
 
 .term {
@@ -367,6 +372,7 @@ h2 {
     align-items: center;
     margin-bottom: 8px;
     user-select: none;
+    cursor: default;
     font-size: 16px;
 }
 
@@ -392,6 +398,7 @@ h2 {
 
 .file-path {
     user-select: text;
+    cursor: text;
     overflow-wrap: break-word;
     word-break: break-all;
 }

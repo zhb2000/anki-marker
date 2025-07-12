@@ -456,6 +456,7 @@ onBeforeMount(async () => {
         'header header'
         'sentence words';
     overflow-x: hidden;
+    user-select: none;
 }
 
 .header-container {
@@ -548,5 +549,6 @@ onBeforeMount(async () => {
 .youdao-title {
     margin-bottom: 10px;
     user-select: none;
+    cursor: default;
 }
 </style>
