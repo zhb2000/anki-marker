@@ -64,6 +64,7 @@ export default tseslint.config(
             'dist',
             'node_modules',
             'eslint.config.js',
+            'postcss.config.cjs',
             '**/*.d.ts',
             '**/*.local',
             '**/*.local.*',
