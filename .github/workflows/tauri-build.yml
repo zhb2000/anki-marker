@@ -16,9 +16,9 @@ jobs:
             fail-fast: false
             matrix:
                 include:
-                    # Windows x64 原生构建
+                    # Windows x86_64 原生构建
                     - os: windows-latest
-                      platform: windows-x64
+                      platform: windows-x86_64
                       target: x86_64-pc-windows-msvc
                       rust_targets: x86_64-pc-windows-msvc
                     # Windows ARM64 交叉构建（依赖 VS 自带 ARM64 工具链）
@@ -26,7 +26,7 @@ jobs:
                       platform: windows-arm64
                       target: aarch64-pc-windows-msvc
                       rust_targets: aarch64-pc-windows-msvc
-                    # macOS 使用 Apple Silicon 机型，生成通用二进制（x64 + arm64）
+                    # macOS 使用 Apple Silicon 机型，生成通用二进制（x86_64 + arm64）
                     - os: macos-latest
                       platform: macos-universal
                       target: universal-apple-darwin
@@ -37,7 +37,7 @@ jobs:
                       target: x86_64-unknown-linux-gnu
                       rust_targets: x86_64-unknown-linux-gnu
                     # Linux ARM64 原生构建（使用 arm64 runner）
-                    - os: ubuntu-24.04-arm
+                    - os: ubuntu-22.04-arm
                       platform: linux-arm64
                       target: aarch64-unknown-linux-gnu
                       rust_targets: aarch64-unknown-linux-gnu
@@ -70,10 +70,10 @@ jobs:
                       ~/.cargo/registry
                       ~/.cargo/git
                       src-tauri/target
-                  key: cargo-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+                  key: cargo-${{ matrix.os }}-${{ matrix.target }}-${{ hashFiles('src-tauri/Cargo.lock') }}
                   restore-keys: |
-                      cargo-${{ runner.os }}-${{ matrix.target }}-
-                      cargo-${{ runner.os }}-
+                      cargo-${{ matrix.os }}-${{ matrix.target }}-
+                      cargo-${{ matrix.os }}-
               # 缓存 Rust 依赖与编译产物，加速跨平台重复构建
 
             - name: Install Linux dependencies
@@ -96,12 +96,48 @@ jobs:
                   TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
               with:
                   # 如果未设置签名密钥，仍会生成未签名安装包；可在仓库 Secrets 中填入
-                args: --target ${{ matrix.target }}
+                  args: --target ${{ matrix.target }}
               # tauri-action 会自动调用 npm run tauri build，并根据 target 生成安装包
 
-            - name: Upload artifacts
+            # 将打包产物保存到当前 workflow 运行的 artifacts，便于下载与发布
+            - name: Upload Windows nsis artifacts
               uses: actions/upload-artifact@v4
+              if: startsWith(matrix.platform, 'windows')
               with:
-                  name: ${{ matrix.platform }}-artifacts
-                  path: src-tauri/target/${{ matrix.target }}/release/bundle
-              # 将打包产物保存到当前 workflow 运行的 artifacts，便于下载与发布
+                  name: ${{ matrix.platform }}-nsis
+                  path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+
+            - name: Upload Windows msi artifacts
+              uses: actions/upload-artifact@v4
+              if: startsWith(matrix.platform, 'windows')
+              with:
+                  name: ${{ matrix.platform }}-msi
+                  path: src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+
+            - name: Upload macOS dmg artifacts
+              uses: actions/upload-artifact@v4
+              if: startsWith(matrix.platform, 'macos')
+              with:
+                  name: ${{ matrix.platform }}-dmg
+                  path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+
+            - name: Upload Linux deb artifacts
+              uses: actions/upload-artifact@v4
+              if: startsWith(matrix.platform, 'linux')
+              with:
+                  name: ${{ matrix.platform }}-deb
+                  path: src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+
+            - name: Upload Linux rpm artifacts
+              uses: actions/upload-artifact@v4
+              if: startsWith(matrix.platform, 'linux')
+              with:
+                  name: ${{ matrix.platform }}-rpm
+                  path: src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
+
+            - name: Upload Linux AppImage artifacts
+              uses: actions/upload-artifact@v4
+              if: startsWith(matrix.platform, 'linux')
+              with:
+                  name: ${{ matrix.platform }}-appimage
+                  path: src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage

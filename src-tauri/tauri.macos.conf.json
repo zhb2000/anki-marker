@@ -1,7 +1,7 @@
 {
   "identifier": "com.zhb2000.anki-marker",
   "bundle": {
-    "targets": ["dmg", "app"],
+    "targets": ["dmg"],
     "macOS": {
       "signingIdentity": null
     }
