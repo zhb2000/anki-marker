@@ -94,7 +94,7 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
         if let Some(model_name) = modified.model_name {
             doc["model-name"] = toml_edit::value(model_name);
         }
-        std::fs::write(&config_path, doc.to_string()).map_err(|e| {
+        std::fs::write(config_path, doc.to_string()).map_err(|e| {
             format!(
                 "failed to write to config file {}: {e}",
                 config_path.display()

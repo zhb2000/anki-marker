@@ -31,6 +31,9 @@ sanitise-file-name = "1.0"
 # DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]
 
+[lints.clippy]
+needless_return = "allow"
+
 [profile.release]
 panic = 'abort'
 lto = true
