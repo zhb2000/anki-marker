@@ -1,0 +1,107 @@
+name: Build and Package Tauri App
+
+# 触发条件：推送到 build 分支时自动构建
+on:
+    push:
+        branches: ["build"]
+
+permissions:
+    contents: read
+
+jobs:
+    build:
+        name: Build ${{ matrix.platform }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    # Windows x64 原生构建
+                    - os: windows-latest
+                      platform: windows-x64
+                      target: x86_64-pc-windows-msvc
+                      rust_targets: x86_64-pc-windows-msvc
+                    # Windows ARM64 交叉构建（依赖 VS 自带 ARM64 工具链）
+                    - os: windows-latest
+                      platform: windows-arm64
+                      target: aarch64-pc-windows-msvc
+                      rust_targets: aarch64-pc-windows-msvc
+                    # macOS 使用 Apple Silicon 机型，生成通用二进制（x64 + arm64）
+                    - os: macos-latest
+                      platform: macos-universal
+                      target: universal-apple-darwin
+                      rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+                    # Linux x86_64 原生构建
+                    - os: ubuntu-22.04
+                      platform: linux-x86_64
+                      target: x86_64-unknown-linux-gnu
+                      rust_targets: x86_64-unknown-linux-gnu
+                    # Linux ARM64 原生构建（使用 arm64 runner）
+                    - os: ubuntu-24.04-arm
+                      platform: linux-arm64
+                      target: aarch64-unknown-linux-gnu
+                      rust_targets: aarch64-unknown-linux-gnu
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                  lfs: true
+              # 保证拉取子模块或 LFS 文件时可以按需设置 fetch-depth（默认已足够）
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: npm
+                  cache-dependency-path: package-lock.json
+              # Tauri v2 与 Vite 在 Node 18+ 上工作良好；开启 npm 缓存加快安装
+
+            - name: Set up Rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: ${{ matrix.rust_targets }}
+              # 为当前平台需要的 Rust target 安装工具链；通用包需安装多个 target
+
+            - name: Cache cargo
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
+                      src-tauri/target
+                  key: cargo-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+                  restore-keys: |
+                      cargo-${{ runner.os }}-${{ matrix.target }}-
+                      cargo-${{ runner.os }}-
+              # 缓存 Rust 依赖与编译产物，加速跨平台重复构建
+
+            - name: Install Linux dependencies
+              if: startsWith(matrix.os, 'ubuntu')
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y \
+                    libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+                    librsvg2-dev patchelf build-essential curl wget libssl-dev
+              # Tauri 在 Linux 打包 AppImage / deb 时依赖 WebKitGTK、GTK 等运行时库
+
+            - name: Install frontend dependencies
+              run: npm ci
+              # 使用 package-lock 精确安装依赖，避免不同平台的锁文件差异
+
+            - name: Build with Tauri
+              uses: tauri-apps/tauri-action@v0
+              env:
+                  TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+                  TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+              with:
+                  # 如果未设置签名密钥，仍会生成未签名安装包；可在仓库 Secrets 中填入
+                args: --target ${{ matrix.target }}
+              # tauri-action 会自动调用 npm run tauri build，并根据 target 生成安装包
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ matrix.platform }}-artifacts
+                  path: src-tauri/target/${{ matrix.target }}/release/bundle
+              # 将打包产物保存到当前 workflow 运行的 artifacts，便于下载与发布
