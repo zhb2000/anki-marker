@@ -1,6 +1,6 @@
 [package]
 name = "anki-marker"
-version = "0.2.0"
+version = "0.2.1-0"
 description = "Anki Marker is a tool for creating Anki cards."
 authors = ["ZHB"]
 license = "GPL-3.0"

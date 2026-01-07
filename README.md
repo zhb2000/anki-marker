@@ -4,6 +4,12 @@
 
 <div align="center"><h1>Anki 划词助手</h1></div>
 
+<div align="center">
+
+[![GitHub Repo stars](https://img.shields.io/github/stars/zhb2000/anki-marker?style=social)](https://github.com/zhb2000/anki-marker/stargazers) [![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/zhb2000/anki-marker/total?logo=anki)](https://github.com/zhb2000/anki-marker/releases) [![GitHub Release](https://img.shields.io/github/v/release/zhb2000/anki-marker)](https://github.com/zhb2000/anki-marker/releases/latest) [![GitHub package.json version](https://img.shields.io/github/package-json/v/zhb2000/anki-marker?label=dev)](https://github.com/zhb2000/anki-marker/blob/master/CHANGELOG.md)
+
+</div>
+
 Anki 划词助手是一个制作 Anki 卡片的工具，你可以用划词助手标记句子中的生词，通过“**单词结合上下文**”的方式更好地背单词。
 
 本项目受到了 [mmjang / ankihelper](https://github.com/mmjang/ankihelper) 的启发。由于原项目是 Android 应用，且已经不再维护，而我自己用电脑的时间更多，因此自己用 [Tauri](https://github.com/tauri-apps/tauri) 写了一个类似的工具。
@@ -86,7 +92,7 @@ npm run tauri build
 
 打包好的应用位于 `src-tauri/target/release/bundle` 目录下。
 
-在 Windows 平台上可以使用 `build-for-windows.js` 这个脚本，同时将应用打包成安装程序（.msi/.exe）和便携式应用（.zip）：
+在 Windows 平台上可以使用 `build-for-windows.js` 这个脚本，同时将应用打包成安装程序（.exe/.msi）和便携式应用（.zip）：
 
 ```shell
 node build-for-windows.js
