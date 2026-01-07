@@ -15,7 +15,7 @@ Anki 划词助手是一个制作 Anki 卡片的工具，你可以用划词助手
 # 安装
 ## 安装划词助手本体
 
-[Releases 页面](https://github.com/zhb2000/anki-marker/releases)提供了 Windows 平台的安装程序（.msi/.exe）和便携式应用（.zip），其余平台请自行编译。
+[Releases 页面](https://github.com/zhb2000/anki-marker/releases)提供了 Windows 平台的安装程序（.exe/.msi）和便携式应用（.zip），其余平台请自行编译。
 
 Anki 划词助手是一个基于 Tauri 的桌面应用，你的 Windows 系统需要带有 [Microsoft Edge WebView2](https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/) 才能运行（Windows 10 2004 及以上版本已经自带）。
 

@@ -16,7 +16,9 @@
 - 更新 API 以**修复例句朗读失效**的问题。
 - 卡片切换后暂停例句朗读。
 
----
+<details open>
+<summary><strong>点击展开/收起模板升级提示</strong></summary>
+<br>
 
 如果你使用过本应用的旧版本或 [mmjang](https://github.com/mmjang) 开发的 Android 版（[mmjang / ankihelper](https://github.com/mmjang/ankihelper)），那么需要手动确认是否**将已有的旧模板升级为新模板**：
 
@@ -25,6 +27,19 @@
 1. 点击设置页面的“更新模板”按钮，并在弹出的对话框中确认更新。
 
 建议更新模板，以在复习单词时获得更好的体验。
+</details>
+
+<details open>
+<summary><strong>点击展开/收起下载链接</strong></summary>
+<br>
+
+**Windows**
+
+- **x86-64:**
+   - [Installer (User) (.exe)](https://github.com/zhb2000/anki-marker/releases/download/v0.2.0/anki-marker_0.2.0_windows_x64-setup.exe)
+   - [Installer (System) (.msi)](https://github.com/zhb2000/anki-marker/releases/download/v0.2.0/anki-marker_0.2.0_windows_x64.msi)
+   - [Portable (.zip)](https://github.com/zhb2000/anki-marker/releases/download/v0.2.0/anki-marker_0.2.0_windows_x64-portable.zip)
+</details>
 
 ## [0.1.0] - 2025-01-02
 
@@ -45,7 +60,9 @@
 - 为条目的**展开和收起**添加了**动画效果**，点击条目的标题可以展开或收起条目的内容。
 - 其他卡片布局优化。
 
----
+<details>
+<summary><strong>点击展开/收起模板升级提示</strong></summary>
+<br>
 
 如果你使用过本应用的 0.0.1 版本或 [mmjang](https://github.com/mmjang) 开发的 Android 版（[mmjang / ankihelper](https://github.com/mmjang/ankihelper)），那么需要手动确认是否**将已有的旧模板升级为新模板**：
 
@@ -56,7 +73,32 @@
 你也可以继续使用旧模板，这不会影响划词助手的使用。但是，建议你更新模板，以在复习单词时获得更好的体验。
 
 如果你的 Anki 软件中没有划词助手的旧模板，或者你是第一次使用划词助手，那么无需进行上述操作，直接使用即可。
+</details>
+
+<details>
+<summary><strong>点击展开/收起下载链接</strong></summary>
+<br>
+
+**Windows**
+
+- **x86-64:**
+   - [Installer (User) (.exe)](https://github.com/zhb2000/anki-marker/releases/download/v0.1.0/anki-marker_0.1.0_windows_x64-setup.exe)
+   - [Installer (System) (.msi)](https://github.com/zhb2000/anki-marker/releases/download/v0.1.0/anki-marker_0.1.0_windows_x64.msi)
+   - [Portable (.zip)](https://github.com/zhb2000/anki-marker/releases/download/v0.1.0/anki-marker_0.1.0_windows_x64-portable.zip)
+</details>
 
 ## [0.0.1] - 2024-03-17
 
 第一个版本。
+
+<details>
+<summary><strong>点击展开/收起下载链接</strong></summary>
+<br>
+
+**Windows**
+
+- **x86-64:**
+   - [Installer (User) (.exe)](https://github.com/zhb2000/anki-marker/releases/download/v0.0.1/anki-marker_0.0.1_x64-setup.exe)
+   - [Installer (System) (.msi)](https://github.com/zhb2000/anki-marker/releases/download/v0.0.1/anki-marker_0.0.1_x64.msi)
+   - [Portable (.zip)](https://github.com/zhb2000/anki-marker/releases/download/v0.0.1/anki-marker_0.0.1_windows-x64-portable.zip)
+</details>
