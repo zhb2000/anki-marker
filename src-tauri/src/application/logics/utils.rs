@@ -11,7 +11,7 @@ pub fn show_in_explorer(path: impl AsRef<Path>) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         std::process::Command::new("cmd")
-            .args(&["/C", "explorer", "/select,", path])
+            .args(["/C", "explorer", "/select,", path])
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| e.to_string())?;
@@ -53,8 +53,7 @@ pub fn show_in_explorer(path: impl AsRef<Path>) -> Result<(), String> {
         .as_ref()
         .to_str()
         .ok_or("path is not valid utf-8")?
-        .replace('/', std::path::MAIN_SEPARATOR_STR)
-        .replace('\\', std::path::MAIN_SEPARATOR_STR);
+        .replace(['/', '\\'], std::path::MAIN_SEPARATOR_STR);
     return inner(&path);
 }
 
@@ -64,7 +63,7 @@ pub fn open_filepath(path: impl AsRef<Path>) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         std::process::Command::new("cmd")
-            .args(&["/C", "start", "", path])
+            .args(["/C", "start", "", path])
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| e.to_string())?;
@@ -101,8 +100,7 @@ pub fn open_filepath(path: impl AsRef<Path>) -> Result<(), String> {
         .as_ref()
         .to_str()
         .ok_or("path is not valid utf-8")?
-        .replace('/', std::path::MAIN_SEPARATOR_STR)
-        .replace('\\', std::path::MAIN_SEPARATOR_STR);
+        .replace(['/', '\\'], std::path::MAIN_SEPARATOR_STR);
     return inner(&path);
 }
 
@@ -112,7 +110,7 @@ pub fn open_in_browser(url: &str) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         std::process::Command::new("cmd")
-            .args(&["/C", "start", "", url])
+            .args(["/C", "start", "", url])
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| e.to_string())?;
@@ -149,8 +147,8 @@ pub fn open_in_browser(url: &str) -> Result<(), String> {
 }
 
 pub fn current_exe_dir() -> Result<PathBuf, String> {
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("failed to get current exe path: {}", e.to_string()))?;
+    let exe_path =
+        std::env::current_exe().map_err(|e| format!("failed to get current exe path: {}", e))?;
     let exe_dir = exe_path
         .parent()
         .ok_or("failed to get current exe directory")?;
