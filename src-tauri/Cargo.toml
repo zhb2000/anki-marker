@@ -24,6 +24,8 @@ tauri-plugin-http = { version = "2.4", features = ["unsafe-headers"] }
 tauri-plugin-dialog = "2.2"
 tauri-plugin-os = "2.2"
 tauri-plugin-clipboard-manager = "2.2"
+tauri-plugin-log = "2"
+log = "0.4"
 sanitise-file-name = "1.0"
 # WebDriver automation server, for debugging/testing only. Enabled via the `webdriver` feature.
 tauri-plugin-webdriver = { version = "0.2", optional = true }

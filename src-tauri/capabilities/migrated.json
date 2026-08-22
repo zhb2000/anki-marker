@@ -35,6 +35,7 @@
     "os:allow-locale",
     "os:allow-hostname",
     "clipboard-manager:allow-read-text",
+    "log:default",
     "core:app:allow-app-show",
     "core:app:allow-app-hide",
     "dialog:default",

@@ -136,8 +136,18 @@ curl -s -X POST http://127.0.0.1:4445/session/$SID/execute/async \
 3. **点击/导航后给渲染留时间**。路由跳转有过渡动画，`sleep 1~2` 后再截图。
 4. **截图前可先确认 DOM 状态**（用 `execute/sync` 读 `location.pathname`、元素文本等），
    截图与 DOM 互相印证，避免被旧帧误导。
-5. JavaScript 控制台消息/报错的捕获方法：**待补充**（W3C 协议无原生 console 端点，
-   可通过 `execute_script` 注入 `console`/`window.onerror` 钩子变通，细节另行讨论）。
+5. **JavaScript 控制台消息/报错直接读日志，不需要 devtools**。
+   应用已通过 `tauri-plugin-log` 把前端的 `console.log/warn/error/...`、未捕获异常
+   （`window.onerror`）、未处理的 Promise 拒绝（`unhandledrejection`）和 Vue 组件错误
+   （`app.config.errorHandler`）全部转发到 Rust 侧统一日志（见 `src/logics/logging.ts`），
+   转发记录带 `[webview]` 标签。查看方式：
+   - dev 终端输出：`grep -a '\[webview\]' /tmp/anki-marker-tauri-dev.log | tail -50`
+     （即启动时 nohup 重定向的那个文件）
+   - 日志文件（release 同样写入）：`~/Library/Logs/com.zhb2000.anki-marker/Anki 划词助手.log`
+   - 注意 WebKit 的 `error.stack` 不含错误消息文本，`logging.ts` 已做拼接处理。
+   - 相同消息在 1 秒窗口内会被去重，刷屏停止后输出一条
+     `[repeated N times, duplicates suppressed] ...` 汇总（类似 devtools 的重复计数）；
+     Vue 组件错误会附带 `[component] App > ... > 出错组件` 组件链路行。
 
 ## 端到端流程示例
 

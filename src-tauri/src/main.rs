@@ -9,7 +9,23 @@ use tauri::Manager;
 mod application;
 
 fn main() {
+    // 统一日志：JS 侧日志经 IPC 转发到 Rust 后，与 Rust 日志走同一套 target。
+    // debug：stdout + 日志文件；release：仅日志文件且只记 Warn 以上。
+    #[cfg(debug_assertions)]
+    let log_builder = tauri_plugin_log::Builder::new().targets([
+        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None }),
+    ]);
+    #[cfg(not(debug_assertions))]
+    let log_builder = tauri_plugin_log::Builder::new()
+        .clear_targets()
+        .targets([tauri_plugin_log::Target::new(
+            tauri_plugin_log::TargetKind::LogDir { file_name: None },
+        )])
+        .level(log::LevelFilter::Warn);
+
     let builder = tauri::Builder::default()
+        .plugin(log_builder.build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
