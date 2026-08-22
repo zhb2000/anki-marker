@@ -47,6 +47,17 @@ fn main() {
             app.manage(application::config::IsWatching::new());
             app.manage(application::dict::DictPath::new(portable.0, app.path())?);
             app.manage(Mutex::new(None::<Connection>));
+
+            // 防启动闪屏的兜底：窗口初始隐藏（tauri.conf.json 中 visible: false），
+            // 正常由前端应用主题后调用 show() 显示；
+            // 若前端异常迟迟未显示窗口，3 秒后强制显示，避免应用“隐形”。
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.show();
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

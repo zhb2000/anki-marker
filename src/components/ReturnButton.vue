@@ -18,19 +18,27 @@ import { HoverWrapper } from '../fluent-controls/HoverWrapper';
     padding: 0;
     border: none;
     border-radius: 50%;
-    background-image: url('../assets/arrow-back.svg');
-    /* background-size: cover; */
-    background-repeat: no-repeat;
-    background-position: center center;
-    background-size: 80% 80%;
     background-color: var(--window-background);
 }
 
+/* 使用 mask-image 显示图标，颜色由 background-color 提供，暗色模式下跟随文本颜色 */
+.return-button::after {
+    content: '';
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-color: var(--control-text-color);
+    mask-image: url('../assets/arrow-back.svg');
+    mask-repeat: no-repeat;
+    mask-position: center center;
+    mask-size: 80% 80%;
+}
+
 .return-button[fluent-hovered] {
-    filter: brightness(90%);
+    filter: var(--icon-button-filter-hover);
 }
 
 .return-button:active {
-    filter: brightness(80%);
+    filter: var(--icon-button-filter-active);
 }
 </style>

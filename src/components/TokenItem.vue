@@ -57,7 +57,7 @@ function handleClick() {
 
 .token.is-word.marked {
     background-color: var(--accent);
-    color: white;
+    color: var(--control-accent-text-color);
     font-weight: bold;
 }
 

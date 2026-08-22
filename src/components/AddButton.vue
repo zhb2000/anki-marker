@@ -39,7 +39,7 @@ const statusToTitle = {
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background-color: #D4D7D7;
+    background-color: var(--icon-button-background);
     position: relative;
 }
 
@@ -91,7 +91,6 @@ const statusToTitle = {
 
 .add-btn.processing {
     cursor: not-allowed;
-    --processing-background-color: #e4e4e4;
-    background-color: var(--processing-background-color);
+    background-color: var(--processing-background);
 }
 </style>

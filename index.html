@@ -5,6 +5,31 @@
     <link rel="icon" type="image/svg+xml" href="/tauri.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Anki 划词助手</title>
+    <script>
+      // 首帧防白闪：在模块加载前同步设置暗色 class，之后由 src/logics/theme.ts 接管
+      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.documentElement.classList.add('dark');
+      }
+    </script>
+    <style>
+      /*
+       * 首帧关键 CSS：webview 默认白底会造成暗色模式下启动闪白屏，
+       * 必须在外部 CSS 加载前就提供背景色。
+       * 取值与 src/fluent-controls/fluent-styles.css 的 --window-background 保持一致，
+       * 修改那边的窗口底色时这里也要同步。
+       */
+      :root {
+        --window-background: #f3f3f3;
+      }
+      html.dark {
+        --window-background: #202020;
+      }
+      html,
+      body,
+      #app {
+        background-color: var(--window-background);
+      }
+    </style>
   </head>
 
   <body>

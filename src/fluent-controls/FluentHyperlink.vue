@@ -24,11 +24,11 @@ import { HoverWrapper } from './HoverWrapper';
 
 .fluent-hyperlink[fluent-hovered] {
     color: var(--control-accent-background-hover);
-    background-color: rgb(0, 0, 0, 0.1);
+    background-color: var(--hyperlink-hover-background);
 }
 
 .fluent-hyperlink:active {
     color: var(--accent);
-    background-color: rgb(0, 0, 0, 0.1);
+    background-color: var(--hyperlink-hover-background);
 }
 </style>

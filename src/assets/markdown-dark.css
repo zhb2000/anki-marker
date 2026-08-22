@@ -1,0 +1,68 @@
+/*
+ * github-markdown-css 暗色适配
+ *
+ * github-markdown-css（github-markdown.css，auto 版）的所有颜色均由
+ * `.markdown-body` 上的 CSS 变量驱动（规则内全部使用 var(--xxx)，无硬编码颜色），
+ * 但变量本身只在 `@media (prefers-color-scheme: dark)` 中定义，
+ * 无法配合本项目基于 <html class="dark"> 的暗色方案。
+ *
+ * 本文件将官方暗色变量定义（与 @media (prefers-color-scheme: dark) 中完全一致）
+ * 改写到 `html.dark .markdown-body` 作用域下，利用更高的选择器优先级覆盖浅色变量。
+ * 链接色、代码块背景、表格边框等全部由这些变量派生，无需逐条改写规则。
+ *
+ * 变量取值来源：node_modules/github-markdown-css/github-markdown-dark.css
+ * （与 github-markdown.css 的 dark 媒体查询一致）
+ */
+html.dark .markdown-body {
+    color-scheme: dark;
+    --focus-outlineColor: #1f6feb;
+    --fgColor-default: #f0f6fc;
+    --fgColor-muted: #9198a1;
+    --fgColor-accent: #4493f8;
+    --fgColor-success: #3fb950;
+    --fgColor-attention: #d29922;
+    --fgColor-danger: #f85149;
+    --fgColor-done: #ab7df8;
+    --bgColor-default: #0d1117;
+    --bgColor-muted: #151b23;
+    --bgColor-neutral-muted: #656c7633;
+    --bgColor-attention-muted: #bb800926;
+    --borderColor-default: #3d444d;
+    --borderColor-muted: #3d444db3;
+    --borderColor-neutral-muted: #3d444db3;
+    --borderColor-accent-emphasis: #1f6feb;
+    --borderColor-success-emphasis: #238636;
+    --borderColor-attention-emphasis: #9e6a03;
+    --borderColor-danger-emphasis: #da3633;
+    --borderColor-done-emphasis: #8957e5;
+    --color-prettylights-syntax-comment: #9198a1;
+    --color-prettylights-syntax-constant: #79c0ff;
+    --color-prettylights-syntax-constant-other-reference-link: #a5d6ff;
+    --color-prettylights-syntax-entity: #d2a8ff;
+    --color-prettylights-syntax-storage-modifier-import: #f0f6fc;
+    --color-prettylights-syntax-entity-tag: #7ee787;
+    --color-prettylights-syntax-keyword: #ff7b72;
+    --color-prettylights-syntax-string: #a5d6ff;
+    --color-prettylights-syntax-variable: #ffa657;
+    --color-prettylights-syntax-brackethighlighter-unmatched: #f85149;
+    --color-prettylights-syntax-brackethighlighter-angle: #9198a1;
+    --color-prettylights-syntax-invalid-illegal-text: #f0f6fc;
+    --color-prettylights-syntax-invalid-illegal-bg: #8e1519;
+    --color-prettylights-syntax-carriage-return-text: #f0f6fc;
+    --color-prettylights-syntax-carriage-return-bg: #b62324;
+    --color-prettylights-syntax-string-regexp: #7ee787;
+    --color-prettylights-syntax-markup-list: #f2cc60;
+    --color-prettylights-syntax-markup-heading: #1f6feb;
+    --color-prettylights-syntax-markup-italic: #f0f6fc;
+    --color-prettylights-syntax-markup-bold: #f0f6fc;
+    --color-prettylights-syntax-markup-deleted-text: #ffdcd7;
+    --color-prettylights-syntax-markup-deleted-bg: #67060c;
+    --color-prettylights-syntax-markup-inserted-text: #aff5b4;
+    --color-prettylights-syntax-markup-inserted-bg: #033a16;
+    --color-prettylights-syntax-markup-changed-text: #ffdfb6;
+    --color-prettylights-syntax-markup-changed-bg: #5a1e02;
+    --color-prettylights-syntax-markup-ignored-text: #f0f6fc;
+    --color-prettylights-syntax-markup-ignored-bg: #1158c7;
+    --color-prettylights-syntax-meta-diff-range: #d2a8ff;
+    --color-prettylights-syntax-sublimelinter-gutter-mark: #3d444d;
+}

@@ -144,7 +144,7 @@ function handleAnimationEnd() {
     padding: 0;
     border: none;
     border-radius: var(--border-radius);
-    background-color: #D4D7D7;
+    background-color: var(--icon-button-background);
     /* 使用 mask-image 后，用 background 设置图标的颜色 */
     mask-image: url('../assets/edit.svg');
 }

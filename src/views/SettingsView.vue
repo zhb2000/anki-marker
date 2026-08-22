@@ -5,6 +5,7 @@ import * as api from '../tauri-api';
 import { ElMessage, ElPopconfirm, ElDialog } from 'element-plus';
 import MarkdownIt from 'markdown-it';
 import 'github-markdown-css';
+import '../assets/markdown-dark.css';
 
 import * as globals from '../logics/globals';
 import * as cfg from '../logics/config';

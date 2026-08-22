@@ -36,7 +36,8 @@
         "resizable": true,
         "title": "Anki 划词助手",
         "width": 800,
-        "height": 500
+        "height": 500,
+        "visible": false
       }
     ],
     "security": {

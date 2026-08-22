@@ -65,21 +65,29 @@ audio.addEventListener('play', () => {
     margin-right: 8px;
     margin-left: 2px;
     padding: 0;
-    background-image: url('../assets/play-audio.svg');
-    /* background-size: cover; */
-    background-repeat: no-repeat;
-    background-position: center center;
     background-color: var(--window-background);
-    background-size: 160% 160%;
     border: none;
     border-radius: 2px;
 }
 
+/* 使用 mask-image 显示图标，颜色由 background-color 提供，暗色模式下跟随文本颜色 */
+.play-audio-button::after {
+    content: '';
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-color: var(--control-text-color);
+    mask-image: url('../assets/play-audio.svg');
+    mask-repeat: no-repeat;
+    mask-position: center center;
+    mask-size: 160% 160%;
+}
+
 .play-audio-button[fluent-hovered] {
-    filter: brightness(90%);
+    filter: var(--icon-button-filter-hover);
 }
 
 .play-audio-button:active {
-    filter: brightness(80%);
+    filter: var(--icon-button-filter-active);
 }
 </style>

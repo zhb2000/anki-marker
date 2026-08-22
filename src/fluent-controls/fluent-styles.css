@@ -37,4 +37,62 @@
     --scrollbar-width: 15px;
     --scrollbar-thumb-background: #8a8a8a;
     --scrollbar-thumb-background-hover: #636363;
+    /* page transition */
+    --page-transition-shadow: -16px 0 16px 0px rgba(0, 0, 0, 0.1);
+    /* icon button */
+    --icon-button-background: #D4D7D7;
+    --processing-background: #e4e4e4;
+    --hyperlink-hover-background: rgba(0, 0, 0, 0.1);
+    --icon-button-filter-hover: brightness(90%);
+    --icon-button-filter-active: brightness(80%);
+}
+
+/* Dark theme overrides, based on WinUI 3 / Windows 11 Fluent Design dark color tokens.
+   Values reference the dark dictionary of WinUI's Common_themeresources_any.xaml
+   (e.g. ControlFillColorDefault = #0FFFFFFF, TextFillColorPrimary = #FFFFFF,
+   SolidBackgroundFillColorBase = #202020). */
+html.dark {
+    color-scheme: dark;
+    /* accent: Windows 11 base accent #0078D4; keeps white accent text at 4.5:1
+       and stays visible (3.6:1) on the dark window background */
+    --accent: #0078d4;
+    --control-background: #ffffff0f;
+    --control-background-hover: #ffffff15;
+    --control-background-active: #ffffff08;
+    --control-background-disabled: #ffffff0b;
+    --control-text-color: #ffffff;
+    --control-text-color-active: #ffffffc5;
+    --control-text-color-disabled: #ffffff5d;
+    --control-accent-background-hover: #1a86d8;
+    --control-accent-background-active: #3393dd;
+    --control-accent-background-disabled: #ffffff28;
+    --control-accent-text-color: #ffffff;
+    --control-accent-text-color-active: #ffffffb3;
+    --control-accent-text-color-disabled: #ffffff87;
+    --border-color: #ffffff18;
+    --border-bottom-color: #ffffff12;
+    --border-accent-color: #ffffff14;
+    --border-accent-bottom-color: #00000023;
+    /* window */
+    --window-background: #202020;
+    /* text input */
+    --input-text-background-focus: #1e1e1eb3;
+    --placeholder-color: #ffffffc5;
+    --placeholder-color-focus: #ffffff87;
+    /* radio button */
+    --radio-border-color: #ffffff8b;
+    --radio-background: #ffffff0f;
+    --radio-background-hover: #ffffff15;
+    --radio-background-active: #ffffff08;
+    /* scrollbar */
+    --scrollbar-thumb-background: #ffffff54;
+    --scrollbar-thumb-background-hover: #ffffff73;
+    /* page transition */
+    --page-transition-shadow: -16px 0 16px 0px rgba(0, 0, 0, 0.5);
+    /* icon button */
+    --icon-button-background: #ffffff14;
+    --processing-background: #ffffff14;
+    --hyperlink-hover-background: #ffffff14;
+    --icon-button-filter-hover: brightness(140%);
+    --icon-button-filter-active: brightness(80%);
 }

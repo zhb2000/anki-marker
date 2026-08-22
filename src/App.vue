@@ -34,18 +34,18 @@ watch(() => currentRoute.path, (newPath) => {
     transition: all 0.3s ease-out;
     will-change: transform;
     position: absolute !important;
-    background-color: white;
+    background-color: var(--window-background);
     left: 0;
     right: 0;
     top: 0;
     bottom: 0;
-    box-shadow: -16px 0 16px 0px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--page-transition-shadow);
 }
 
 .slide-left-enter-from {
     z-index: 100;
     transform: translateX(100%);
-    box-shadow: -16px 0 16px 0px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--page-transition-shadow);
 }
 
 .slide-left-leave-to {
@@ -61,7 +61,7 @@ watch(() => currentRoute.path, (newPath) => {
 }
 
 .slide-right-leave-from {
-    box-shadow: -16px 0 16px 0px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--page-transition-shadow);
 }
 
 .slide-right-leave-to {
