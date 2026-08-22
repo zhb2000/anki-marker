@@ -336,6 +336,8 @@ onActivated(async () => {
 .title-bar {
     top: 0;
     position: sticky;
+    /* 提升层级，避免内容区中由 mask-image 等属性创建的层叠上下文（如 ResetButton 图标）穿透到标题栏之上 */
+    z-index: 1;
     display: flex;
     align-items: center;
     padding: 32px 20px;
