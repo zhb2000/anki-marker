@@ -25,11 +25,16 @@ tauri-plugin-dialog = "2.2"
 tauri-plugin-os = "2.2"
 tauri-plugin-clipboard-manager = "2.2"
 sanitise-file-name = "1.0"
+# WebDriver automation server, for debugging/testing only. Enabled via the `webdriver` feature.
+tauri-plugin-webdriver = { version = "0.2", optional = true }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
 # DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]
+# Start a W3C WebDriver server at http://127.0.0.1:4445 for automated debugging/testing.
+# NEVER enable this for release builds (`npm run tauri dev -- --features webdriver`).
+webdriver = ["dep:tauri-plugin-webdriver"]
 
 [lints.clippy]
 needless_return = "allow"

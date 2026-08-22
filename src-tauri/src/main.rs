@@ -9,11 +9,18 @@ use tauri::Manager;
 mod application;
 
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_http::init());
+
+    // W3C WebDriver server at http://127.0.0.1:4445, for automated debugging/testing only.
+    // Enabled via `--features webdriver`; NEVER enable for release builds.
+    #[cfg(feature = "webdriver")]
+    let builder = builder.plugin(tauri_plugin_webdriver::init());
+
+    builder
         .setup(|app| {
             let portable = application::config::Portable::new()?;
             app.manage(portable);
