@@ -69,7 +69,8 @@ const checkingAppUpdate = ref(false);
 async function handleCheckUpdateClick() {
     try {
         checkingAppUpdate.value = true;
-        await globals.fetchAndSetLatestAppInfo();
+        // 手动检查：force = true 绕过时间间隔检查，但仍使用 ETag 条件请求
+        await globals.fetchAndSetLatestAppInfo(true);
     } catch (error) {
         console.error(error);
         await api.dialog.message(String(error), { title: '检查更新失败', kind: 'error' });
