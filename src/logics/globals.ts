@@ -10,36 +10,7 @@ import { AnkiService } from './anki';
 import * as utils from './utils';
 import { typeAssertion } from './typing';
 import * as preference from './preference';
-
-/**
- * 禁用应用启动时的应用版本检查
- * （GitHub Release API 有请求频率限制，开发模式下不要频繁请求）
- */
-export let DEBUG_DISABLE_ONSTART_APP_CHECK: boolean;
-/** 模拟当前应用版本过低 */
-export let DEBUG_CURRENT_LOW_APP_VERSION: boolean;
-/**
- * 不实际请求 GitHub Release API
- * （GitHub Release API 有请求频率限制，开发模式下不要频繁请求）
- */
-export let DEBUG_NOT_REAL_APP_CHECK: boolean;
-/** 模拟当前模板版本过低 */
-export let DEBUG_CURRENT_LOW_TEMPLATE_VERSION: boolean;
-
-async function initDebugFlags() {
-    const IN_DEV_MODE = !await utils.rustInRelease();
-    if (IN_DEV_MODE) {
-        DEBUG_DISABLE_ONSTART_APP_CHECK = true;
-        // DEBUG_CURRENT_LOW_APP_VERSION = true;
-        // DEBUG_NOT_REAL_APP_CHECK = true;
-        // DEBUG_CURRENT_LOW_TEMPLATE_VERSION = true;
-    } else {
-        DEBUG_DISABLE_ONSTART_APP_CHECK = false;
-        DEBUG_CURRENT_LOW_APP_VERSION = false;
-        DEBUG_NOT_REAL_APP_CHECK = false;
-        DEBUG_CURRENT_LOW_TEMPLATE_VERSION = false;
-    }
-}
+import * as debug from './debug';
 
 // #region Config
 let config: Config;
@@ -81,7 +52,7 @@ export async function getAnkiService(): Promise<AnkiService> {
 // #endregion
 
 // #region app version
-interface LatestAppInfo {
+export interface LatestAppInfo {
     version: string;
     tagName: string;
     htmlURL: string;
@@ -187,10 +158,9 @@ export async function fetchAndSetLatestAppInfo(force = false) {
         }
     }
 
-    if (DEBUG_NOT_REAL_APP_CHECK) {
+    if (debug.appUpdateScenario !== 'real') {
         // mock 分支：不读写持久化缓存，避免调试数据污染真实缓存
-        const { info } = await getLatestAppInfoFromGitHubRelease();
-        latestAppInfo.value = info;
+        latestAppInfo.value = await debug.mockLatestAppInfo();
         lastFetchTimestamp = Date.now();
         return;
     }
@@ -229,20 +199,6 @@ interface GitHubReleaseResponse {
 }
 
 async function getLatestAppInfoFromGitHubRelease(etag?: string): Promise<GitHubReleaseResponse> {
-    if (DEBUG_NOT_REAL_APP_CHECK) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return {
-            info: {
-                version: '0.0.1',
-                tagName: 'v0.0.1',
-                htmlURL: 'https://github.com/zhb2000/anki-marker/releases/tag/v0.0.1',
-                name: 'Anki Marker v0.0.1',
-                body: '## [0.0.1] - 2024-03-17\r\n第一个版本。\n\n开发测试显示效果用，' +
-                    '将 `src/logics/globals.ts` 中的 `DEBUG_APP_UPDATE_NOT_FETCH` 设置为 `false` 后可正常获取最新版本。'
-            },
-            etag: null
-        };
-    }
     const GITHUB_RELEASE_API = 'https://api.github.com/repos/zhb2000/anki-marker/releases/latest';
     const headers: Record<string, string> = {
         'Accept': 'application/vnd.github.v3+json', // 推荐明确声明 GitHub API 版本（GitHub API v3）
@@ -293,10 +249,6 @@ async function initAppVersion() {
         return;
     }
     appVersion = await api.app.getVersion();
-    if (DEBUG_CURRENT_LOW_APP_VERSION) {
-        appVersion = '0.0.0';
-    }
-
 }
 
 export async function getAppVersion(): Promise<string> {
@@ -332,8 +284,16 @@ export const templateUpdateAvailable = computed(() => {
 
 /** 获取 Anki 中的笔记模板版本，出错时不抛出异常，而是将异常信息存入 templateVersion */
 export async function fetchAndSetTemplateVersion(modelName: string) {
-    if (DEBUG_CURRENT_LOW_TEMPLATE_VERSION) {
+    if (debug.templateVersionScenario === 'low-version') {
+        // mock：模拟 Anki 中的笔记模板版本过低
+        await debug.mockDelay();
         templateVersion.value = '0.0.0';
+        return;
+    }
+    if (debug.templateVersionScenario === 'request-error') {
+        // mock：模拟获取笔记模板版本失败
+        await debug.mockDelay();
+        templateVersion.value = new Error("mock request error (debug template version scenario: 'request-error')");
         return;
     }
     try {
@@ -428,8 +388,6 @@ export async function initAtAppStart() {
     if (initializedAtAppStart) {
         return;
     }
-    // 初始化调试标志
-    await initDebugFlags();
     // 禁用 WebView 右键菜单和快捷键
     if (await utils.rustInRelease()) {
         utils.disableWebviewContextMenu();
@@ -467,9 +425,11 @@ export async function initAtAppStart() {
         { immediate: true }
     );
     // 检查应用更新，在初始化代码中不等待更新检查的结果，避免阻塞应用启动。
+    // dev 模式且真实场景（'real'）下禁用启动检查，避免频繁请求 GitHub API；
+    // mock 场景不打真实 API，正常执行启动检查，以便调试红点等启动时 UI。
     // 距上次成功检查未超过 AUTO_CHECK_MIN_INTERVAL 时会直接使用持久化缓存，不发请求
     void (async () => {
-        if (DEBUG_DISABLE_ONSTART_APP_CHECK) {
+        if (!debug.startupAppUpdateCheckEnabled()) {
             return;
         }
         try {
