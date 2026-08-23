@@ -71,9 +71,14 @@ pub fn read_config(
 pub fn commit_config(
     modified: PartialConfig,
     config_path: State<ConfigPath>,
+    app: AppHandle,
 ) -> Result<(), String> {
     let config_path: &Path = config_path.0.as_ref();
-    return logics::config::commit_config(config_path, modified);
+    logics::config::commit_config(config_path, modified)?;
+    // 配置保存后立即更新全局快捷键注册，使设置页获得即时反馈；
+    // 配置文件监视器随后触发的重注册是幂等的兜底
+    super::shortcut::update_from_config(&app);
+    return Ok(());
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -128,7 +133,11 @@ pub fn start_config_watcher(
         .get_webview_window("main")
         .ok_or("failed to get main window")?;
     let main_window = window.clone();
+    let shortcut_app = app.clone();
     let on_change = move || {
+        // 配置文件可能被外部编辑（包括 global-shortcut 项），静默重新注册全局快捷键：
+        // 不通知前端——设置页保存配置后 watcher 也会触发，通知会导致重复的注册结果提示
+        super::shortcut::update_from_config_silently(&shortcut_app);
         if main_window.emit("config-changed", ()).is_err() {
             println!("failed to emit config-changed event");
         }

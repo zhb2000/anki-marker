@@ -30,6 +30,14 @@ sanitise-file-name = "1.0"
 # WebDriver automation server, for debugging/testing only. Enabled via the `webdriver` feature.
 tauri-plugin-webdriver = { version = "0.2", optional = true }
 
+# 划词录入句子的全局快捷键，目前仅支持 macOS
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-plugin-global-shortcut = "2.3"
+accessibility-ng = "0.1"
+accessibility-sys-ng = "0.1"
+core-foundation = "0.9"
+macos-accessibility-client = "0.0.2"
+
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
 # DO NOT REMOVE!!

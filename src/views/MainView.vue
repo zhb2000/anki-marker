@@ -215,6 +215,47 @@ async function handleEditTextAreaKeydown(event: KeyboardEvent) {
 }
 // #endregion
 
+// #region 全局快捷键划词录入
+/** 录入捕获的句子：退出编辑模式并替换当前句子，分词与搜索管线随之自动触发 */
+async function applyCapturedSentence(text: string) {
+    const trimmed = text.trim();
+    if (trimmed.length === 0) {
+        return;
+    }
+    if (showEdit.value) {
+        await changeEditStatus();
+    }
+    sentence.value = trimmed;
+}
+
+/** 监听划词句子事件，并取走可能在主窗口重建期间暂存的句子 */
+async function initSentenceCapture() {
+    // 主窗口被关闭后按快捷键会重建窗口，前端就绪之前 emit 的事件会丢失，
+    // 此时通过 take_pending_sentence 取回 Rust 侧暂存的句子
+    try {
+        await api.event.listen<string>('sentence-captured', event => {
+            void applyCapturedSentence(event.payload);
+        });
+        const pending = await utils.invoke<string | null>('take_pending_sentence');
+        if (pending != null) {
+            await applyCapturedSentence(pending);
+        }
+    } catch (error) {
+        console.error(error);
+    }
+    try {
+        await api.event.listen('sentence-capture-failed', () => {
+            void api.dialog.message(
+                '获取选中文本失败。\n\n请在「系统设置 → 隐私与安全性 → 辅助功能」中允许本应用，然后重试。',
+                { title: '划词录入失败', kind: 'error' }
+            );
+        });
+    } catch (error) {
+        console.error(error);
+    }
+}
+// #endregion
+
 // #region Anki
 /** 若牌组或笔记模板不存在，则创建之 */
 async function prepareDeckAndModel(deckName: string, modelName: string) {
@@ -407,6 +448,8 @@ onBeforeMount(async () => {
     if (!await utils.rustInRelease()) {
         sentence.value = 'The quick brown fox jumps over the lazy dog.'; // test sentence in dev mode
     }
+    // 放在 dev 测试句子之后，捕获的句子可覆盖测试句子
+    await initSentenceCapture();
 });
 </script>
 

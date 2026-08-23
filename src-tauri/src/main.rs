@@ -31,6 +31,18 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init());
 
+    // 全局快捷键（划词录入句子），目前仅支持 macOS
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(|app, _shortcut, event| {
+                if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                    application::shortcut::on_shortcut_pressed(app.clone());
+                }
+            })
+            .build(),
+    );
+
     // W3C WebDriver server at http://127.0.0.1:4445, for automated debugging/testing only.
     // Enabled via `--features webdriver`; NEVER enable for release builds.
     #[cfg(feature = "webdriver")]
@@ -47,6 +59,11 @@ fn main() {
             app.manage(application::config::IsWatching::new());
             app.manage(application::dict::DictPath::new(portable.0, app.path())?);
             app.manage(Mutex::new(None::<Connection>));
+            app.manage(application::shortcut::PendingSentence::new());
+
+            // 注册配置中设置的划词全局快捷键（仅 macOS）
+            #[cfg(target_os = "macos")]
+            application::shortcut::update_from_config(app.handle());
 
             // 防启动闪屏的兜底：窗口初始隐藏（tauri.conf.json 中 visible: false），
             // 正常由前端应用主题后调用 show() 显示；
@@ -76,6 +93,9 @@ fn main() {
             application::dict::search_oxford,
             application::dict::get_word_base,
             application::dict::sanitize_filename,
+            application::shortcut::take_pending_sentence,
+            application::shortcut::is_accessibility_trusted,
+            application::shortcut::request_accessibility_trust,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -10,6 +10,7 @@ pub struct Config {
     auto_launch_anki: bool,
     launch_anki_on_app_start: bool,
     anki_executable_path: String,
+    global_shortcut: String,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -22,6 +23,14 @@ pub struct PartialConfig {
     auto_launch_anki: Option<bool>,
     launch_anki_on_app_start: Option<bool>,
     anki_executable_path: Option<String>,
+    global_shortcut: Option<String>,
+}
+
+impl Config {
+    /// 划词录入句子的全局快捷键，空字符串表示未设置
+    pub fn global_shortcut(&self) -> &str {
+        return &self.global_shortcut;
+    }
 }
 
 /// 将配置模板复制到配置文件路径
@@ -86,6 +95,11 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        let global_shortcut = doc
+            .get("global-shortcut")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         return Ok(Config {
             anki_connect_url: anki_connect_url.to_string(),
             deck_name: deck_name.to_string(),
@@ -93,6 +107,7 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             auto_launch_anki,
             launch_anki_on_app_start,
             anki_executable_path,
+            global_shortcut,
         });
     }
     return inner(config_path.as_ref());
@@ -125,6 +140,9 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
         }
         if let Some(anki_executable_path) = modified.anki_executable_path {
             doc["anki-executable-path"] = toml_edit::value(anki_executable_path);
+        }
+        if let Some(global_shortcut) = modified.global_shortcut {
+            doc["global-shortcut"] = toml_edit::value(global_shortcut);
         }
         std::fs::write(config_path, doc.to_string()).map_err(|e| {
             format!(

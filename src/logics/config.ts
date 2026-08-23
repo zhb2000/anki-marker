@@ -9,9 +9,10 @@ interface ConfigModel {
     autoLaunchAnki: boolean;
     launchAnkiOnAppStart: boolean;
     ankiExecutablePath: string;
+    globalShortcut: string;
 }
 
-const CONFIG_KEYS = ['ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath'] as const;
+const CONFIG_KEYS = ['ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut'] as const;
 
 /** 配置项的默认值 */
 export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
@@ -21,6 +22,7 @@ export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     autoLaunchAnki: true,
     launchAnkiOnAppStart: false,
     ankiExecutablePath: '',
+    globalShortcut: '',
 };
 
 export class Config implements ConfigModel {
@@ -40,6 +42,8 @@ export class Config implements ConfigModel {
     public launchAnkiOnAppStart!: boolean;
     /** Anki 可执行文件的路径，留空表示自动检测 */
     public ankiExecutablePath!: string;
+    /** 划词录入句子的全局快捷键，空字符串表示未设置 */
+    public globalShortcut!: string;
     /** 存储配置项的对象 */
     private config: ConfigModel;
     /** 被修改过的配置项 */

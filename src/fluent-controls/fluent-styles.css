@@ -45,6 +45,10 @@
     --hyperlink-hover-background: rgba(0, 0, 0, 0.1);
     --icon-button-filter-hover: brightness(90%);
     --icon-button-filter-active: brightness(80%);
+    /* status text: WinUI SystemFillColorSuccess light token;
+       warning uses a dark amber for readability on light backgrounds */
+    --success-text-color: #0f7b0f;
+    --warning-text-color: #9a6700;
 }
 
 /* Dark theme overrides, based on WinUI 3 / Windows 11 Fluent Design dark color tokens.
@@ -95,4 +99,8 @@ html.dark {
     --hyperlink-hover-background: #ffffff14;
     --icon-button-filter-hover: brightness(140%);
     --icon-button-filter-active: brightness(80%);
+    /* status text: WinUI SystemFillColorSuccess dark token;
+       warning uses a bright amber for readability on dark backgrounds */
+    --success-text-color: #6ccb5f;
+    --warning-text-color: #d4a72c;
 }

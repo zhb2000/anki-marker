@@ -11,7 +11,9 @@ import * as globals from '../logics/globals';
 import * as cfg from '../logics/config';
 import * as anki from '../logics/anki';
 import { FluentInput, FluentButton, FluentHyperlink } from '../fluent-controls';
-import { ReturnButton, ResetButton } from '../components';
+import { ReturnButton, ResetButton, ShortcutRecorder } from '../components';
+import { formatShortcut } from '../logics/shortcut';
+import { invoke } from '../logics/utils';
 import OpenFilledSvg from '../assets/OpenFilled.svg';
 import GitHubSvg from '../assets/github.svg';
 
@@ -139,6 +141,104 @@ async function handleShowInExplorerClick() {
 }
 // #endregion
 
+// #region 全局快捷键
+/** 是否为 macOS（全局快捷键目前仅支持 macOS） */
+const isMacOS = computed(() => api.os.type() === 'macos');
+
+/**
+ * 快捷键设置的响应式镜像。
+ * config 对象本身不是响应式的，直接依赖其属性无法驱动界面更新，
+ * 故在页面初始化与快捷键变化时同步此 ref。
+ */
+const globalShortcut = ref('');
+
+/** 辅助功能权限状态：null 表示尚未检查 */
+const accessibilityTrusted = ref<boolean | null>(null);
+
+/** 辅助功能权限状态显示文本 */
+const accessibilityStatusText = computed(() => {
+    if (accessibilityTrusted.value === true) {
+        return '✓ 已授权';
+    } else if (accessibilityTrusted.value === false) {
+        return '⚠️ 未授权';
+    }
+    return '检查中…';
+});
+
+/** 辅助功能权限状态文本的颜色（跟随浅色/深色主题的语义色变量） */
+const accessibilityStatusClass = computed(() => {
+    if (accessibilityTrusted.value === true) {
+        return 'status-success';
+    } else if (accessibilityTrusted.value === false) {
+        return 'status-warning';
+    }
+    return '';
+});
+
+/** 检查辅助功能权限状态 */
+async function checkAccessibilityTrust() {
+    if (!isMacOS.value) {
+        return;
+    }
+    try {
+        accessibilityTrusted.value = await invoke<boolean>('is_accessibility_trusted');
+    } catch (error) {
+        console.error(error);
+    }
+}
+
+/** 点击申请权限按钮：弹出系统授权弹窗；若弹窗曾被拒绝则直接打开系统设置的辅助功能面板 */
+async function handleRequestAccessibilityClick() {
+    try {
+        await invoke('request_accessibility_trust');
+    } catch (error) {
+        console.error(error);
+        await api.dialog.message(String(error), { title: '申请辅助功能权限失败', kind: 'error' });
+        return;
+    }
+    // 授权完成后切回本应用时，由窗口焦点监听自动刷新状态
+}
+
+/** 快捷键变更（录制/清除）后保存配置；快捷键从无到有时权限状态行首次出现，顺带检查一次权限 */
+async function handleShortcutChange() {
+    // v-model 的赋值先于本 handler 执行，此处 config.globalShortcut 已是最新值
+    globalShortcut.value = config.globalShortcut;
+    await commitConfig();
+    void checkAccessibilityTrust();
+}
+
+/** 重置快捷键设置后同步响应式镜像 */
+async function handleShortcutResetClick() {
+    await handleResetClick('globalShortcut');
+    globalShortcut.value = config.globalShortcut;
+}
+
+/** 快捷键注册结果（Rust 侧在注册/注销后 emit） */
+interface ShortcutRegistration {
+    shortcut: string;
+    success: boolean;
+    error: string | null;
+}
+
+/** 监听快捷键注册结果事件，用于向用户反馈注册成功或失败（如快捷键冲突） */
+async function listenShortcutRegistration() {
+    try {
+        await api.event.listen<ShortcutRegistration>('shortcut-registration', event => {
+            const { shortcut, success, error } = event.payload;
+            if (success) {
+                ElMessage.success(shortcut.length > 0
+                    ? `全局快捷键已注册：${formatShortcut(shortcut)}`
+                    : '已停用全局快捷键');
+            } else {
+                ElMessage.error(`全局快捷键注册失败：${error ?? '未知错误'}`);
+            }
+        });
+    } catch (error) {
+        console.error(error);
+    }
+}
+// #endregion
+
 // 由于使用了 KeepAlive 不销毁页面，所以 onMounted 只会执行一次
 onBeforeMount(async () => {
     // 为需要初始化的变量赋值
@@ -150,9 +250,24 @@ onBeforeMount(async () => {
         globals.getAppVersion(),
     ]);
     pageInitialized.value = true;
+    await listenShortcutRegistration();
+    globalShortcut.value = config.globalShortcut;
+    // 从其他应用切回本应用时（如从系统设置授权后返回）自动刷新权限状态；
+    // 页面随 KeepAlive 常驻，监听器无需注销
+    try {
+        await api.window.getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+            if (focused) {
+                void checkAccessibilityTrust();
+            }
+        });
+    } catch (error) {
+        console.error(error);
+    }
 });
 
 onActivated(async () => {
+    // 进入设置页面时检查辅助功能权限状态
+    void checkAccessibilityTrust();
     // 打开设置页面时获取/刷新一次笔记模板版本
     // 由于 vue 的生命周期钩子不会等待 async 函数执行完毕，
     // 所以即使 onActivated 在 onBeforeMount 之后执行，页面的 config 变量仍可能未初始化（undefined）
@@ -209,6 +324,28 @@ onActivated(async () => {
             </div>
             <FluentInput class="input-text" placeholder="留空则自动检测 Anki 路径" v-model="config.ankiExecutablePath"
                 @blur="handleInputBlur" />
+
+            <template v-if="isMacOS">
+                <div class="term">
+                    <span>全局快捷键（录入句子）</span>
+                    <ResetButton @click="handleShortcutResetClick" />
+                </div>
+                <ShortcutRecorder class="input-text" v-model="config.globalShortcut"
+                    @update:model-value="handleShortcutChange" />
+                <div class="term" v-if="globalShortcut.length > 0">
+                    <span style="margin-right: 8px;">辅助功能权限：<span :class="accessibilityStatusClass">{{
+                        accessibilityStatusText }}</span></span>
+                    <FluentButton v-if="accessibilityTrusted === false" class="update-button"
+                        @click="handleRequestAccessibilityClick">申请权限</FluentButton>
+                    <FluentButton class="update-button" @click="checkAccessibilityTrust">检查</FluentButton>
+                </div>
+                <div class="shortcut-note">
+                    在任意应用中选中一段文字后按下此快捷键，所选文字将录入划词面板并自动分词。
+                </div>
+                <div class="shortcut-note" v-if="accessibilityTrusted === false">
+                    辅助功能未授权，划词功能可能无法使用。请点击上方“申请权限”按钮，并按系统提示授权本应用。
+                </div>
+            </template>
 
             <div style="height: 12px;"></div>
             <h2>关于</h2>
@@ -422,6 +559,23 @@ h2 {
     opacity: 0.6;
     user-select: none;
     cursor: default;
+}
+
+.shortcut-note {
+    font-size: 14px;
+    opacity: 0.6;
+    max-width: 640px;
+    margin-bottom: 8px;
+    user-select: none;
+    cursor: default;
+}
+
+.status-success {
+    color: var(--success-text-color);
+}
+
+.status-warning {
+    color: var(--warning-text-color);
 }
 
 .open-file-button {
