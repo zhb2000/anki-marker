@@ -2,7 +2,7 @@
 import { ref, reactive, watch, nextTick, onBeforeMount, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import * as api from '../tauri-api';
-import { ElMessage } from 'element-plus';
+import { ElMessage, type MessageHandler } from 'element-plus';
 
 import * as utils from '../logics/utils';
 import * as dict from '../logics/dict';
@@ -276,6 +276,24 @@ async function changeItemAdded(index: number) {
     const pronunciationType = selectedPronunciation.value;
     if (item.status === 'not-added') { // add to Anki
         item.status = 'processing-add';
+        // 确保 AnkiConnect 可用：不可用时按配置自动启动 Anki 并等待其就绪
+        let progressMessage: MessageHandler | null = null;
+        // 关闭进度提示。通过箭头函数引用 progressMessage，
+        // 避免 TS 沿用外层将其窄化为 null 而导致 finally 中调用 close() 报类型错误
+        const closeProgressMessage = () => { progressMessage?.close(); };
+        try {
+            await globals.ensureAnkiConnect(message => {
+                closeProgressMessage();
+                progressMessage = ElMessage({ message, duration: 0, showClose: true });
+            });
+        } catch (error) {
+            item.status = 'not-added';
+            console.error(error);
+            await api.dialog.message(String(error), { title: '无法连接 Anki', kind: 'error' });
+            return;
+        } finally {
+            closeProgressMessage();
+        }
         try {
             await prepareDeckAndModel(config.deckName, config.modelName);
         } catch (error) {

@@ -9,3 +9,12 @@ deck-name = "划词助手默认牌组"
 
 # 使用的笔记模板名称
 model-name = "划词助手默认单词模板"
+
+# 添加卡片时若 Anki 未运行，是否自动启动 Anki
+auto-launch-anki = true
+
+# 应用启动时是否一并启动 Anki
+launch-anki-on-app-start = false
+
+# Anki 可执行文件路径（留空则自动探测）
+anki-executable-path = ""

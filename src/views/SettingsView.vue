@@ -2,7 +2,7 @@
 import { ref, computed, onActivated, onBeforeMount } from 'vue';
 import { useRouter } from 'vue-router';
 import * as api from '../tauri-api';
-import { ElMessage, ElPopconfirm, ElDialog } from 'element-plus';
+import { ElMessage, ElPopconfirm, ElDialog, ElSwitch } from 'element-plus';
 import MarkdownIt from 'markdown-it';
 import 'github-markdown-css';
 import '../assets/markdown-dark.css';
@@ -48,8 +48,9 @@ async function handleInputBlur() {
 }
 
 /** 点击输入框右侧的重置按钮时重置设置并保存 */
-async function handleResetClick(key: keyof typeof cfg.CONFIG_DEFAULTS) {
-    config[key] = cfg.CONFIG_DEFAULTS[key];
+async function handleResetClick<K extends keyof typeof cfg.CONFIG_DEFAULTS>(key: K) {
+    // 配置项的值类型为 string 或 boolean（见 CONFIG_DEFAULTS），断言到具体键的属性类型
+    config[key] = cfg.CONFIG_DEFAULTS[key] as cfg.Config[K];
     await commitConfig();
 }
 // #endregion
@@ -185,6 +186,28 @@ onActivated(async () => {
                 <ResetButton @click="handleResetClick('modelName')" />
             </div>
             <FluentInput class="input-text" placeholder="请输入笔记模板名称" v-model="config.modelName"
+                @blur="handleInputBlur" />
+            <div class="term">
+                <span>自动启动 Anki</span>
+                <ResetButton @click="handleResetClick('autoLaunchAnki')" />
+            </div>
+            <div class="switch-row">
+                <ElSwitch v-model="config.autoLaunchAnki" @change="commitConfig" />
+                <span class="switch-note">添加笔记时若 Anki 未运行，将自动启动 Anki 并等待其就绪</span>
+            </div>
+            <div class="term">
+                <span>应用启动时启动 Anki</span>
+                <ResetButton @click="handleResetClick('launchAnkiOnAppStart')" />
+            </div>
+            <div class="switch-row">
+                <ElSwitch v-model="config.launchAnkiOnAppStart" @change="commitConfig" />
+                <span class="switch-note">应用启动时自动启动 Anki，无需等到添加笔记</span>
+            </div>
+            <div class="term">
+                <span>Anki 可执行文件路径</span>
+                <ResetButton @click="handleResetClick('ankiExecutablePath')" />
+            </div>
+            <FluentInput class="input-text" placeholder="留空则自动检测 Anki 路径" v-model="config.ankiExecutablePath"
                 @blur="handleInputBlur" />
 
             <div style="height: 12px;"></div>
@@ -384,6 +407,21 @@ h2 {
     height: 32px;
     width: 400px;
     margin-bottom: 24px;
+}
+
+.switch-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    margin-bottom: 24px;
+}
+
+.switch-note {
+    font-size: 14px;
+    opacity: 0.6;
+    user-select: none;
+    cursor: default;
 }
 
 .open-file-button {

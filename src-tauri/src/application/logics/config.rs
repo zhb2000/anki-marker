@@ -7,6 +7,9 @@ pub struct Config {
     anki_connect_url: String,
     deck_name: String,
     model_name: String,
+    auto_launch_anki: bool,
+    launch_anki_on_app_start: bool,
+    anki_executable_path: String,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -16,6 +19,9 @@ pub struct PartialConfig {
     anki_connect_url: Option<String>,
     deck_name: Option<String>,
     model_name: Option<String>,
+    auto_launch_anki: Option<bool>,
+    launch_anki_on_app_start: Option<bool>,
+    anki_executable_path: Option<String>,
 }
 
 /// 将配置模板复制到配置文件路径
@@ -66,10 +72,27 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             .ok_or(r#"toml key "model-name" does not exist"#)?
             .as_str()
             .ok_or(r#"the value of "model-name" is not a string"#)?;
+        // 新增键必须带缺省回退：老用户的配置文件中没有这些键，绝不能因缺键而报错
+        let auto_launch_anki = doc
+            .get("auto-launch-anki")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let launch_anki_on_app_start = doc
+            .get("launch-anki-on-app-start")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let anki_executable_path = doc
+            .get("anki-executable-path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         return Ok(Config {
             anki_connect_url: anki_connect_url.to_string(),
             deck_name: deck_name.to_string(),
             model_name: model_name.to_string(),
+            auto_launch_anki,
+            launch_anki_on_app_start,
+            anki_executable_path,
         });
     }
     return inner(config_path.as_ref());
@@ -93,6 +116,15 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
         }
         if let Some(model_name) = modified.model_name {
             doc["model-name"] = toml_edit::value(model_name);
+        }
+        if let Some(auto_launch_anki) = modified.auto_launch_anki {
+            doc["auto-launch-anki"] = toml_edit::value(auto_launch_anki);
+        }
+        if let Some(launch_anki_on_app_start) = modified.launch_anki_on_app_start {
+            doc["launch-anki-on-app-start"] = toml_edit::value(launch_anki_on_app_start);
+        }
+        if let Some(anki_executable_path) = modified.anki_executable_path {
+            doc["anki-executable-path"] = toml_edit::value(anki_executable_path);
         }
         std::fs::write(config_path, doc.to_string()).map_err(|e| {
             format!(

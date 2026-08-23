@@ -12,7 +12,7 @@ export class AnkiConnectApi {
         this.url = url;
     }
 
-    public async invoke<T>(action: string, params?: Record<string, any>): Promise<T> {
+    public async invoke<T>(action: string, params?: Record<string, any>, signal?: AbortSignal): Promise<T> {
         // 使用 Tauri 的 fetch 发送 HTTP 请求，以规避跨域问题
         const response = await fetch(this.url, {
             method: 'POST',
@@ -27,6 +27,7 @@ export class AnkiConnectApi {
             },
             body: JSON.stringify({ action, params, version: 6 }),
             // mode: 'no-cors' // 添加这一行以规避跨域问题
+            signal,
         });
         if (!response.ok) {
             throw new Error(
@@ -53,6 +54,17 @@ export class AnkiConnectApi {
         }
         return data.result;
     }
+
+    // #region Miscellaneous Actions, https://foosoft.net/projects/anki-connect/#misc-actions
+    /**
+     * Gets the version of the API exposed by AnkiConnect.
+     *
+     * 该方法开销小，可用作 AnkiConnect 服务的探活请求；可选的 `signal` 用于超时控制。
+     */
+    public async version(signal?: AbortSignal): Promise<number> {
+        return await this.invoke('version', undefined, signal);
+    }
+    // #endregion
 
     // #region Deck Actions, https://foosoft.net/projects/anki-connect/#deck-actions
     /** Gets the complete list of deck names for the current user. */

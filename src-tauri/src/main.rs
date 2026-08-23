@@ -61,6 +61,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            application::anki::launch_anki,
+            application::anki::is_anki_running,
             application::config::read_config,
             application::config::commit_config,
             application::config::config_path,

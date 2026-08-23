@@ -51,6 +51,93 @@ export async function getAnkiService(): Promise<AnkiService> {
 }
 // #endregion
 
+// #region AnkiConnect 可用性保障
+/** AnkiConnect 探活请求的超时时间（毫秒） */
+const ANKI_CONNECT_PROBE_TIMEOUT_MS = 2000;
+/** 启动 Anki 后等待 AnkiConnect 就绪的总超时时间（毫秒） */
+const ANKI_LAUNCH_WAIT_TIMEOUT_MS = 60 * 1000;
+/** 启动 Anki 后轮询探活的间隔（毫秒） */
+const ANKI_LAUNCH_POLL_INTERVAL_MS = 500;
+/** ensureAnkiConnect 正在执行中的 Promise，用于防止重入（并发调用共享同一次执行） */
+let ensureAnkiConnectInFlight: Promise<void> | null = null;
+
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** 探活 AnkiConnect 服务（带超时），成功时 resolve，失败时 reject */
+async function probeAnkiConnect(): Promise<void> {
+    const service = await getAnkiService();
+    // 使用 AbortController 而非 AbortSignal.timeout，以兼容不支持后者的 WebView
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ANKI_CONNECT_PROBE_TIMEOUT_MS);
+    try {
+        await service.version(controller.signal);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function ensureAnkiConnectImpl(onProgress?: (message: string) => void): Promise<void> {
+    // 先探活，AnkiConnect 可用时直接返回
+    try {
+        await probeAnkiConnect();
+        return;
+    } catch {
+        // AnkiConnect 不可用，继续后续处理
+    }
+    // Anki 在运行但连不上，多半是未安装或未启用 AnkiConnect 插件
+    if (await utils.invoke<boolean>('is_anki_running')) {
+        throw new Error(
+            'Anki 正在运行，但无法连接 AnkiConnect。' +
+            '请确认已安装并启用 AnkiConnect 插件（安装代码 2055492159），并检查 AnkiConnect 服务地址设置。'
+        );
+    }
+    const cfg = await getConfig();
+    if (!cfg.autoLaunchAnki) {
+        throw new Error('无法连接 AnkiConnect，且未启用自动启动 Anki。请手动启动 Anki，或在设置中开启“自动启动 Anki”。');
+    }
+    // 拉起 Anki，然后串行轮询等待 AnkiConnect 就绪（上一次探活结束后再 sleep，避免请求堆积）
+    // 注意：该命令标注了 rename_all = "snake_case"（项目惯例），参数 key 须用 snake_case
+    onProgress?.('正在启动 Anki，请稍候…');
+    await utils.invoke<void>('launch_anki', { anki_executable_path: cfg.ankiExecutablePath || null });
+    const deadline = Date.now() + ANKI_LAUNCH_WAIT_TIMEOUT_MS;
+    while (true) {
+        try {
+            await probeAnkiConnect();
+            return;
+        } catch {
+            // 本次探活失败，等待后重试
+        }
+        if (Date.now() >= deadline) {
+            throw new Error(
+                '等待 AnkiConnect 就绪超时。Anki 可能仍在启动中，' +
+                '或未安装 AnkiConnect 插件（安装代码 2055492159），请检查后重试。'
+            );
+        }
+        await sleep(ANKI_LAUNCH_POLL_INTERVAL_MS);
+    }
+}
+
+/**
+ * 确保 AnkiConnect 服务可用：探活失败且 Anki 未运行时，按配置自动拉起 Anki 并等待其就绪。
+ *
+ * 并发调用会共享同一次执行（后到的调用等待同一次结果，不会重复启动 Anki），
+ * 此时只有第一次调用传入的 `onProgress` 会收到进度回调。
+ *
+ * @param onProgress 进度提示回调（如“正在启动 Anki，请稍候……”）
+ * @throws AnkiConnect 最终不可用时抛出 Error
+ */
+export async function ensureAnkiConnect(onProgress?: (message: string) => void): Promise<void> {
+    if (ensureAnkiConnectInFlight == null) {
+        ensureAnkiConnectInFlight = ensureAnkiConnectImpl(onProgress).finally(() => {
+            ensureAnkiConnectInFlight = null;
+        });
+    }
+    return ensureAnkiConnectInFlight;
+}
+// #endregion
+
 // #region app version
 export interface LatestAppInfo {
     version: string;
@@ -439,5 +526,16 @@ export async function initAtAppStart() {
             // 应用更新检查失败时仅在控制台报错，不弹窗提示，也不阻止后续操作
         }
     })();
+    // 配置开启时，在应用启动后自动启动 Anki（不等待结果，静默失败，不阻塞应用启动）
+    if (config.launchAnkiOnAppStart) {
+        void (async () => {
+            try {
+                await ensureAnkiConnect();
+            } catch (error) {
+                console.error(error);
+                // 启动时自动拉起 Anki 失败仅在控制台报错，不弹窗提示，也不阻止后续操作
+            }
+        })();
+    }
     initializedAtAppStart = true;
 }

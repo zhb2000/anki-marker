@@ -6,15 +6,21 @@ interface ConfigModel {
     ankiConnectURL: string;
     deckName: string;
     modelName: string;
+    autoLaunchAnki: boolean;
+    launchAnkiOnAppStart: boolean;
+    ankiExecutablePath: string;
 }
 
-const CONFIG_KEYS = ['ankiConnectURL', 'deckName', 'modelName'] as const;
+const CONFIG_KEYS = ['ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath'] as const;
 
 /** 配置项的默认值 */
-export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string> = {
+export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     ankiConnectURL: 'http://localhost:8765',
     deckName: '划词助手默认牌组',
     modelName: '划词助手默认单词模板',
+    autoLaunchAnki: true,
+    launchAnkiOnAppStart: false,
+    ankiExecutablePath: '',
 };
 
 export class Config implements ConfigModel {
@@ -28,6 +34,12 @@ export class Config implements ConfigModel {
     public deckName!: string;
     /** 划词结果使用的笔记模板名 */
     public modelName!: string;
+    /** 添加笔记时若 Anki 未运行，是否自动启动 Anki */
+    public autoLaunchAnki!: boolean;
+    /** 应用启动时是否自动启动 Anki */
+    public launchAnkiOnAppStart!: boolean;
+    /** Anki 可执行文件的路径，留空表示自动检测 */
+    public ankiExecutablePath!: string;
     /** 存储配置项的对象 */
     private config: ConfigModel;
     /** 被修改过的配置项 */
@@ -48,12 +60,12 @@ export class Config implements ConfigModel {
         }
     }
 
-    private defineAccessor(propertyName: keyof ConfigModel): void {
+    private defineAccessor<K extends keyof ConfigModel>(propertyName: K): void {
         Object.defineProperty(this, propertyName, {
-            get(this: Config): ConfigModel[typeof propertyName] {
+            get(this: Config): ConfigModel[K] {
                 return this.config[propertyName];
             },
-            set(this: Config, value: ConfigModel[typeof propertyName]) {
+            set(this: Config, value: ConfigModel[K]) {
                 if (value !== this.config[propertyName]) {
                     this.config[propertyName] = value;
                     this.modified[propertyName] = value;
