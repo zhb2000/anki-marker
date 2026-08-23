@@ -12,7 +12,6 @@ import * as cfg from '../logics/config';
 import * as anki from '../logics/anki';
 import { FluentInput, FluentButton, FluentHyperlink } from '../fluent-controls';
 import { ReturnButton, ResetButton, ShortcutRecorder } from '../components';
-import { formatShortcut } from '../logics/shortcut';
 import { invoke } from '../logics/utils';
 import OpenFilledSvg from '../assets/OpenFilled.svg';
 import GitHubSvg from '../assets/github.svg';
@@ -215,22 +214,16 @@ async function handleShortcutResetClick() {
 
 /** 快捷键注册结果（Rust 侧在注册/注销后 emit） */
 interface ShortcutRegistration {
-    shortcut: string;
     success: boolean;
     error: string | null;
 }
 
-/** 监听快捷键注册结果事件，用于向用户反馈注册成功或失败（如快捷键冲突） */
+/** 监听快捷键注册结果事件，仅在注册失败（如快捷键冲突）时向用户反馈 */
 async function listenShortcutRegistration() {
     try {
         await api.event.listen<ShortcutRegistration>('shortcut-registration', event => {
-            const { shortcut, success, error } = event.payload;
-            if (success) {
-                ElMessage.success(shortcut.length > 0
-                    ? `全局快捷键已注册：${formatShortcut(shortcut)}`
-                    : '已停用全局快捷键');
-            } else {
-                ElMessage.error(`全局快捷键注册失败：${error ?? '未知错误'}`);
+            if (!event.payload.success) {
+                ElMessage.error(`全局快捷键注册失败：${event.payload.error ?? '未知错误'}`);
             }
         });
     } catch (error) {
@@ -336,13 +329,13 @@ onActivated(async () => {
                     <span style="margin-right: 8px;">辅助功能权限：<span :class="accessibilityStatusClass">{{
                         accessibilityStatusText }}</span></span>
                     <FluentButton v-if="accessibilityTrusted === false" class="update-button"
-                        @click="handleRequestAccessibilityClick">申请权限</FluentButton>
+                        @click="handleRequestAccessibilityClick" accent>申请权限</FluentButton>
                     <FluentButton class="update-button" @click="checkAccessibilityTrust">检查</FluentButton>
                 </div>
                 <div class="shortcut-note">
                     在任意应用中选中一段文字后按下此快捷键，所选文字将录入划词面板并自动分词。
                 </div>
-                <div class="shortcut-note" v-if="accessibilityTrusted === false">
+                <div class="shortcut-note" v-if="globalShortcut.length > 0 && accessibilityTrusted === false">
                     辅助功能未授权，划词功能可能无法使用。请点击上方“申请权限”按钮，并按系统提示授权本应用。
                 </div>
             </template>

@@ -90,7 +90,7 @@ onBeforeUnmount(() => {
 
 const display = computed(() => {
     if (recording.value) {
-        return '请按下含 ⌘/⌃/⌥ 的组合键…（Esc 取消，退格键清除）';
+        return '请按下含 ⌘/⌃/⌥ 的组合键（Esc 取消，退格键清除）';
     }
     if (props.modelValue.length === 0) {
         return '点击设置快捷键';
@@ -112,6 +112,9 @@ const display = computed(() => {
     padding-left: 12px;
     padding-right: 12px;
     line-height: 100%;
+    /* 录制态提示文案较长：保证单行显示，超宽截断而不折行溢出 */
+    white-space: nowrap;
+    overflow: hidden;
     font-family: var(--font-family);
     font-size: var(--font-size);
     text-align: left;
