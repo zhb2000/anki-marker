@@ -159,3 +159,40 @@ hr {
     background-size: contain;
     background-repeat: no-repeat;
 }
+
+/* ===== 深色模式适配 =====
+ * Anki 在夜间模式下会给卡片根元素注入 nightMode 类
+ * （桌面版 / AnkiDroid / AnkiMobile 通用），以下规则仅在夜间模式生效。
+ * 配色以 Anki 深色复习界面（画布约 #2f2f31）为基准设计。 */
+.card.nightMode {
+    color: #e4e4e8;
+}
+
+.nightMode .section {
+    background-color: #28282c;
+    color: #e4e4e8;
+    border-color: #3a3a41 #34343b #2c2c33;
+}
+
+.nightMode .bar {
+    background-color: #2e4c84;
+    border-bottom-color: #21395f;
+}
+
+.nightMode hr {
+    border-top-color: #3f3f46;
+}
+
+.nightMode #sentence-content b {
+    background-color: #4c4c55;
+    color: #f4f4f6;
+}
+
+.nightMode .items a {
+    color: #8ab4f8;
+}
+
+/* 喇叭图标的 SVG 描边为深色 #333，反色后在深色背景上可见 */
+.nightMode .audio-button {
+    filter: invert(0.8);
+}
