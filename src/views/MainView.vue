@@ -2,6 +2,7 @@
 import { ref, reactive, watch, nextTick, onBeforeMount, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import * as api from '../tauri-api';
+import { ElMessage } from 'element-plus';
 
 import * as utils from '../logics/utils';
 import * as dict from '../logics/dict';
@@ -326,7 +327,14 @@ async function changeItemAdded(index: number) {
     }
 }
 
-/** 点击单词卡片的“编辑笔记”按钮后，打开 Anki 的编辑对话框 */
+/**
+ * 点击单词卡片的“编辑笔记”按钮后，打开 Anki 的编辑对话框。
+ *
+ * Anki 26.08 重构了编辑窗口（移除了 Ui_Dialog 的 buttonBox），导致 AnkiConnect 的
+ * guiEditNote 报错。
+ * 
+ * 因此在 guiEditNote 失败时降级为打开 Anki 卡片浏览器并定位到该笔记，卡片浏览器中可直接编辑。
+ */
 async function openEditDialog(index: number) {
     const selected = selectedDict.value;
     const item = wordItems[selected][index];
@@ -338,7 +346,16 @@ async function openEditDialog(index: number) {
         await ankiService.guiEditNote(item.id);
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '打开编辑对话框失败', kind: 'error' });
+        try {
+            await ankiService.guiBrowse(`nid:${item.id}`);
+            ElMessage.warning({
+                message: '编辑对话框打开失败（Anki 26.08 与 AnkiConnect 不兼容），已在 Anki 卡片浏览器中定位该笔记，选中后可在右侧直接编辑。',
+                duration: 5000
+            });
+        } catch (fallbackError) {
+            console.error(fallbackError);
+            await api.dialog.message(String(error), { title: '打开编辑对话框失败', kind: 'error' });
+        }
     }
 }
 

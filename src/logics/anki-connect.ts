@@ -156,9 +156,16 @@ export class AnkiConnectApi {
 
     // #region Graphical Actions, https://foosoft.net/projects/anki-connect/#graphical-actions
     /**
+     * Invokes the Card Browser dialog and opens a search query. Returns the number of cards found.
+     */
+    public async guiBrowse(query: string): Promise<number> {
+        return await this.invoke('guiBrowse', { query });
+    }
+
+    /**
      * Opens the Edit dialog with a note corresponding to given note ID. The dialog is similar to
      * the Edit Current dialog, but:
-     * 
+     *
      * - has a Preview button to preview the cards for the note
      * - has a Browse button to open the browser with these cards
      * - has Previous/Back buttons to navigate the history of the dialog
