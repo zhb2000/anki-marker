@@ -5,7 +5,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import fsp from 'fs/promises'; // 使用 fs/promises 提供的异步方法
 import path from 'path';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 // ES 模块中处理 __dirname
@@ -81,7 +81,8 @@ async function makePortable(productName, portableName) {
     console.log(`开始压缩 ${portableName}.zip ...`);
     await new Promise((resolve, reject) => {
         const output = fs.createWriteStream(path.join(portableDir, `${portableName}.zip`));
-        const archive = archiver('zip', { zlib: { level: 9 } });
+        // archiver 8+ 移除了默认导出的工厂函数，改为具名导出的类
+        const archive = new ZipArchive({ zlib: { level: 9 } });
 
         output.on('close', () => {
             const sizeInBytes = archive.pointer();

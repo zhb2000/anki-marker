@@ -6,6 +6,11 @@ import svgLoader from 'vite-svg-loader';
 
 export default defineConfig(async () => ({
     plugins: [vue(), svgLoader()],
+    // Vite 8 默认 target 已提升到 `baseline-widely-available`（Chrome 111 / Safari 16.4）。
+    // Tauri 使用系统 WebView，显式降低 target 以继续支持较旧的 WebView（如 macOS 12.3+ 的 Safari 15.4）。
+    build: {
+        target: 'es2022',
+    },
     css: {
         postcss: './postcss.config.cjs',
     },

@@ -78,7 +78,8 @@ function sendLog(logger: Logger, message: string): void {
 type ConsoleFnName = 'log' | 'debug' | 'info' | 'warn' | 'error';
 
 function forwardConsole(fnName: ConsoleFnName, logger: Logger): void {
-    const original = console[fnName];
+    // 绑定 this 以避免 console 方法与对象分离后产生 unbound-method 问题
+    const original = console[fnName].bind(console);
     console[fnName] = (...args: unknown[]) => {
         original(...args);
         sendLog(logger, formatArgs(args));

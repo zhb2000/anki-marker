@@ -10,21 +10,21 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
-tauri-build = { version = "2.2", features = [] }
+tauri-build = { version = "2.6", features = [] }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rusqlite = { version = "0.36", features = ["bundled"] }
-toml_edit = "0.22"
+rusqlite = { version = "0.40", features = ["bundled"] }
+toml_edit = "0.25"
 notify = "8.0"
 notify-debouncer-full = "0.5"
-tauri = { version = "2.5", features = [] }
-tauri-plugin-http = { version = "2.4", features = ["unsafe-headers"] }
-tauri-plugin-dialog = "2.2"
-tauri-plugin-os = "2.2"
-tauri-plugin-clipboard-manager = "2.2"
-tauri-plugin-log = "2"
+tauri = { version = "2.11", features = [] }
+tauri-plugin-http = { version = "2.5", features = ["unsafe-headers"] }
+tauri-plugin-dialog = "2.7"
+tauri-plugin-os = "2.3"
+tauri-plugin-clipboard-manager = "2.3"
+tauri-plugin-log = "2.9"
 log = "0.4"
 sanitise-file-name = "1.0"
 # WebDriver automation server, for debugging/testing only. Enabled via the `webdriver` feature.

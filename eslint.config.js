@@ -22,7 +22,7 @@ export default tseslint.config(
             '@typescript-eslint/no-floating-promises': 'error',
             '@typescript-eslint/require-await': 'warn',
             '@typescript-eslint/no-explicit-any': 'off',
-            '@typescript-eslint/no-unused-vars': 'warn',
+            '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
         },
     },
     // 针对 .vue 文件的特定配置

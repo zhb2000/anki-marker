@@ -141,11 +141,11 @@ async function handleShowInExplorerClick() {
 onBeforeMount(async () => {
     // 为需要初始化的变量赋值
     await globals.initAtAppStart();
+    // plugin-os 2.3+ 中 type() 已改为同步函数，且其返回值在此处未被使用，故移除
     [config, ankiService, appVersion] = await Promise.all([
         globals.getConfig(),
         globals.getAnkiService(),
         globals.getAppVersion(),
-        api.os.type()
     ]);
     pageInitialized.value = true;
 });

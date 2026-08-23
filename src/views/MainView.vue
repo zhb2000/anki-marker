@@ -252,7 +252,7 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
         return false;
     }
 
-    let newModelCreated = false;
+    let newModelCreated: boolean;
     try {
         newModelCreated = (await Promise.all([prepareDeck(deckName), prepareModel(modelName)]))[1];
     } catch (error) {

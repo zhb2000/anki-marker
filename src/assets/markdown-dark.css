@@ -10,12 +10,12 @@
  * 改写到 `html.dark .markdown-body` 作用域下，利用更高的选择器优先级覆盖浅色变量。
  * 链接色、代码块背景、表格边框等全部由这些变量派生，无需逐条改写规则。
  *
- * 变量取值来源：node_modules/github-markdown-css/github-markdown-dark.css
- * （与 github-markdown.css 的 dark 媒体查询一致）
+ * 变量取值来源：node_modules/github-markdown-css/github-markdown.css
+ * （与其中 dark 媒体查询保持一致，包括官方对 var() 的间接引用方式）
  */
 html.dark .markdown-body {
     color-scheme: dark;
-    --focus-outlineColor: #1f6feb;
+    --focus-outlineColor: var(--borderColor-accent-emphasis);
     --fgColor-default: #f0f6fc;
     --fgColor-muted: #9198a1;
     --fgColor-accent: #4493f8;
@@ -29,7 +29,7 @@ html.dark .markdown-body {
     --bgColor-attention-muted: #bb800926;
     --borderColor-default: #3d444d;
     --borderColor-muted: #3d444db3;
-    --borderColor-neutral-muted: #3d444db3;
+    --borderColor-neutral-muted: var(--borderColor-muted);
     --borderColor-accent-emphasis: #1f6feb;
     --borderColor-success-emphasis: #238636;
     --borderColor-attention-emphasis: #9e6a03;
@@ -46,8 +46,8 @@ html.dark .markdown-body {
     --color-prettylights-syntax-variable: #ffa657;
     --color-prettylights-syntax-brackethighlighter-unmatched: #f85149;
     --color-prettylights-syntax-brackethighlighter-angle: #9198a1;
-    --color-prettylights-syntax-invalid-illegal-text: #f0f6fc;
-    --color-prettylights-syntax-invalid-illegal-bg: #8e1519;
+    --color-prettylights-syntax-invalid-illegal-text: var(--fgColor-danger);
+    --color-prettylights-syntax-invalid-illegal-bg: var(--bgColor-danger-muted);
     --color-prettylights-syntax-carriage-return-text: #f0f6fc;
     --color-prettylights-syntax-carriage-return-bg: #b62324;
     --color-prettylights-syntax-string-regexp: #7ee787;
