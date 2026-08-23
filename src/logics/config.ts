@@ -25,6 +25,14 @@ export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     globalShortcut: '',
 };
 
+/**
+ * 将 source 中指定键的值同步到 target。
+ * 以泛型键参数而非联合类型索引赋值，避免 TypeScript 将联合键的写入类型收窄为 never。
+ */
+function syncConfigKey<K extends keyof ConfigModel>(target: ConfigModel, source: ConfigModel, key: K): void {
+    target[key] = source[key];
+}
+
 export class Config implements ConfigModel {
     /** The path of the configuration file. */
     public readonly path: string;
@@ -48,6 +56,8 @@ export class Config implements ConfigModel {
     private config: ConfigModel;
     /** 被修改过的配置项 */
     private modified: Partial<ConfigModel>;
+    /** commit 的串行化队列（自身永不 reject），reload 读取文件前等待其清空 */
+    private commitTail: Promise<void> = Promise.resolve();
     // Config 对象被设计为始终存活的全局单例，因此不需要取消事件监听
     /** 'config-changed' 事件对应的取消监听函数 */
     public __unlistenConfigChanged?: () => void;
@@ -80,19 +90,47 @@ export class Config implements ConfigModel {
         });
     }
 
-    public async commit() {
-        if (Object.keys(this.modified).length === 0) {
+    public commit(): Promise<void> {
+        // 串行化写入：并发的 commit（如防抖保存与 blur 保存撞车）排队依次执行，
+        // 避免 Rust 端并发的读-改-写交错导致先完成的写入被后完成的覆盖
+        const next = this.commitTail.then(() => this.commitImpl());
+        this.commitTail = next.catch(() => { }); // 链条自身不因失败而中断，异常只传给调用方
+        return next;
+    }
+
+    private async commitImpl(): Promise<void> {
+        // 快照待写入的修改并立即清空脏标记：
+        // 写入期间用户的新修改会记入新的 modified，不会随本次写入的完成而丢失
+        const pending = this.modified;
+        if (Object.keys(pending).length === 0) {
             return;
         }
-        await invoke('commit_config', { modified: this.modified, config_path: this.path });
         this.modified = {};
+        try {
+            await invoke('commit_config', { modified: pending, config_path: this.path });
+        } catch (error) {
+            // 写入失败：恢复未落盘的修改；写入期间用户又改过的键保留用户的最新值
+            this.modified = { ...pending, ...this.modified };
+            throw error;
+        }
     }
 
     public async reload() {
+        // 等待已排队的写入全部完成后再读取文件，避免读到写入前的旧内容
+        // （链条不会 reject；等到写入失败的 commit 完成也无妨，读到的是文件的真实状态）
+        await this.commitTail;
         const newConfig = await Config.load();
-        if (CONFIG_KEYS.some(key => this.config[key] !== newConfig.config[key])) {
-            this.config = newConfig.config;
-            this.modified = {};
+        // 键级合并（与 commit_config 只写入被修改键的文件写入策略对称）：
+        // - 文件值与内存值一致：该键已落盘，清除其脏标记（典型场景：自己 commit 后 watcher 的回声）
+        // - 文件值与内存值不一致、且该键不在 modified 中：外部修改，同步到内存
+        // - 文件值与内存值不一致、且该键在 modified 中：用户尚未保存的修改，保留 UI 值，
+        //   待 commit 时以用户输入为准——绝不回退正在编辑的内容
+        for (const key of CONFIG_KEYS) {
+            if (this.config[key] === newConfig.config[key]) {
+                delete this.modified[key];
+            } else if (!(key in this.modified)) {
+                syncConfigKey(this.config, newConfig.config, key);
+            }
         }
     }
 

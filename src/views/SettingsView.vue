@@ -12,7 +12,7 @@ import * as cfg from '../logics/config';
 import * as anki from '../logics/anki';
 import { FluentInput, FluentButton, FluentHyperlink } from '../fluent-controls';
 import { ReturnButton, ResetButton, ShortcutRecorder } from '../components';
-import { invoke } from '../logics/utils';
+import { invoke, debounce } from '../logics/utils';
 import OpenFilledSvg from '../assets/OpenFilled.svg';
 import GitHubSvg from '../assets/github.svg';
 
@@ -37,14 +37,27 @@ async function commitConfig() {
     }
 }
 
+/** 输入框自动保存的防抖间隔（毫秒）：停止输入一段时间后自动保存，缩小未保存修改的窗口期 */
+const INPUT_AUTOSAVE_DEBOUNCE_MS = 500;
+
+/** 防抖自动保存：输入期间持续触发会重置计时，停止输入一段时间后自动保存 */
+const debouncedCommitConfig = debounce(() => void commitConfig(), INPUT_AUTOSAVE_DEBOUNCE_MS);
+
+/** 输入内容变化时防抖自动保存（输入框失焦时会取消待触发的防抖保存并立即保存） */
+function handleInputUpdate() {
+    debouncedCommitConfig();
+}
+
 /** 点击返回按钮时先保存设置再返回 */
 async function handleReturnClick() {
+    debouncedCommitConfig.cancel(); // 取消待触发的防抖保存，避免离开设置页后才执行保存
     await commitConfig();
     router.back();
 }
 
 /** 输入框失去焦点时保存设置 */
 async function handleInputBlur() {
+    debouncedCommitConfig.cancel(); // 取消待触发的防抖保存，立即保存以免重复执行
     await commitConfig();
 }
 
@@ -283,18 +296,19 @@ onActivated(async () => {
                 <ResetButton @click="handleResetClick('ankiConnectURL')" />
             </div>
             <FluentInput class="input-text" placeholder="请输入 AnkiConnect 服务的 URL" v-model="config.ankiConnectURL"
-                @blur="handleInputBlur" />
+                @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
             <div class="term">
                 <span>将划词结果添加到哪个牌组</span>
                 <ResetButton @click="handleResetClick('deckName')" />
             </div>
-            <FluentInput class="input-text" placeholder="请输入牌组名称" v-model="config.deckName" @blur="handleInputBlur" />
+            <FluentInput class="input-text" placeholder="请输入牌组名称" v-model="config.deckName" @blur="handleInputBlur"
+                @update:model-value="handleInputUpdate" />
             <div class="term">
                 <span>使用的笔记模板名称</span>
                 <ResetButton @click="handleResetClick('modelName')" />
             </div>
             <FluentInput class="input-text" placeholder="请输入笔记模板名称" v-model="config.modelName"
-                @blur="handleInputBlur" />
+                @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
             <div class="term">
                 <span>自动启动 Anki</span>
                 <ResetButton @click="handleResetClick('autoLaunchAnki')" />
@@ -316,7 +330,7 @@ onActivated(async () => {
                 <ResetButton @click="handleResetClick('ankiExecutablePath')" />
             </div>
             <FluentInput class="input-text" placeholder="留空则自动检测 Anki 路径" v-model="config.ankiExecutablePath"
-                @blur="handleInputBlur" />
+                @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
 
             <template v-if="isMacOS">
                 <div class="term">

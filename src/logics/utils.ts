@@ -31,6 +31,13 @@ export async function sanitizeFilename(filename: string): Promise<string> {
     return await invoke<string>('sanitize_filename', { filename });
 }
 
+/** 带 cancel 方法的防抖函数 */
+export interface DebouncedFunction<F extends (...args: any[]) => any> {
+    (...args: Parameters<F>): void;
+    /** 取消尚未执行的防抖调用 */
+    cancel(): void;
+}
+
 /**
  * 创建一个防抖函数
  * 
@@ -38,16 +45,16 @@ export async function sanitizeFilename(filename: string): Promise<string> {
  * @param wait 延迟时间（毫秒）
  * @param immediate 是否立即执行，若为 `false` 则为标准的防抖逻辑，延迟 `wait` 毫秒后执行 `func`；
  * 若为 `true` 则立即执行函数 `func`，然后在 `wait` 毫秒内不再执行。
- * @returns 返回一个防抖函数
+ * @returns 返回一个防抖函数，附带 `cancel` 方法用于取消尚未执行的防抖调用
  */
 export function debounce<F extends (...args: any[]) => any>(
     func: F,
     wait: number,
     immediate: boolean = false
-): (...args: Parameters<F>) => void {
+): DebouncedFunction<F> {
     let timeout: ReturnType<typeof setTimeout> | null = null;
 
-    return function (this: any, ...args: Parameters<F>) {
+    const debounced = function (this: any, ...args: Parameters<F>): void {
         if (timeout != null) {
             // 若延迟定时器已被设置，则清除之前的定时器，重新设置一个延迟定时器
             clearTimeout(timeout);
@@ -63,6 +70,13 @@ export function debounce<F extends (...args: any[]) => any>(
             func.apply(this, args); // 立即执行的防抖逻辑
         }
     };
+    debounced.cancel = (): void => {
+        if (timeout != null) {
+            clearTimeout(timeout);
+            timeout = null;
+        }
+    };
+    return debounced;
 }
 
 /**
