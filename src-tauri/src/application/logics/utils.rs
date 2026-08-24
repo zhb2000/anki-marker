@@ -21,7 +21,7 @@ pub fn show_in_explorer(path: impl AsRef<Path>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     fn inner(path: &str) -> Result<(), String> {
         std::process::Command::new("open")
-            .args(&["-R", path])
+            .args(["-R", path])
             .spawn()
             .map_err(|e| e.to_string())?;
         return Ok(());
