@@ -167,9 +167,12 @@ pub fn on_shortcut_pressed(app: AppHandle) {
     });
 }
 
-/// 显示并聚焦主窗口；若主窗口已被用户关闭，则按 tauri.conf.json 中的窗口配置重建。
+/// 显示并聚焦主窗口；若主窗口已不存在，则按 tauri.conf.json 中的窗口配置重建。
+///
+/// 调用时机：划词快捷键触发、点击 Dock 图标。macOS 上点关闭按钮仅隐藏窗口
+/// （应用保留在 Dock 栏），正常情况下窗口始终存在，重建仅作兜底。
 #[cfg(target_os = "macos")]
-fn show_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
+pub fn show_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;

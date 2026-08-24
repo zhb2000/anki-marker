@@ -48,7 +48,17 @@ fn main() {
     #[cfg(feature = "webdriver")]
     let builder = builder.plugin(tauri_plugin_webdriver::init());
 
-    builder
+    // macOS：点关闭按钮仅隐藏窗口，应用保留在 Dock 栏，由点击 Dock 图标或划词快捷键
+    // 再次唤起；其他平台维持默认行为（关闭窗口即退出应用）。
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_window_event(|window, event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            let _ = window.hide();
+            api.prevent_close();
+        }
+    });
+
+    let app = builder
         .setup(|app| {
             let portable = application::config::Portable::new()?;
             app.manage(portable);
@@ -97,6 +107,27 @@ fn main() {
             application::shortcut::is_accessibility_trusted,
             application::shortcut::request_accessibility_trust,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        // macOS：主窗口被隐藏（点关闭按钮）后点击 Dock 图标，系统不会自动恢复窗口，
+        // 在此显示并聚焦；若尚有可见窗口，交给系统默认的激活行为即可。
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } = event
+        {
+            if !has_visible_windows {
+                if let Err(error) = application::shortcut::show_and_focus_main_window(app_handle) {
+                    log::warn!("failed to show main window on dock click: {error}");
+                }
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (app_handle, event);
+        }
+    });
 }
