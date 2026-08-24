@@ -1,12 +1,17 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use rusqlite::Connection;
 use tauri::Manager;
 
 mod application;
+
+/// 用户已主动关闭主窗口（点关闭按钮被拦截为隐藏）。
+/// 用于阻止启动兜底线程在用户关闭后强制弹出窗口。
+static USER_CLOSED_MAIN_WINDOW: AtomicBool = AtomicBool::new(false);
 
 fn main() {
     // 统一日志：JS 侧日志经 IPC 转发到 Rust 后，与 Rust 日志走同一套 target。
@@ -53,6 +58,7 @@ fn main() {
     #[cfg(target_os = "macos")]
     let builder = builder.on_window_event(|window, event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            USER_CLOSED_MAIN_WINDOW.store(true, Ordering::Relaxed);
             let _ = window.hide();
             api.prevent_close();
         }
@@ -78,9 +84,13 @@ fn main() {
             // 防启动闪屏的兜底：窗口初始隐藏（tauri.conf.json 中 visible: false），
             // 正常由前端应用主题后调用 show() 显示；
             // 若前端异常迟迟未显示窗口，3 秒后强制显示，避免应用“隐形”。
+            // 用户已主动关闭窗口时跳过，防止把刚隐藏的窗口又弹出。
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(3));
+                if USER_CLOSED_MAIN_WINDOW.load(Ordering::Relaxed) {
+                    return;
+                }
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.show();
                 }
