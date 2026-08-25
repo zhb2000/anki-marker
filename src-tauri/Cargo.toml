@@ -19,7 +19,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 toml_edit = "0.25"
 notify = "8.0"
 notify-debouncer-full = "0.5"
-tauri = { version = "2.11", features = [] }
+tauri = { version = "2.11", features = ["tray-icon"] }
 tauri-plugin-http = { version = "2.5", features = ["unsafe-headers"] }
 tauri-plugin-dialog = "2.7"
 tauri-plugin-os = "2.3"

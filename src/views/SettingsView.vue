@@ -2,7 +2,7 @@
 import { ref, computed, onActivated, onBeforeMount } from 'vue';
 import { useRouter } from 'vue-router';
 import * as api from '../tauri-api';
-import { ElMessage, ElPopconfirm, ElDialog, ElSwitch } from 'element-plus';
+import { ElMessage, ElPopconfirm, ElDialog, ElSwitch, ElRadioGroup, ElRadio } from 'element-plus';
 import MarkdownIt from 'markdown-it';
 import 'github-markdown-css';
 import '../assets/markdown-dark.css';
@@ -352,6 +352,30 @@ onActivated(async () => {
                 <div class="shortcut-note" v-if="globalShortcut.length > 0 && accessibilityTrusted === false">
                     辅助功能未授权，划词功能可能无法使用。请点击上方“申请权限”按钮，并按系统提示授权本应用。
                 </div>
+                <div class="term">
+                    <span>关闭窗口后保持后台运行</span>
+                    <ResetButton @click="handleResetClick('keepRunningOnClose')" />
+                </div>
+                <div class="switch-row">
+                    <ElSwitch v-model="config.keepRunningOnClose" @change="commitConfig" />
+                    <span class="switch-note">关闭窗口后应用将在后台继续运行，可通过 Dock 图标、菜单栏图标或全局快捷键再次打开</span>
+                </div>
+                <template v-if="config.keepRunningOnClose">
+                    <div class="term">
+                        <span>后台运行时显示</span>
+                        <ResetButton @click="handleResetClick('backgroundIcon')" />
+                    </div>
+                    <div class="switch-row">
+                        <ElRadioGroup v-model="config.backgroundIcon" @change="commitConfig">
+                            <ElRadio value="dock">Dock 栏图标</ElRadio>
+                            <ElRadio value="menu-bar">菜单栏图标</ElRadio>
+                            <ElRadio value="none">都不显示</ElRadio>
+                        </ElRadioGroup>
+                    </div>
+                    <div class="switch-row">
+                        <span class="switch-note">选择窗口关闭后（后台运行期间）应用图标的显示位置；窗口打开时图标始终显示在 Dock 栏</span>
+                    </div>
+                </template>
             </template>
 
             <div style="height: 12px;"></div>

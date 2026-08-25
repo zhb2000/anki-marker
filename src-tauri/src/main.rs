@@ -53,14 +53,24 @@ fn main() {
     #[cfg(feature = "webdriver")]
     let builder = builder.plugin(tauri_plugin_webdriver::init());
 
-    // macOS：点关闭按钮仅隐藏窗口，应用保留在 Dock 栏，由点击 Dock 图标或划词快捷键
-    // 再次唤起；其他平台维持默认行为（关闭窗口即退出应用）。
+    // macOS：点关闭按钮的行为可配置（keep-running-on-close）——
+    // 默认仅隐藏窗口、应用保持后台运行，由点击 Dock/菜单栏图标或划词快捷键再次唤起；
+    // 配置为不保持运行时则直接退出应用；其他平台维持默认行为（关闭窗口即退出应用）。
     #[cfg(target_os = "macos")]
     let builder = builder.on_window_event(|window, event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            USER_CLOSED_MAIN_WINDOW.store(true, Ordering::Relaxed);
-            let _ = window.hide();
-            api.prevent_close();
+            if application::menubar::keep_running_on_close(window.app_handle()) {
+                // 保持运行：拦截关闭，仅隐藏窗口
+                USER_CLOSED_MAIN_WINDOW.store(true, Ordering::Relaxed);
+                let _ = window.hide();
+                api.prevent_close();
+                // 进入后台模式，按配置显示 Dock/菜单栏图标
+                application::menubar::on_main_window_hidden(window.app_handle());
+            } else {
+                // 不保持运行：直接退出应用
+                api.prevent_close();
+                window.app_handle().exit(0);
+            }
         }
     });
 

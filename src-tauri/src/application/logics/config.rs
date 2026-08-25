@@ -1,5 +1,28 @@
 use std::path::Path;
 
+/// 后台运行（关闭窗口保持运行）期间应用图标的显示位置
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BackgroundIcon {
+    /// Dock 栏图标
+    Dock,
+    /// 屏幕顶部菜单栏图标
+    MenuBar,
+    /// 都不显示
+    None,
+}
+
+impl BackgroundIcon {
+    /// 对应 config.toml 中的字符串值
+    pub fn as_toml_str(self) -> &'static str {
+        return match self {
+            BackgroundIcon::Dock => "dock",
+            BackgroundIcon::MenuBar => "menu-bar",
+            BackgroundIcon::None => "none",
+        };
+    }
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
@@ -11,6 +34,8 @@ pub struct Config {
     launch_anki_on_app_start: bool,
     anki_executable_path: String,
     global_shortcut: String,
+    keep_running_on_close: bool,
+    background_icon: BackgroundIcon,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -24,12 +49,41 @@ pub struct PartialConfig {
     launch_anki_on_app_start: Option<bool>,
     anki_executable_path: Option<String>,
     global_shortcut: Option<String>,
+    keep_running_on_close: Option<bool>,
+    background_icon: Option<BackgroundIcon>,
 }
 
 impl Config {
     /// 划词录入句子的全局快捷键，空字符串表示未设置
     pub fn global_shortcut(&self) -> &str {
         return &self.global_shortcut;
+    }
+
+    /// 关闭窗口时应用是否保持后台运行（仅 macOS 生效）
+    pub fn keep_running_on_close(&self) -> bool {
+        return self.keep_running_on_close;
+    }
+
+    /// 后台运行期间应用图标的显示位置（仅 macOS 生效）
+    pub fn background_icon(&self) -> BackgroundIcon {
+        return self.background_icon;
+    }
+}
+
+impl Default for Config {
+    /// 各键缺省值与 read_config 的缺省回退、配置模板保持一致，用于配置读取失败时的兜底
+    fn default() -> Self {
+        return Config {
+            anki_connect_url: "http://localhost:8765".to_string(),
+            deck_name: "划词助手默认牌组".to_string(),
+            model_name: "划词助手默认单词模板".to_string(),
+            auto_launch_anki: true,
+            launch_anki_on_app_start: false,
+            anki_executable_path: String::new(),
+            global_shortcut: String::new(),
+            keep_running_on_close: true,
+            background_icon: BackgroundIcon::Dock,
+        };
     }
 }
 
@@ -100,6 +154,17 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        // 关闭行为相关为后加的键，老配置文件中没有这些键，必须带缺省回退
+        let keep_running_on_close = doc
+            .get("keep-running-on-close")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        // 后台运行期间图标位置为后加的键，老配置文件中没有；缺省或非法值回退 Dock
+        let background_icon = match doc.get("background-icon").and_then(|v| v.as_str()) {
+            Some("menu-bar") => BackgroundIcon::MenuBar,
+            Some("none") => BackgroundIcon::None,
+            _ => BackgroundIcon::Dock,
+        };
         return Ok(Config {
             anki_connect_url: anki_connect_url.to_string(),
             deck_name: deck_name.to_string(),
@@ -108,6 +173,8 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             launch_anki_on_app_start,
             anki_executable_path,
             global_shortcut,
+            keep_running_on_close,
+            background_icon,
         });
     }
     return inner(config_path.as_ref());
@@ -143,6 +210,12 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
         }
         if let Some(global_shortcut) = modified.global_shortcut {
             doc["global-shortcut"] = toml_edit::value(global_shortcut);
+        }
+        if let Some(keep_running_on_close) = modified.keep_running_on_close {
+            doc["keep-running-on-close"] = toml_edit::value(keep_running_on_close);
+        }
+        if let Some(background_icon) = modified.background_icon {
+            doc["background-icon"] = toml_edit::value(background_icon.as_toml_str());
         }
         std::fs::write(config_path, doc.to_string()).map_err(|e| {
             format!(

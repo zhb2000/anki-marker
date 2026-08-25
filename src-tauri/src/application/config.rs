@@ -78,6 +78,8 @@ pub fn commit_config(
     // 配置保存后立即更新全局快捷键注册，使设置页获得即时反馈；
     // 配置文件监视器随后触发的重注册是幂等的兜底
     super::shortcut::update_from_config(&app);
+    // 保存后若应用正处于后台运行，立即按新配置应用 Dock/菜单栏图标显隐
+    super::menubar::on_config_changed(&app);
     return Ok(());
 }
 
@@ -138,6 +140,8 @@ pub fn start_config_watcher(
         // 配置文件可能被外部编辑（包括 global-shortcut 项），静默重新注册全局快捷键：
         // 不通知前端——设置页保存配置后 watcher 也会触发，通知会导致重复的注册结果提示
         super::shortcut::update_from_config_silently(&shortcut_app);
+        // 外部编辑配置文件时，若应用正处于后台运行，按新配置兜底应用 Dock/菜单栏图标显隐
+        super::menubar::on_config_changed(&shortcut_app);
         if main_window.emit("config-changed", ()).is_err() {
             println!("failed to emit config-changed event");
         }

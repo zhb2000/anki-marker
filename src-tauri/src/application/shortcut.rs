@@ -176,6 +176,8 @@ pub fn show_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
+        // 切回前台模式——Dock 显示、托盘隐藏
+        super::menubar::on_main_window_shown(app);
         return Ok(());
     }
     let window_config = app
@@ -194,5 +196,7 @@ pub fn show_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
     // 前端就绪后的 show() 是幂等的
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
+    // 切回前台模式——Dock 显示、托盘隐藏
+    super::menubar::on_main_window_shown(app);
     return Ok(());
 }

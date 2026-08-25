@@ -10,9 +10,11 @@ interface ConfigModel {
     launchAnkiOnAppStart: boolean;
     ankiExecutablePath: string;
     globalShortcut: string;
+    keepRunningOnClose: boolean;
+    backgroundIcon: 'dock' | 'menu-bar' | 'none';
 }
 
-const CONFIG_KEYS = ['ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut'] as const;
+const CONFIG_KEYS = ['ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut', 'keepRunningOnClose', 'backgroundIcon'] as const;
 
 /** 配置项的默认值 */
 export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
@@ -23,6 +25,8 @@ export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     launchAnkiOnAppStart: false,
     ankiExecutablePath: '',
     globalShortcut: '',
+    keepRunningOnClose: true,
+    backgroundIcon: 'dock',
 };
 
 /**
@@ -52,6 +56,10 @@ export class Config implements ConfigModel {
     public ankiExecutablePath!: string;
     /** 划词录入句子的全局快捷键，空字符串表示未设置 */
     public globalShortcut!: string;
+    /** 关闭窗口时是否保持应用在后台运行（仅 macOS） */
+    public keepRunningOnClose!: boolean;
+    /** 后台运行期间应用图标的显示位置（仅 macOS）：dock=Dock 栏、menu-bar=菜单栏、none=都不显示 */
+    public backgroundIcon!: 'dock' | 'menu-bar' | 'none';
     /** 存储配置项的对象 */
     private config: ConfigModel;
     /** 被修改过的配置项 */

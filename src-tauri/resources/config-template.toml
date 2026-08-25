@@ -22,3 +22,12 @@ anki-executable-path = ""
 # 划词录入句子的全局快捷键，留空表示未设置（也可以在设置页面中录制）
 # 格式如 "Cmd+Shift+KeyS"（修饰键 Cmd/Ctrl/Alt/Shift + 键名），目前仅 macOS 支持
 global-shortcut = ""
+
+# 关闭窗口时应用是否在后台继续运行（仅 macOS）
+# 保持运行时窗口仅被隐藏，可由 Dock 图标、菜单栏图标或划词快捷键再次唤起
+keep-running-on-close = true
+
+# 后台运行（关闭窗口保持运行）期间，应用图标显示的位置（仅 macOS）
+# 可选值：dock = Dock 栏（默认）、menu-bar = 屏幕顶部菜单栏、none = 都不显示
+# 窗口打开时图标始终显示在 Dock 栏、不显示在菜单栏
+background-icon = "dock"
