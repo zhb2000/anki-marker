@@ -49,6 +49,18 @@
        warning uses a dark amber for readability on light backgrounds */
     --success-text-color: #0f7b0f;
     --warning-text-color: #9a6700;
+    /* flyout: 下拉选择器等弹出面板。背景/边框/圆角对应 WinUI AcrylicBackgroundFillColorDefault
+       的纯色回退、SurfaceStrokeColorFlyout 与 OverlayCornerRadius(8px)；列表项底色对应
+       SubtleFillColorSecondary(hover) / SubtleFillColorTertiary(pressed/selected) */
+    --flyout-background: #f9f9f9;
+    --flyout-border-color: #00000029;
+    --flyout-border-radius: 8px;
+    --flyout-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 0 2px rgba(0, 0, 0, 0.08);
+    --flyout-item-background-hover: #00000009;
+    --flyout-item-background-active: #00000006;
+    --flyout-item-background-selected: #00000006;
+    /* 键盘焦点外框: WinUI FocusStrokeColorOuter */
+    --focus-stroke: #00000089;
 }
 
 /* Dark theme overrides, based on WinUI 3 / Windows 11 Fluent Design dark color tokens.
@@ -103,4 +115,13 @@ html.dark {
        warning uses a bright amber for readability on dark backgrounds */
     --success-text-color: #6ccb5f;
     --warning-text-color: #d4a72c;
+    /* flyout: 暗色下 AcrylicBackgroundFillColorDefault 的纯色回退约为 #2c2c2c */
+    --flyout-background: #2c2c2c;
+    --flyout-border-color: #00000033;
+    --flyout-border-radius: 8px;
+    --flyout-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 2px rgba(0, 0, 0, 0.2);
+    --flyout-item-background-hover: #ffffff0f;
+    --flyout-item-background-active: #ffffff0a;
+    --flyout-item-background-selected: #ffffff0a;
+    --focus-stroke: #ffffff;
 }
