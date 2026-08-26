@@ -245,6 +245,28 @@ async function listenShortcutRegistration() {
 }
 // #endregion
 
+// #region AI 优选释义
+/**
+ * AI 优选释义开关的响应式镜像。
+ * config 对象本身不是响应式的，直接依赖其属性无法驱动界面更新，
+ * 故在页面初始化与开关变化时同步此 ref，用于控制 LLM 配置输入区的显隐。
+ */
+const llmEnabled = ref(false);
+
+/** 切换 AI 优选释义开关后同步响应式镜像并保存配置 */
+async function handleLlmEnabledChange() {
+    // v-model 的赋值先于本 handler 执行，此处 config.llmEnabled 已是最新值
+    llmEnabled.value = config.llmEnabled;
+    await commitConfig();
+}
+
+/** 重置 AI 优选释义开关后同步响应式镜像 */
+async function handleLlmEnabledResetClick() {
+    await handleResetClick('llmEnabled');
+    llmEnabled.value = config.llmEnabled;
+}
+// #endregion
+
 // 由于使用了 KeepAlive 不销毁页面，所以 onMounted 只会执行一次
 onBeforeMount(async () => {
     // 为需要初始化的变量赋值
@@ -258,6 +280,7 @@ onBeforeMount(async () => {
     pageInitialized.value = true;
     await listenShortcutRegistration();
     globalShortcut.value = config.globalShortcut;
+    llmEnabled.value = config.llmEnabled;
     // 从其他应用切回本应用时（如从系统设置授权后返回）自动刷新权限状态；
     // 页面随 KeepAlive 常驻，监听器无需注销
     try {
@@ -376,6 +399,43 @@ onActivated(async () => {
                         <span class="switch-note">选择窗口关闭后（后台运行期间）应用图标的显示位置；窗口打开时图标始终显示在 Dock 栏</span>
                     </div>
                 </template>
+            </template>
+
+            <div style="height: 12px;"></div>
+            <h2>AI 优选释义</h2>
+            <div class="term">
+                <span>启用 AI 优选释义</span>
+                <ResetButton @click="handleLlmEnabledResetClick" />
+            </div>
+            <div class="switch-row">
+                <ElSwitch v-model="config.llmEnabled" @change="handleLlmEnabledChange" />
+                <span class="switch-note">按句子语境从多本词典中优选释义，需自行配置 LLM API</span>
+            </div>
+            <template v-if="llmEnabled">
+                <div class="term">
+                    <span>API 地址</span>
+                    <ResetButton @click="handleResetClick('llmBaseUrl')" />
+                </div>
+                <FluentInput class="input-text" placeholder="如 https://api.deepseek.com" v-model="config.llmBaseUrl"
+                    @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
+                <div class="term">
+                    <span>API Key</span>
+                    <ResetButton @click="handleResetClick('llmApiKey')" />
+                </div>
+                <FluentInput class="input-text" placeholder="请输入 API Key（仅保存在本地配置）" v-model="config.llmApiKey"
+                    @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
+                <div class="term">
+                    <span>模型</span>
+                    <ResetButton @click="handleResetClick('llmModel')" />
+                </div>
+                <FluentInput class="input-text" placeholder="如 deepseek-v4-flash" v-model="config.llmModel"
+                    @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
+                <div class="term">
+                    <span>思考强度</span>
+                    <ResetButton @click="handleResetClick('llmReasoningEffort')" />
+                </div>
+                <FluentInput class="input-text" placeholder="留空则不传参；常见取值 low / medium / high"
+                    v-model="config.llmReasoningEffort" @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
             </template>
 
             <div style="height: 12px;"></div>

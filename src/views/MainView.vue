@@ -10,6 +10,9 @@ import * as anki from '../logics/anki';
 import * as cfg from '../logics/config';
 import * as globals from '../logics/globals';
 import * as preference from '../logics/preference';
+import * as aiPickLogic from '../logics/aiPick';
+import { isLlmReady, type LlmRequestConfig } from '../logics/llm';
+import AiPickCard from '../components/AiPickCard.vue';
 import { FluentButton, FluentSelect, FluentInput, FluentRadio } from '../fluent-controls';
 import {
     CardStatus,
@@ -48,17 +51,22 @@ const wordItems = reactive({
     'oxford': [] as ItemModel<dict.OxfordItem>[],
     'youdao': [] as ItemModel<dict.YoudaoItem>[]
 });
-/** 将有道词典的搜索结果分为 concise, web, phrase 三类 */
+/**
+ * 将有道词典的搜索结果分为 concise, web, phrase 三类。
+ * 每项携带其在 wordItems.youdao 中的扁平索引：分组 v-for 的组内索引与
+ * changeItemAdded/openEditDialog 按扁平索引取词的语义不一致，直接传组内索引会操作错位条目，
+ * 因此卡片一律绑定 flatIndex。
+ */
 const wordItemsYoudao = computed(() => {
-    const itemModels = {
-        'concise': [] as ItemModel<dict.YoudaoItem>[],
-        'web': [] as ItemModel<dict.YoudaoItem>[],
-        'phrase': [] as ItemModel<dict.YoudaoItem>[]
+    const groups = {
+        'concise': [] as { model: ItemModel<dict.YoudaoItem>, flatIndex: number }[],
+        'web': [] as { model: ItemModel<dict.YoudaoItem>, flatIndex: number }[],
+        'phrase': [] as { model: ItemModel<dict.YoudaoItem>, flatIndex: number }[]
     };
-    for (const wordItem of wordItems.youdao) {
-        itemModels[wordItem.item.meaningType].push(wordItem);
-    }
-    return itemModels;
+    wordItems.youdao.forEach((model, flatIndex) => {
+        groups[model.item.meaningType].push({ model, flatIndex });
+    });
+    return groups;
 });
 /** 正在搜索或上一次成功搜索的单词，用于防止重复搜索 */
 const searchingOrSearchedWords = {
@@ -76,12 +84,21 @@ watch(tokens, async newTokens => {
         .map(token => token.token)
         .join(' ');
     searchText.value = newSearchText;
-    await searchAndUpdate(newSearchText, selectedDict.value);
+    await submitSearch();
 }, { deep: true });
 
 /** 所选的词典改变时，在所选词典中搜索新单词 */
 watch(selectedDict, async newSelected => {
-    await searchAndUpdate(searchText.value, newSelected);
+    const succeeded = await searchAndUpdate(searchText.value, newSelected);
+    // 切词典后候选总数较 AI 请求时的快照变多，说明此前预取缺货导致 AI 误走 fallback，
+    // 值得用更全的候选自动补触发一次优选；候选数不再增长时不会重复触发，无循环风险
+    const candidateTotal = wordItems.collins.length + wordItems.oxford.length + wordItems.youdao.length;
+    if (succeeded && aiPick.phase === 'done' && aiPick.fallback
+        && searchText.value.trim().length > 0 && candidateTotal > aiCandidateTotal) {
+        aiPickLogic.invalidateAiPickCache(sentence.value, searchText.value);
+        resetAiPick();
+        void maybeStartAiPick(searchText.value);
+    }
 });
 
 /** 搜索框中的文字改变时，搜索新单词 */
@@ -104,32 +121,35 @@ watch(selectedPronunciation, newPronunciation => {
 });
 
 /** 输入框内容改变时调用节流版搜索函数，避免过于频繁地搜索 */
-const throttledSearch = utils.throttle(async () => {
-    await searchAndUpdate(searchText.value, selectedDict.value);
-}, 200);
+const throttledSearch = utils.throttle(submitSearch, 200);
 
-const throttledYoudaoSearch = utils.throttle(async () => {
-    await searchAndUpdate(searchText.value, 'youdao');
-}, 400);
+const throttledYoudaoSearch = utils.throttle(submitSearch, 400);
 
 /**
  * 搜索单词，并用搜索结果更新 wordItems。
- * 
+ *
  * 点击“查询”按钮或按下回车键时直接调用此函数。
+ *
+ * @param options.suppressErrorDialog 为 true 时查询失败只 console.error 不弹 dialog（供 AI 预取静默重试）
+ * @returns 查询失败时返回 false，其余路径（含去重早退、空词清空、成功）返回 true
  */
-async function searchAndUpdate(word: string, dictionary: 'collins' | 'oxford' | 'youdao') {
+async function searchAndUpdate(
+    word: string,
+    dictionary: 'collins' | 'oxford' | 'youdao',
+    options?: { suppressErrorDialog?: boolean; }
+): Promise<boolean> {
     word = word.trim();
     if (word.length === 0) {
         wordItems[dictionary] = [];
         // 界面上的单词列表已清空，无法复用，因此对于任何单词都要重新搜索
         searchingOrSearchedWords[dictionary] = '';
-        return;
+        return true;
     }
     if (word === searchingOrSearchedWords[dictionary]) {
         // 无需重复搜索
         // - 若 word 正在被搜索，则等待搜索结果即可
         // - 若 word 上次已被搜索成功，则复用界面上的单词列表
-        return;
+        return true;
     }
     // 新单词的搜索请求，清空界面上的已有的搜索结果
     wordItems[dictionary] = [];
@@ -155,14 +175,17 @@ async function searchAndUpdate(word: string, dictionary: 'collins' | 'oxford' | 
         if (searchingOrSearchedWords[dictionary] === word) {
             searchingOrSearchedWords[dictionary] = '';
             console.error(error);
-            await api.dialog.message(String(error), { title: '查询失败', kind: 'error' });
+            if (options?.suppressErrorDialog !== true) {
+                await api.dialog.message(String(error), { title: '查询失败', kind: 'error' });
+            }
         }
-        return;
+        return false;
     }
     // 仅在本次搜索结果有效时更新搜索结果单词列表
     if (searchingOrSearchedWords[dictionary] === word) {
         wordItems[dictionary] = results.map(item => ({ item, status: 'not-added', id: null }) as ItemModel<any>);
     }
+    return true;
 }
 // #endregion
 
@@ -213,6 +236,127 @@ async function handleEditTextAreaKeydown(event: KeyboardEvent) {
         await changeEditStatus();
     }
 }
+// #endregion
+
+// #region AI 优选释义
+/** AI 优选卡片的状态 */
+const aiPick = reactive<aiPickLogic.AiPickState>(aiPickLogic.createIdleAiPickState());
+/** 进行中的 AI 请求的中止器 */
+let aiAbort: AbortController | null = null;
+/** 当前 aiPick 状态对应的搜索 key（sentence|word），用于防止重复发起 */
+let aiSearchedKey = '';
+/** 本次 AI 请求送入的候选总数快照，用于检测切词典后候选变多（预取缺货）并补触发优选 */
+let aiCandidateTotal = 0;
+/** 是否显示 AI 优选卡片（idle/error 时不渲染） */
+const showAiPickCard = computed(() =>
+    aiPick.phase === 'loading' || aiPick.phase === 'streaming' || aiPick.phase === 'done');
+
+/** AI 优选卡片加号按钮的状态：跟随 AI 选中的那条词典条目的添加状态 */
+const aiPickCardStatus = computed<CardStatus>(() => {
+    if (aiPick.pick == null) {
+        return 'not-added';
+    }
+    return wordItems[aiPick.pick.source][aiPick.pick.index]?.status ?? 'not-added';
+});
+
+function resetAiPick() {
+    Object.assign(aiPick, aiPickLogic.createIdleAiPickState());
+    aiSearchedKey = '';
+}
+
+/** 判断指定词典的指定条目是否为当前 AI 优选命中的条目 */
+function isAiPicked(source: aiPickLogic.DictSource, index: number): boolean {
+    return aiPick.pick != null && aiPick.pick.source === source && aiPick.pick.index === index;
+}
+
+/** 指定条目的 AI 笔记（未命中时为空串，供词典卡片 props 使用） */
+function aiNoteFor(source: aiPickLogic.DictSource, index: number): string {
+    return isAiPicked(source, index) ? aiPick.note : '';
+}
+
+/**
+ * 提交一次有效搜索后调用：若启用并配置好了 LLM，则并行搜索三本词典（填满 wordItems，
+ * 保证候选与界面条目索引对齐、切 tab 即时）并发起 AI 优选；否则在无进行中请求时重置为 idle。
+ */
+async function maybeStartAiPick(word: string) {
+    const trimmed = word.trim();
+    const llmConfig: LlmRequestConfig = {
+        baseUrl: config.llmBaseUrl,
+        apiKey: config.llmApiKey,
+        model: config.llmModel,
+        reasoningEffort: config.llmReasoningEffort
+    };
+    if (trimmed.length === 0 || !config.llmEnabled || !isLlmReady(llmConfig)) {
+        if (aiAbort == null) {
+            resetAiPick();
+        }
+        return;
+    }
+    const key = aiPickLogic.makeAiPickCacheKey(sentence.value, trimmed);
+    if (key === aiSearchedKey && aiPick.phase !== 'idle') {
+        return; // 同一「句子+单词」已在进行或已有结果（含 error，不自动重试）
+    }
+    // 快速连点：中止旧请求
+    aiAbort?.abort();
+    const controller = new AbortController();
+    aiAbort = controller;
+    aiSearchedKey = key;
+    try {
+        // 并行搜索三本词典；searchingOrSearchedWords 去重保证已查过的词典立即返回。
+        // 预取失败（多为有道的 HTTP 抖动）时静默重试一次，避免候选缺失导致 AI 误走 fallback
+        const prefetch = async (dictionary: 'collins' | 'oxford' | 'youdao'): Promise<void> => {
+            let ok = await searchAndUpdate(trimmed, dictionary, { suppressErrorDialog: true });
+            if (!ok) {
+                console.warn(`[aiPick] ${dictionary} 预取失败，重试一次`);
+                ok = await searchAndUpdate(trimmed, dictionary, { suppressErrorDialog: true });
+                if (!ok) {
+                    console.warn(`[aiPick] ${dictionary} 候选缺失，本次优选将不含该来源`);
+                }
+            }
+        };
+        await Promise.all([prefetch('collins'), prefetch('oxford'), prefetch('youdao')]);
+        console.debug(`[aiPick] 候选数量 collins=${wordItems.collins.length} oxford=${wordItems.oxford.length} youdao=${wordItems.youdao.length}`);
+        // 等待期间若已有更新的搜索接管，则放弃本次发起
+        if (aiAbort !== controller || controller.signal.aborted) {
+            return;
+        }
+        aiCandidateTotal = wordItems.collins.length + wordItems.oxford.length + wordItems.youdao.length;
+        await aiPickLogic.requestAiPick({
+            sentence: sentence.value,
+            word: trimmed,
+            config: llmConfig,
+            signal: controller.signal,
+            sources: {
+                collins: wordItems.collins.map(model => model.item),
+                oxford: wordItems.oxford.map(model => model.item),
+                youdao: wordItems.youdao.map(model => model.item)
+            },
+            onUpdate: state => {
+                // 只接受当前请求的回调，丢弃被中止请求的陈旧回调
+                if (aiAbort === controller) {
+                    Object.assign(aiPick, state);
+                }
+            }
+        });
+    } finally {
+        if (aiAbort === controller) {
+            aiAbort = null;
+        }
+    }
+}
+
+/** 提交一次有效搜索：更新当前词典的搜索结果，并按需触发 AI 优选 */
+async function submitSearch() {
+    await searchAndUpdate(searchText.value, selectedDict.value);
+    void maybeStartAiPick(searchText.value);
+}
+
+/** sentence 或 searchText 变化时，若无进行中的 AI 请求，则把 AI 卡片重置为 idle */
+watch([sentence, searchText], () => {
+    if (aiAbort == null && aiPick.phase !== 'idle') {
+        resetAiPick();
+    }
+});
 // #endregion
 
 // #region 全局快捷键划词录入
@@ -311,9 +455,14 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
     }
 }
 
-async function changeItemAdded(index: number) {
-    const selected = selectedDict.value;
-    const item = wordItems[selected][index];
+/**
+ * 切换指定词典中指定条目的加卡状态（添加/取消添加）。
+ *
+ * 词典参数独立出来，是为了让 AI 优选卡片能跨词典操作其选中的条目（可能与当前 tab 不同）；
+ * AI 笔记注入判断仍用 isAiPicked(dictionary, index)，仅命中条目带笔记时写入「笔记」字段
+ */
+async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', index: number) {
+    const item = wordItems[dictionary][index];
     const pronunciationType = selectedPronunciation.value;
     if (item.status === 'not-added') { // add to Anki
         item.status = 'processing-add';
@@ -343,7 +492,11 @@ async function changeItemAdded(index: number) {
             return; // prepareDeckAndModel has already shown the error message
         }
         try {
-            const fields = anki.makeFields(selected, item.item, makeSentenceHTML());
+            const fields = anki.makeFields(dictionary, item.item, makeSentenceHTML());
+            // AI 优选联动：若所加条目正是 AI 优选命中的条目且带有笔记，则写入「笔记」字段
+            if (aiPick.note.length > 0 && isAiPicked(dictionary, index)) {
+                fields['笔记'] = aiPick.note;
+            }
             const word = ('phrase' in item.item && item.item.phrase != null)
                 ? item.item.phrase
                 : item.item.word;
@@ -383,6 +536,18 @@ async function changeItemAdded(index: number) {
             console.error(error);
             await api.dialog.message(String(error), { title: '删除失败', kind: 'error' });
         }
+    }
+}
+
+/** 词典卡片的加卡入口：操作当前所选词典中的条目 */
+async function changeItemAdded(index: number) {
+    await changeItemAddedOf(selectedDict.value, index);
+}
+
+/** AI 优选卡片的加卡入口：操作 AI 选中的那条真实词典条目，可能与当前 tab 不同词典 */
+async function handleAiPickAdd() {
+    if (aiPick.pick != null) {
+        await changeItemAddedOf(aiPick.pick.source, aiPick.pick.index);
     }
 }
 
@@ -435,6 +600,14 @@ onBeforeMount(async () => {
         globals.getConfig(),
         globals.getAnkiService()
     ]);
+    // 关闭 AI 优选功能时：中止进行中的请求并重置卡片，界面恢复原样
+    watch(() => config.llmEnabled, enabled => {
+        if (!enabled) {
+            aiAbort?.abort();
+            aiAbort = null;
+            resetAiPick();
+        }
+    });
     // 恢复用户选项
     const cachedDict = preference.get('selectedDict') as 'collins' | 'oxford' | 'youdao';
     if (cachedDict != null && ['collins', 'oxford', 'youdao'].includes(cachedDict)) {
@@ -461,8 +634,8 @@ onBeforeMount(async () => {
             </FluentButton>
             <FluentButton class="header-button" @click="pasteToEdit">粘贴</FluentButton>
             <FluentInput class="header-input-text" type="text" v-model="searchText" placeholder="回车查询单词" name="search"
-                autocomplete="off" @keydown.enter="searchAndUpdate(searchText, selectedDict)" />
-            <FluentButton class="header-button" @click="searchAndUpdate(searchText, selectedDict)">查询
+                autocomplete="off" @keydown.enter="submitSearch()" />
+            <FluentButton class="header-button" @click="submitSearch()">查询
             </FluentButton>
             <FluentSelect class="header-select" v-model="selectedDict" name="dict">
                 <option value="collins">柯林斯词典</option>
@@ -486,31 +659,48 @@ onBeforeMount(async () => {
                     class="pronunciation-radio-box" />
             </div>
             <ScrollMemory :show="selectedDict === 'collins'" class="words-container-inner">
+                <!-- AI 优选卡随列表内容滚动，每个词典容器内各放一份（内容同源） -->
+                <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
+                    @add-btn-click="handleAiPickAdd" />
                 <CollinsCard v-for="(item, index) in wordItems['collins']" :key="index" :item="item.item" :index="index"
-                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
+                    :status="item.status" :ai-picked="isAiPicked('collins', index)"
+                    :ai-note="aiNoteFor('collins', index)" @add-btn-click="changeItemAdded"
+                    @edit-btn-click="openEditDialog" />
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'oxford'" class="words-container-inner">
+                <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
+                    @add-btn-click="handleAiPickAdd" />
                 <OxfordCard v-for="(item, index) in wordItems['oxford']" :key="index" :item="item.item" :index="index"
-                    :status="item.status" @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog" />
+                    :status="item.status" :ai-picked="isAiPicked('oxford', index)"
+                    :ai-note="aiNoteFor('oxford', index)" @add-btn-click="changeItemAdded"
+                    @edit-btn-click="openEditDialog" />
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'youdao'" class="words-container-inner">
+                <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
+                    @add-btn-click="handleAiPickAdd" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['concise'].length > 0" class="youdao-title">
                     简明释义
                 </div>
-                <YoudaoCard v-for="(item, index) in wordItemsYoudao['concise']" :key="index" :item="item.item"
-                    :index="index" :status="item.status" @add-btn-click="changeItemAdded"
+                <YoudaoCard v-for="entry in wordItemsYoudao['concise']" :key="entry.flatIndex" :item="entry.model.item"
+                    :index="entry.flatIndex" :status="entry.model.status"
+                    :ai-picked="isAiPicked('youdao', entry.flatIndex)"
+                    :ai-note="aiNoteFor('youdao', entry.flatIndex)" @add-btn-click="changeItemAdded"
                     @edit-btn-click="openEditDialog" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['web'].length > 0" class="youdao-title">
                     网络释义
                 </div>
-                <YoudaoCard v-for="(item, index) in wordItemsYoudao['web']" :key="index" :item="item.item"
-                    :index="index" :status="item.status" @add-btn-click="changeItemAdded"
+                <YoudaoCard v-for="entry in wordItemsYoudao['web']" :key="entry.flatIndex" :item="entry.model.item"
+                    :index="entry.flatIndex" :status="entry.model.status"
+                    :ai-picked="isAiPicked('youdao', entry.flatIndex)"
+                    :ai-note="aiNoteFor('youdao', entry.flatIndex)" @add-btn-click="changeItemAdded"
                     @edit-btn-click="openEditDialog" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['phrase'].length > 0" class="youdao-title">
                     短语
                 </div>
-                <YoudaoCard v-for="(item, index) in wordItemsYoudao['phrase']" :key="index" :item="item.item"
-                    :index="index" :status="item.status" @add-btn-click="changeItemAdded"
+                <YoudaoCard v-for="entry in wordItemsYoudao['phrase']" :key="entry.flatIndex" :item="entry.model.item"
+                    :index="entry.flatIndex" :status="entry.model.status"
+                    :ai-picked="isAiPicked('youdao', entry.flatIndex)"
+                    :ai-note="aiNoteFor('youdao', entry.flatIndex)" @add-btn-click="changeItemAdded"
                     @edit-btn-click="openEditDialog" />
             </ScrollMemory>
         </div>

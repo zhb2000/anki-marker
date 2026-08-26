@@ -12,9 +12,14 @@ interface ConfigModel {
     globalShortcut: string;
     keepRunningOnClose: boolean;
     backgroundIcon: 'dock' | 'menu-bar' | 'none';
+    llmEnabled: boolean;
+    llmBaseUrl: string;
+    llmApiKey: string;
+    llmModel: string;
+    llmReasoningEffort: string;
 }
 
-const CONFIG_KEYS = ['ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut', 'keepRunningOnClose', 'backgroundIcon'] as const;
+const CONFIG_KEYS = ['ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut', 'keepRunningOnClose', 'backgroundIcon', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmReasoningEffort'] as const;
 
 /** 配置项的默认值 */
 export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
@@ -27,6 +32,11 @@ export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     globalShortcut: '',
     keepRunningOnClose: true,
     backgroundIcon: 'dock',
+    llmEnabled: false,
+    llmBaseUrl: '',
+    llmApiKey: '',
+    llmModel: '',
+    llmReasoningEffort: '',
 };
 
 /**
@@ -60,6 +70,16 @@ export class Config implements ConfigModel {
     public keepRunningOnClose!: boolean;
     /** 后台运行期间应用图标的显示位置（仅 macOS）：dock=Dock 栏、menu-bar=菜单栏、none=都不显示 */
     public backgroundIcon!: 'dock' | 'menu-bar' | 'none';
+    /** 是否启用 AI 优选释义（LLM） */
+    public llmEnabled!: boolean;
+    /** LLM 服务的 Base URL，留空表示未配置 */
+    public llmBaseUrl!: string;
+    /** LLM 服务的 API Key，留空表示未配置 */
+    public llmApiKey!: string;
+    /** LLM 使用的模型名，留空表示未配置 */
+    public llmModel!: string;
+    /** LLM 的推理强度（reasoning effort），留空表示使用模型默认值 */
+    public llmReasoningEffort!: string;
     /** 存储配置项的对象 */
     private config: ConfigModel;
     /** 被修改过的配置项 */

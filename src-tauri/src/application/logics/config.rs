@@ -36,6 +36,11 @@ pub struct Config {
     global_shortcut: String,
     keep_running_on_close: bool,
     background_icon: BackgroundIcon,
+    llm_enabled: bool,
+    llm_base_url: String,
+    llm_api_key: String,
+    llm_model: String,
+    llm_reasoning_effort: String,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -51,6 +56,11 @@ pub struct PartialConfig {
     global_shortcut: Option<String>,
     keep_running_on_close: Option<bool>,
     background_icon: Option<BackgroundIcon>,
+    llm_enabled: Option<bool>,
+    llm_base_url: Option<String>,
+    llm_api_key: Option<String>,
+    llm_model: Option<String>,
+    llm_reasoning_effort: Option<String>,
 }
 
 impl Config {
@@ -83,6 +93,11 @@ impl Default for Config {
             global_shortcut: String::new(),
             keep_running_on_close: true,
             background_icon: BackgroundIcon::Dock,
+            llm_enabled: false,
+            llm_base_url: String::new(),
+            llm_api_key: String::new(),
+            llm_model: String::new(),
+            llm_reasoning_effort: String::new(),
         };
     }
 }
@@ -165,6 +180,31 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             Some("none") => BackgroundIcon::None,
             _ => BackgroundIcon::Dock,
         };
+        // AI 优选释义相关为后加的键，老配置文件中没有这些键，必须带缺省回退
+        let llm_enabled = doc
+            .get("llm-enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let llm_base_url = doc
+            .get("llm-base-url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let llm_api_key = doc
+            .get("llm-api-key")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let llm_model = doc
+            .get("llm-model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let llm_reasoning_effort = doc
+            .get("llm-reasoning-effort")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         return Ok(Config {
             anki_connect_url: anki_connect_url.to_string(),
             deck_name: deck_name.to_string(),
@@ -175,6 +215,11 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             global_shortcut,
             keep_running_on_close,
             background_icon,
+            llm_enabled,
+            llm_base_url,
+            llm_api_key,
+            llm_model,
+            llm_reasoning_effort,
         });
     }
     return inner(config_path.as_ref());
@@ -216,6 +261,21 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
         }
         if let Some(background_icon) = modified.background_icon {
             doc["background-icon"] = toml_edit::value(background_icon.as_toml_str());
+        }
+        if let Some(llm_enabled) = modified.llm_enabled {
+            doc["llm-enabled"] = toml_edit::value(llm_enabled);
+        }
+        if let Some(llm_base_url) = modified.llm_base_url {
+            doc["llm-base-url"] = toml_edit::value(llm_base_url);
+        }
+        if let Some(llm_api_key) = modified.llm_api_key {
+            doc["llm-api-key"] = toml_edit::value(llm_api_key);
+        }
+        if let Some(llm_model) = modified.llm_model {
+            doc["llm-model"] = toml_edit::value(llm_model);
+        }
+        if let Some(llm_reasoning_effort) = modified.llm_reasoning_effort {
+            doc["llm-reasoning-effort"] = toml_edit::value(llm_reasoning_effort);
         }
         std::fs::write(config_path, doc.to_string()).map_err(|e| {
             format!(
