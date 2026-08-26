@@ -10,7 +10,7 @@ import '../assets/markdown-dark.css';
 import * as globals from '../logics/globals';
 import * as cfg from '../logics/config';
 import * as anki from '../logics/anki';
-import { FluentInput, FluentButton, FluentHyperlink } from '../fluent-controls';
+import { FluentInput, FluentPasswordInput, FluentButton, FluentHyperlink } from '../fluent-controls';
 import { ReturnButton, ResetButton, ShortcutRecorder } from '../components';
 import { invoke, debounce } from '../logics/utils';
 import OpenFilledSvg from '../assets/OpenFilled.svg';
@@ -422,8 +422,8 @@ onActivated(async () => {
                     <span>API Key</span>
                     <ResetButton @click="handleResetClick('llmApiKey')" />
                 </div>
-                <FluentInput class="input-text" placeholder="请输入 API Key（仅保存在本地配置）" v-model="config.llmApiKey"
-                    @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
+                <FluentPasswordInput class="input-text" placeholder="请输入 API Key（仅保存在本地配置）"
+                    v-model="config.llmApiKey" @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
                 <div class="term">
                     <span>模型</span>
                     <ResetButton @click="handleResetClick('llmModel')" />
