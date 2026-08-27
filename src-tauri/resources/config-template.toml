@@ -1,6 +1,9 @@
 # 请勿手动修改此字段
 __minimal-version__ = "0.0.1"
 
+# 主题模式：system = 跟随系统（默认）、light = 浅色、dark = 深色
+theme = "system"
+
 # AnkiConnect 服务的 URL
 anki-connect-url = "http://localhost:8765"
 

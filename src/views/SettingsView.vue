@@ -1,309 +1,91 @@
 <script setup lang="ts">
 import { ref, computed, onActivated, onBeforeMount } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import * as api from '../tauri-api';
-import { ElMessage, ElPopconfirm, ElDialog, ElSwitch, ElRadioGroup, ElRadio } from 'element-plus';
-import MarkdownIt from 'markdown-it';
-import 'github-markdown-css';
-import '../assets/markdown-dark.css';
 
+import { useSettingsStore } from '../logics/settings-store';
+import {
+    SETTINGS_PAGES, searchSettings,
+    type SettingEntry, type SettingsPageId,
+} from '../logics/settings-registry';
 import * as globals from '../logics/globals';
-import * as cfg from '../logics/config';
-import * as anki from '../logics/anki';
-import { FluentInput, FluentPasswordInput, FluentButton, FluentHyperlink } from '../fluent-controls';
-import { ReturnButton, ResetButton, ShortcutRecorder } from '../components';
-import { invoke, debounce } from '../logics/utils';
-import OpenFilledSvg from '../assets/OpenFilled.svg';
-import GitHubSvg from '../assets/github.svg';
+import { accessibilityTrusted, checkAccessibilityTrust, shortcutError } from '../logics/shortcut-status';
+import { FluentInput } from '../fluent-controls';
+import { ReturnButton } from '../components';
 
-
-/** avoid rendering before the config is loaded */
-const pageInitialized = ref(false);
-let config: cfg.Config;
-let ankiService: anki.AnkiService;
-const markdownIt = new MarkdownIt();
-
-// #region 设置项的保存
 const router = useRouter();
+const route = useRoute();
+const store = useSettingsStore();
 
-async function commitConfig() {
-    if (config != null) {
-        try {
-            await config.commit();
-        } catch (error) {
-            console.error(error);
-            await api.dialog.message(String(error), { title: '配置文件保存失败', kind: 'error' });
-        }
+/** init 完成前不渲染内容区（等价原 pageInitialized，避免闪烁默认值） */
+const ready = store.ready;
+
+/** 是否为 macOS（划词设置页仅支持 macOS，非 macOS 隐藏对应导航项） */
+const isMacOS = api.os.type() === 'macos';
+
+/** 当前平台需要显示的导航页（macOnly 项在非 macOS 不渲染） */
+const visiblePages = computed(() => SETTINGS_PAGES.filter(page => !page.macOnly || isMacOS));
+
+/** 页面 id → 页面标题，用于搜索结果条目展示所属页名 */
+const pageTitles = Object.fromEntries(
+    SETTINGS_PAGES.map(page => [page.id, page.title])
+) as Record<SettingsPageId, string>;
+
+/** 判断导航项是否为当前页（active 判断用 route.path） */
+function isActivePage(pageId: SettingsPageId): boolean {
+    return route.path === `/settings/${pageId}`;
+}
+
+/**
+ * 导航项是否需要显示关注红点：
+ * - 关于：应用更新可用，或 Anki 内笔记模板有更新
+ * - 划词：辅助功能权限未授权，或全局快捷键注册失败（冲突）
+ */
+function hasAttentionBadge(pageId: SettingsPageId): boolean {
+    if (pageId === 'about') {
+        return globals.appUpdateAvailable.value || globals.templateUpdateAvailable.value;
     }
+    if (pageId === 'selection') {
+        return accessibilityTrusted.value === false || shortcutError.value != null;
+    }
+    return false;
 }
 
-/** 输入框自动保存的防抖间隔（毫秒）：停止输入一段时间后自动保存，缩小未保存修改的窗口期 */
-const INPUT_AUTOSAVE_DEBOUNCE_MS = 500;
+// #region 搜索
+/** 搜索框内容 */
+const searchQuery = ref('');
 
-/** 防抖自动保存：输入期间持续触发会重置计时，停止输入一段时间后自动保存 */
-const debouncedCommitConfig = debounce(() => void commitConfig(), INPUT_AUTOSAVE_DEBOUNCE_MS);
+/** 搜索结果（空 query 时 searchSettings 返回 []） */
+const searchResults = computed(() => searchSettings(searchQuery.value));
 
-/** 输入内容变化时防抖自动保存（输入框失焦时会取消待触发的防抖保存并立即保存） */
-function handleInputUpdate() {
-    debouncedCommitConfig();
+/** 是否处于搜索态（输入非空时左栏导航替换为搜索结果列表） */
+const isSearching = computed(() => searchQuery.value.trim().length > 0);
+
+/** 点击搜索结果：跳转所属页并带上高亮锚点 query，然后清空搜索框恢复导航 */
+function handleResultClick(entry: SettingEntry) {
+    void router.push({ path: `/settings/${entry.page}`, query: { h: entry.id } });
+    searchQuery.value = '';
 }
+// #endregion
 
-/** 点击返回按钮时先保存设置再返回 */
+/** 点击返回按钮时先保存设置再返回主页（用 push 而非 back，避免在分类间倒走） */
 async function handleReturnClick() {
-    debouncedCommitConfig.cancel(); // 取消待触发的防抖保存，避免离开设置页后才执行保存
-    await commitConfig();
-    router.back();
+    await store.flush();
+    await router.push('/');
 }
 
-/** 输入框失去焦点时保存设置 */
-async function handleInputBlur() {
-    debouncedCommitConfig.cancel(); // 取消待触发的防抖保存，立即保存以免重复执行
-    await commitConfig();
-}
-
-/** 点击输入框右侧的重置按钮时重置设置并保存 */
-async function handleResetClick<K extends keyof typeof cfg.CONFIG_DEFAULTS>(key: K) {
-    // 配置项的值类型为 string 或 boolean（见 CONFIG_DEFAULTS），断言到具体键的属性类型
-    config[key] = cfg.CONFIG_DEFAULTS[key] as cfg.Config[K];
-    await commitConfig();
-}
-// #endregion
-
-// #region 更新应用
-let appVersion: string;
-/** 是否打开应用更新说明对话框 */
-const appReleaseNoteDialogVisible = ref(false);
-/** 渲染后的应用更新说明 */
-const renderedAppReleaseNote = computed(() => markdownIt.render(
-    `# ${globals.latestAppName.value ?? ''}\n` +
-    `${globals.latestAppBody.value ?? ''}`
-));
-/** 是否正在检查应用更新 */
-const checkingAppUpdate = ref(false);
-
-async function handleCheckUpdateClick() {
-    try {
-        checkingAppUpdate.value = true;
-        // 手动检查：force = true 绕过时间间隔检查，但仍使用 ETag 条件请求
-        await globals.fetchAndSetLatestAppInfo(true);
-    } catch (error) {
-        console.error(error);
-        await api.dialog.message(String(error), { title: '检查更新失败', kind: 'error' });
-        return;
-    } finally {
-        checkingAppUpdate.value = false;
-    }
-    if (globals.appUpdateAvailable.value) {
-        ElMessage.success(`发现应用新版本：${globals.latestAppVersion.value}`);
-    } else {
-        ElMessage.success('当前应用已是最新版本');
-    }
-}
-// #endregion
-
-// #region 更新模板
-/** 界面上显示的笔记模板版本 */
-const templateVersionDisplay = computed(() => {
-    if (globals.templateVersion.value == null) {
-        return '未知';
-    } else if (globals.templateVersion.value instanceof Error) {
-        return '获取失败';
-    }
-    return globals.templateVersion.value;
-});
-/** 是否打开笔记模板更新说明对话框 */
-const templateReleaseNoteDialogVisible = ref(false);
-import TEMPLATE_RELEASE_NOTE from '../assets/model-template-release-note.md?raw';
-/** 渲染后的笔记模板更新说明 */
-const renderedTemplateReleaseNote = markdownIt.render(TEMPLATE_RELEASE_NOTE);
-
-async function handleUpdateTemplateClick() {
-    try {
-        await ankiService.updateMarkerModel(config.modelName);
-    } catch (error) {
-        console.error(error);
-        await api.dialog.message(String(error), { title: '笔记模板更新失败', kind: 'error' });
-        return;
-    }
-    ElMessage.success('笔记模板更新成功');
-    templateReleaseNoteDialogVisible.value = false;
-    await globals.fetchAndSetTemplateVersion(config.modelName); // 刷新笔记模板版本
-}
-// #endregion
-
-// #region 打开配置文件
-/** 点击打开配置文件按钮 */
-async function handleOpenFileClick() {
-    try {
-        await cfg.openFile(config.path);
-    } catch (error) {
-        console.error(error);
-        await api.dialog.message(String(error), { title: '打开文件失败', kind: 'error' });
-    }
-}
-
-/** 点击打开配置文件所在目录按钮 */
-async function handleShowInExplorerClick() {
-    try {
-        await cfg.showInExplorer(config.path);
-    } catch (error) {
-        console.error(error);
-        await api.dialog.message(String(error), { title: '打开目录失败', kind: 'error' });
-    }
-}
-// #endregion
-
-// #region 全局快捷键
-/** 是否为 macOS（全局快捷键目前仅支持 macOS） */
-const isMacOS = computed(() => api.os.type() === 'macos');
-
-/**
- * 快捷键设置的响应式镜像。
- * config 对象本身不是响应式的，直接依赖其属性无法驱动界面更新，
- * 故在页面初始化与快捷键变化时同步此 ref。
- */
-const globalShortcut = ref('');
-
-/** 辅助功能权限状态：null 表示尚未检查 */
-const accessibilityTrusted = ref<boolean | null>(null);
-
-/** 辅助功能权限状态显示文本 */
-const accessibilityStatusText = computed(() => {
-    if (accessibilityTrusted.value === true) {
-        return '✓ 已授权';
-    } else if (accessibilityTrusted.value === false) {
-        return '⚠️ 未授权';
-    }
-    return '检查中…';
-});
-
-/** 辅助功能权限状态文本的颜色（跟随浅色/深色主题的语义色变量） */
-const accessibilityStatusClass = computed(() => {
-    if (accessibilityTrusted.value === true) {
-        return 'status-success';
-    } else if (accessibilityTrusted.value === false) {
-        return 'status-warning';
-    }
-    return '';
-});
-
-/** 检查辅助功能权限状态 */
-async function checkAccessibilityTrust() {
-    if (!isMacOS.value) {
-        return;
-    }
-    try {
-        accessibilityTrusted.value = await invoke<boolean>('is_accessibility_trusted');
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-/** 点击申请权限按钮：弹出系统授权弹窗；若弹窗曾被拒绝则直接打开系统设置的辅助功能面板 */
-async function handleRequestAccessibilityClick() {
-    try {
-        await invoke('request_accessibility_trust');
-    } catch (error) {
-        console.error(error);
-        await api.dialog.message(String(error), { title: '申请辅助功能权限失败', kind: 'error' });
-        return;
-    }
-    // 授权完成后切回本应用时，由窗口焦点监听自动刷新状态
-}
-
-/** 快捷键变更（录制/清除）后保存配置；快捷键从无到有时权限状态行首次出现，顺带检查一次权限 */
-async function handleShortcutChange() {
-    // v-model 的赋值先于本 handler 执行，此处 config.globalShortcut 已是最新值
-    globalShortcut.value = config.globalShortcut;
-    await commitConfig();
-    void checkAccessibilityTrust();
-}
-
-/** 重置快捷键设置后同步响应式镜像 */
-async function handleShortcutResetClick() {
-    await handleResetClick('globalShortcut');
-    globalShortcut.value = config.globalShortcut;
-}
-
-/** 快捷键注册结果（Rust 侧在注册/注销后 emit） */
-interface ShortcutRegistration {
-    success: boolean;
-    error: string | null;
-}
-
-/** 监听快捷键注册结果事件，仅在注册失败（如快捷键冲突）时向用户反馈 */
-async function listenShortcutRegistration() {
-    try {
-        await api.event.listen<ShortcutRegistration>('shortcut-registration', event => {
-            if (!event.payload.success) {
-                ElMessage.error(`全局快捷键注册失败：${event.payload.error ?? '未知错误'}`);
-            }
-        });
-    } catch (error) {
-        console.error(error);
-    }
-}
-// #endregion
-
-// #region AI 优选释义
-/**
- * AI 优选释义开关的响应式镜像。
- * config 对象本身不是响应式的，直接依赖其属性无法驱动界面更新，
- * 故在页面初始化与开关变化时同步此 ref，用于控制 LLM 配置输入区的显隐。
- */
-const llmEnabled = ref(false);
-
-/** 切换 AI 优选释义开关后同步响应式镜像并保存配置 */
-async function handleLlmEnabledChange() {
-    // v-model 的赋值先于本 handler 执行，此处 config.llmEnabled 已是最新值
-    llmEnabled.value = config.llmEnabled;
-    await commitConfig();
-}
-
-/** 重置 AI 优选释义开关后同步响应式镜像 */
-async function handleLlmEnabledResetClick() {
-    await handleResetClick('llmEnabled');
-    llmEnabled.value = config.llmEnabled;
-}
-// #endregion
-
-// 由于使用了 KeepAlive 不销毁页面，所以 onMounted 只会执行一次
+// 由于使用了 KeepAlive 不销毁页面，所以 onBeforeMount 只会执行一次
 onBeforeMount(async () => {
-    // 为需要初始化的变量赋值
-    await globals.initAtAppStart();
-    // plugin-os 2.3+ 中 type() 已改为同步函数，且其返回值在此处未被使用，故移除
-    [config, ankiService, appVersion] = await Promise.all([
-        globals.getConfig(),
-        globals.getAnkiService(),
-        globals.getAppVersion(),
-    ]);
-    pageInitialized.value = true;
-    await listenShortcutRegistration();
-    globalShortcut.value = config.globalShortcut;
-    llmEnabled.value = config.llmEnabled;
-    // 从其他应用切回本应用时（如从系统设置授权后返回）自动刷新权限状态；
-    // 页面随 KeepAlive 常驻，监听器无需注销
-    try {
-        await api.window.getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-            if (focused) {
-                void checkAccessibilityTrust();
-            }
-        });
-    } catch (error) {
-        console.error(error);
-    }
+    await store.init();
 });
 
-onActivated(async () => {
-    // 进入设置页面时检查辅助功能权限状态
+onActivated(() => {
+    // 进入设置页时从 config 全量回拷 state，同步外部修改
+    store.syncFromConfig();
+    // 刷新导航红点的数据源：辅助功能权限状态、Anki 内笔记模板版本
     void checkAccessibilityTrust();
-    // 打开设置页面时获取/刷新一次笔记模板版本
-    // 由于 vue 的生命周期钩子不会等待 async 函数执行完毕，
-    // 所以即使 onActivated 在 onBeforeMount 之后执行，页面的 config 变量仍可能未初始化（undefined）
-    await globals.fetchAndSetTemplateVersion((await globals.getConfig()).modelName);
+    void globals.getConfig().then(config => globals.fetchAndSetTemplateVersion(config.modelName));
 });
-
-
 </script>
 
 <template>
@@ -312,274 +94,49 @@ onActivated(async () => {
             <ReturnButton style="margin-right: 8px;" @click="handleReturnClick" />
             <h1 style="display: inline-block;">设置</h1>
         </div>
-        <div class="content-area" v-if="pageInitialized">
-            <h2>应用设置</h2>
-            <div class="term">
-                <span>AnkiConnect 服务</span>
-                <ResetButton @click="handleResetClick('ankiConnectURL')" />
-            </div>
-            <FluentInput class="input-text" placeholder="请输入 AnkiConnect 服务的 URL" v-model="config.ankiConnectURL"
-                @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
-            <div class="term">
-                <span>将划词结果添加到哪个牌组</span>
-                <ResetButton @click="handleResetClick('deckName')" />
-            </div>
-            <FluentInput class="input-text" placeholder="请输入牌组名称" v-model="config.deckName" @blur="handleInputBlur"
-                @update:model-value="handleInputUpdate" />
-            <div class="term">
-                <span>使用的笔记模板名称</span>
-                <ResetButton @click="handleResetClick('modelName')" />
-            </div>
-            <FluentInput class="input-text" placeholder="请输入笔记模板名称" v-model="config.modelName"
-                @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
-            <div class="term">
-                <span>自动启动 Anki</span>
-                <ResetButton @click="handleResetClick('autoLaunchAnki')" />
-            </div>
-            <div class="switch-row">
-                <ElSwitch v-model="config.autoLaunchAnki" @change="commitConfig" />
-                <span class="switch-note">添加笔记时若 Anki 未运行，将自动启动 Anki 并等待其就绪</span>
-            </div>
-            <div class="term">
-                <span>应用启动时启动 Anki</span>
-                <ResetButton @click="handleResetClick('launchAnkiOnAppStart')" />
-            </div>
-            <div class="switch-row">
-                <ElSwitch v-model="config.launchAnkiOnAppStart" @change="commitConfig" />
-                <span class="switch-note">应用启动时自动启动 Anki，无需等到添加笔记</span>
-            </div>
-            <div class="term">
-                <span>Anki 可执行文件路径</span>
-                <ResetButton @click="handleResetClick('ankiExecutablePath')" />
-            </div>
-            <FluentInput class="input-text" placeholder="留空则自动检测 Anki 路径" v-model="config.ankiExecutablePath"
-                @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
-
-            <template v-if="isMacOS">
-                <div class="term">
-                    <span>全局快捷键（录入句子）</span>
-                    <ResetButton @click="handleShortcutResetClick" />
-                </div>
-                <ShortcutRecorder class="input-text" v-model="config.globalShortcut"
-                    @update:model-value="handleShortcutChange" />
-                <div class="term" v-if="globalShortcut.length > 0">
-                    <span style="margin-right: 8px;">辅助功能权限：<span :class="accessibilityStatusClass">{{
-                        accessibilityStatusText }}</span></span>
-                    <FluentButton v-if="accessibilityTrusted === false" class="update-button"
-                        @click="handleRequestAccessibilityClick" accent>申请权限</FluentButton>
-                    <FluentButton class="update-button" @click="checkAccessibilityTrust">检查</FluentButton>
-                </div>
-                <div class="shortcut-note">
-                    在任意应用中选中一段文字后按下此快捷键，所选文字将录入划词面板并自动分词。
-                </div>
-                <div class="shortcut-note" v-if="globalShortcut.length > 0 && accessibilityTrusted === false">
-                    辅助功能未授权，划词功能可能无法使用。请点击上方“申请权限”按钮，并按系统提示授权本应用。
-                </div>
-                <div class="term">
-                    <span>关闭窗口后保持后台运行</span>
-                    <ResetButton @click="handleResetClick('keepRunningOnClose')" />
-                </div>
-                <div class="switch-row">
-                    <ElSwitch v-model="config.keepRunningOnClose" @change="commitConfig" />
-                    <span class="switch-note">关闭窗口后应用将在后台继续运行，可通过 Dock 图标、菜单栏图标或全局快捷键再次打开</span>
-                </div>
-                <template v-if="config.keepRunningOnClose">
-                    <div class="term">
-                        <span>后台运行时显示</span>
-                        <ResetButton @click="handleResetClick('backgroundIcon')" />
-                    </div>
-                    <div class="switch-row">
-                        <ElRadioGroup v-model="config.backgroundIcon" @change="commitConfig">
-                            <ElRadio value="dock">Dock 栏图标</ElRadio>
-                            <ElRadio value="menu-bar">菜单栏图标</ElRadio>
-                            <ElRadio value="none">都不显示</ElRadio>
-                        </ElRadioGroup>
-                    </div>
-                    <div class="switch-row">
-                        <span class="switch-note">选择窗口关闭后（后台运行期间）应用图标的显示位置；窗口打开时图标始终显示在 Dock 栏</span>
-                    </div>
-                </template>
-            </template>
-
-            <div style="height: 12px;"></div>
-            <h2>AI 优选释义</h2>
-            <div class="term">
-                <span>启用 AI 优选释义</span>
-                <ResetButton @click="handleLlmEnabledResetClick" />
-            </div>
-            <div class="switch-row">
-                <ElSwitch v-model="config.llmEnabled" @change="handleLlmEnabledChange" />
-                <span class="switch-note">按句子语境从多本词典中优选释义，需自行配置 LLM API</span>
-            </div>
-            <template v-if="llmEnabled">
-                <div class="term">
-                    <span>API 地址</span>
-                    <ResetButton @click="handleResetClick('llmBaseUrl')" />
-                </div>
-                <FluentInput class="input-text" placeholder="如 https://api.deepseek.com" v-model="config.llmBaseUrl"
-                    @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
-                <div class="term">
-                    <span>API Key</span>
-                    <ResetButton @click="handleResetClick('llmApiKey')" />
-                </div>
-                <FluentPasswordInput class="input-text" placeholder="请输入 API Key（仅保存在本地配置）"
-                    v-model="config.llmApiKey" @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
-                <div class="term">
-                    <span>模型</span>
-                    <ResetButton @click="handleResetClick('llmModel')" />
-                </div>
-                <FluentInput class="input-text" placeholder="如 deepseek-v4-flash" v-model="config.llmModel"
-                    @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
-                <div class="term">
-                    <span>思考强度</span>
-                    <ResetButton @click="handleResetClick('llmReasoningEffort')" />
-                </div>
-                <FluentInput class="input-text" placeholder="留空则不传参；常见取值 low / medium / high"
-                    v-model="config.llmReasoningEffort" @blur="handleInputBlur" @update:model-value="handleInputUpdate" />
-            </template>
-
-            <div style="height: 12px;"></div>
-            <h2>关于</h2>
-            <div class="term">
-                <span style="margin-right: 8px;">应用版本：{{ appVersion }}</span>
-                <FluentButton class="update-button" @click="handleCheckUpdateClick" :disabled="checkingAppUpdate">
-                    {{ checkingAppUpdate ? '检查中...' : '检查更新' }}
-                </FluentButton>
-                <FluentButton :accent="true" class="update-button" style="cursor: pointer;"
-                    v-if="globals.appUpdateAvailable.value" @click="cfg.openInBrowser(globals.latestAppHtmlURL.value)"
-                    :title="globals.latestAppHtmlURL.value">
-                    <span style="display: flex; align-items: center;">
-                        <OpenFilledSvg style="width: 16px; height: 16px; margin-right: 4px;" />
-                        <span style="padding-bottom: 2px;">下载更新</span>
-                    </span>
-                </FluentButton>
-                <FluentHyperlink v-if="globals.appUpdateAvailable.value" style="padding: 2px 2px; cursor: default;"
-                    title="查看应用更新说明" @click="appReleaseNoteDialogVisible = true">
-                    新版本：{{ globals.latestAppVersion }}
-                </FluentHyperlink>
-            </div>
-            <ElDialog v-model="appReleaseNoteDialogVisible" :title="`Anki 划词助手 ${globals.latestAppVersion.value} 更新说明`"
-                width="80%" center class="release-note-dialog">
-                <div style="padding: 0px 16px 0px 16px;" class="markdown-body" v-html="renderedAppReleaseNote"></div>
-                <template #footer>
-                    <div style="display: flex; align-items: center; justify-content: center;">
-                        <FluentButton :accent="true" class="update-button" style="cursor: pointer;"
-                            v-if="globals.appUpdateAvailable.value"
-                            @click="cfg.openInBrowser(globals.latestAppHtmlURL.value)"
-                            :title="globals.latestAppHtmlURL.value">
-                            <span style="display: flex; align-items: center;">
-                                <OpenFilledSvg style="width: 16px; height: 16px; margin-right: 4px;" />
-                                <span style="padding-bottom: 2px;">下载更新</span>
-                            </span>
-                        </FluentButton>
-                        <FluentButton @click="appReleaseNoteDialogVisible = false" class="update-button">
-                            关闭
-                        </FluentButton>
-                    </div>
-                </template>
-            </ElDialog>
-            <div class="term">
-                <span style="margin-right: 8px;">笔记模板版本：{{ templateVersionDisplay }}</span>
-                <FluentButton class="update-button" @click="globals.fetchAndSetTemplateVersion(config.modelName)">
-                    刷新
-                </FluentButton>
-                <ElPopconfirm title="是否更新笔记模板？" confirmButtonText="更新" cancelButtonText="取消" :width="180"
-                    @confirm="handleUpdateTemplateClick" v-if="globals.templateUpdateAvailable.value">
-                    <template #reference>
-                        <FluentButton :accent="true" class="update-button">
-                            更新模板
-                        </FluentButton>
+        <div class="body-area" v-if="ready">
+            <aside class="sidebar">
+                <FluentInput class="search-input" placeholder="搜索设置" v-model="searchQuery" clearable
+                    @keydown.esc="searchQuery = ''" />
+                <div class="sidebar-scroll">
+                    <template v-if="!isSearching">
+                        <RouterLink v-for="page in visiblePages" :key="page.id" :to="`/settings/${page.id}`"
+                            class="nav-item" :class="{ active: isActivePage(page.id) }">
+                            <span class="nav-icon">{{ page.icon }}</span>
+                            <span>{{ page.title }}</span>
+                            <span v-if="hasAttentionBadge(page.id)" class="nav-dot" title="有需要关注的项"></span>
+                        </RouterLink>
                     </template>
-                </ElPopconfirm>
-                <FluentHyperlink v-if="globals.templateUpdateAvailable.value" style="padding: 2px 2px; cursor: default;"
-                    title="查看模板更新说明" @click="templateReleaseNoteDialogVisible = true">
-                    新版本：{{ anki.CARD_TEMPLATE_VERSION }}
-                </FluentHyperlink>
-            </div>
-            <ElDialog v-model="templateReleaseNoteDialogVisible"
-                :title="`划词助手单词笔记模板 ${anki.CARD_TEMPLATE_VERSION} 更新说明`" width="80%" center class="release-note-dialog">
-                <div style="padding: 0px 16px 0px 16px;" class="markdown-body" v-html="renderedTemplateReleaseNote">
+                    <template v-else>
+                        <div v-for="entry in searchResults" :key="entry.id" class="result-item"
+                            @click="handleResultClick(entry)">
+                            <div class="result-title-line">
+                                <span class="result-title">{{ entry.title }}</span>
+                                <span class="result-page">{{ pageTitles[entry.page] }}</span>
+                            </div>
+                            <div class="result-desc" v-if="entry.description">{{ entry.description }}</div>
+                        </div>
+                        <div class="no-result" v-if="searchResults.length === 0">无匹配设置</div>
+                    </template>
                 </div>
-                <template #footer>
-                    <div style="display: flex; align-items: center; justify-content: center;">
-                        <ElPopconfirm title="是否更新笔记模板？" confirmButtonText="更新" cancelButtonText="取消" :width="180"
-                            @confirm="handleUpdateTemplateClick">
-                            <template #reference>
-                                <FluentButton :accent="true" class="update-button">
-                                    更新模板
-                                </FluentButton>
-                            </template>
-                        </ElPopconfirm>
-                        <FluentButton @click="templateReleaseNoteDialogVisible = false" class="update-button">
-                            关闭
-                        </FluentButton>
-                    </div>
-                </template>
-            </ElDialog>
-            <div class="term">
-                作者：
-                <FluentHyperlink @click="cfg.openInBrowser('https://github.com/zhb2000')"
-                    title="https://github.com/zhb2000" style="display: flex; align-items: center; cursor: pointer;">
-                    <img src="../assets/zhb-avatar.png" alt="ZHB"
-                        style="width: 28px; height: 28px; margin-right: 8px; border-radius: 50%; border: 1px solid var(--border-bottom-color);">
-                    <span>ZHB</span>
-                    <OpenFilledSvg style="width: 16px; height: 16px; margin-left: 4px;" />
-                </FluentHyperlink>
-            </div>
-            <div class="term">
-                项目地址：
-                <FluentHyperlink @click="cfg.openInBrowser('https://github.com/zhb2000/anki-marker')"
-                    title="https://github.com/zhb2000/anki-marker"
-                    style="display: flex; align-items: center; cursor: pointer;">
-                    <GitHubSvg style="width: 20px; height: 20px; margin-right: 8px;" />
-                    <span>zhb2000/anki-marker</span>
-                    <OpenFilledSvg style="width: 16px; height: 16px; margin-left: 4px;" />
-                </FluentHyperlink>
-            </div>
-
-            <div style="height: 24px;"></div>
-            <h2>配置文件</h2>
-            <div class="term" style="margin-bottom: 16px;">
-                <span>
-                    <span>安装/便携模式：</span>
-                    <span>{{ config.portable ? '便携模式' : '安装模式' }}</span>
-                </span>
-            </div>
-            <div class="term">
-                <span>
-                    <span>配置文件路径：</span>
-                    <span class="file-path">{{ config.path }}</span>
-                </span>
-            </div>
-            <div style="margin-bottom: 0px;">
-                <FluentButton class="open-file-button" @click="handleOpenFileClick">打开文件</FluentButton>
-                <FluentButton v-if="(['windows', 'macos', 'linux'] as api.os.OsType[]).includes(api.os.type())"
-                    class="open-file-button" @click="handleShowInExplorerClick">
-                    打开目录
-                </FluentButton>
-            </div>
+            </aside>
+            <main class="content-area">
+                <RouterView v-slot="{ Component }">
+                    <Transition name="settings-fade" mode="out-in">
+                        <component :is="Component" />
+                    </Transition>
+                </RouterView>
+            </main>
         </div>
     </div>
 </template>
 
-<style>
-.release-note-dialog .el-dialog__body {
-    height: calc(80vh - 150px);
-    overflow: auto;
-    user-select: text;
-    cursor: text;
-}
-
-.release-note-dialog {
-    user-select: none;
-    cursor: default;
-}
-</style>
-
 <style scoped>
 .main-window {
-    /* 不设置 overflow: auto; 会导致顶部出现空白，不知道为什么 */
-    overflow: auto;
+    /* 左右两栏各自独立滚动，整页不滚动 */
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
     background-color: var(--window-background);
     height: 100vh;
     user-select: none;
@@ -592,12 +149,131 @@ onActivated(async () => {
     z-index: 1;
     display: flex;
     align-items: center;
+    flex-shrink: 0;
     padding: 32px 20px;
     background-color: var(--window-background);
 }
 
+.body-area {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    width: 180px;
+    padding: 0 8px 8px 12px;
+}
+
+.search-input {
+    flex-shrink: 0;
+    width: 100%;
+    height: 32px;
+    margin-bottom: 8px;
+}
+
+.sidebar-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    margin-bottom: 2px;
+    border-radius: var(--border-radius);
+    color: var(--control-text-color);
+    text-decoration: none;
+    font-size: 14px;
+    user-select: none;
+    cursor: default;
+}
+
+.nav-item:hover {
+    background-color: var(--control-background-hover);
+}
+
+/* 选中态：--accent 文字 + 左侧 3px 指示条（inset 阴影实现，避免布局位移） */
+.nav-item.active {
+    color: var(--accent);
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* 图标为 Unicode 符号，统一字号容器渲染，保证对齐与暗色可读 */
+.nav-icon {
+    flex-shrink: 0;
+    width: 20px;
+    font-size: 14px;
+    line-height: 20px;
+    text-align: center;
+}
+
+/* 关注红点：右对齐的小圆点，提示该分类下有需要用户关注的项（更新/权限/快捷键冲突） */
+.nav-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    margin-left: auto;
+    border-radius: 50%;
+    background-color: var(--critical-fill-color);
+}
+
+.result-item {
+    padding: 6px 8px;
+    margin-bottom: 2px;
+    border-radius: var(--border-radius);
+    user-select: none;
+    cursor: default;
+}
+
+.result-item:hover {
+    background-color: var(--control-background-hover);
+}
+
+.result-title-line {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.result-title {
+    font-size: 14px;
+}
+
+/* 所属页名小字弱化 */
+.result-page {
+    flex-shrink: 0;
+    font-size: 12px;
+    opacity: 0.6;
+}
+
+.result-desc {
+    font-size: 12px;
+    opacity: 0.6;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.no-result {
+    padding: 6px 8px;
+    font-size: 14px;
+    opacity: 0.6;
+    user-select: none;
+    cursor: default;
+}
+
 .content-area {
-    padding: 32px 24px;
+    flex: 1;
+    min-width: 0;
+    overflow: auto;
+    padding: 24px;
     padding-top: 0;
 }
 
@@ -611,82 +287,14 @@ h1 {
     cursor: default;
 }
 
-h2 {
-    margin: 0;
-    margin-bottom: 16px;
-    padding: 0;
-    font-size: 24px;
-    font-weight: normal;
-    line-height: 24px;
-    user-select: none;
-    cursor: default;
+/* 子页面切换的轻 fade 动画（150ms opacity），不沿用顶层 slide 动画 */
+.settings-fade-enter-active,
+.settings-fade-leave-active {
+    transition: opacity 150ms ease;
 }
 
-.term {
-    display: flex;
-    align-items: center;
-    margin-bottom: 8px;
-    user-select: none;
-    cursor: default;
-    font-size: 16px;
-}
-
-.input-text {
-    height: 32px;
-    width: 400px;
-    margin-bottom: 24px;
-}
-
-.switch-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 32px;
-    margin-bottom: 24px;
-}
-
-.switch-note {
-    font-size: 14px;
-    opacity: 0.6;
-    user-select: none;
-    cursor: default;
-}
-
-.shortcut-note {
-    font-size: 14px;
-    opacity: 0.6;
-    max-width: 640px;
-    margin-bottom: 8px;
-    user-select: none;
-    cursor: default;
-}
-
-.status-success {
-    color: var(--success-text-color);
-}
-
-.status-warning {
-    color: var(--warning-text-color);
-}
-
-.open-file-button {
-    margin-right: 8px;
-    height: 28px;
-    padding-left: 8px;
-    padding-right: 8px;
-}
-
-.update-button {
-    margin-right: 8px;
-    height: 28px;
-    padding-left: 8px;
-    padding-right: 8px;
-}
-
-.file-path {
-    user-select: text;
-    cursor: text;
-    overflow-wrap: break-word;
-    word-break: break-all;
+.settings-fade-enter-from,
+.settings-fade-leave-to {
+    opacity: 0;
 }
 </style>

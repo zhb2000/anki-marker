@@ -8,10 +8,10 @@ import './fluent-controls/fluent-scrollbar.css';
 import App from './App.vue';
 import { router } from './router';
 import { setupFrontendLogging } from './logics/logging';
-import { initThemeFollowSystem, revealMainWindow } from './logics/theme';
+import { initTheme, revealMainWindow } from './logics/theme';
 
-// 初始化跟随系统的暗色模式（首帧配色由 index.html 内联脚本保证，这里异步精细接管）
-void initThemeFollowSystem();
+// 初始化主题模式（跟随系统/浅色/深色；首帧配色由 index.html 内联脚本保证，这里异步精细接管）
+void initTheme();
 
 const app = createApp(App);
 setupFrontendLogging(app);

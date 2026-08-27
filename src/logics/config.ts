@@ -2,7 +2,8 @@ import * as api from '../tauri-api';
 
 import { invoke } from './utils';
 
-interface ConfigModel {
+export interface ConfigModel {
+    theme: 'system' | 'light' | 'dark';
     ankiConnectURL: string;
     deckName: string;
     modelName: string;
@@ -19,10 +20,11 @@ interface ConfigModel {
     llmReasoningEffort: string;
 }
 
-const CONFIG_KEYS = ['ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut', 'keepRunningOnClose', 'backgroundIcon', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmReasoningEffort'] as const;
+export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut', 'keepRunningOnClose', 'backgroundIcon', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmReasoningEffort'] as const;
 
 /** 配置项的默认值 */
 export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
+    theme: 'system',
     ankiConnectURL: 'http://localhost:8765',
     deckName: '划词助手默认牌组',
     modelName: '划词助手默认单词模板',
@@ -52,6 +54,8 @@ export class Config implements ConfigModel {
     public readonly path: string;
     /** Whether the app is in portable mode. */
     public readonly portable: boolean;
+    /** 主题模式：跟随系统/浅色/深色 */
+    public theme!: 'system' | 'light' | 'dark';
     /** Anki Connect 服务的 URL */
     public ankiConnectURL!: string;
     /** 将划词结果添加到的牌组名 */

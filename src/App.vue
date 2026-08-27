@@ -6,8 +6,10 @@ import { ElConfigProvider } from 'element-plus';
 const currentRoute = useRoute();
 const transitionName = ref<string | undefined>(undefined);
 
-watch(() => currentRoute.path, (newPath) => {
-    const isBack = newPath === '/'; // 简单判断是否是“后退”操作
+// 按顶层路径判断切换方向与组件 key：设置页内部的子路由切换顶层路径不变（均为 /settings），
+// 既不触发顶层 slide 动画，也不会因 key 变化重建设置页壳
+watch(() => currentRoute.matched[0]?.path ?? currentRoute.path, (newTopPath) => {
+    const isBack = newTopPath === '/'; // 简单判断是否是“后退”操作
     transitionName.value = isBack ? 'slide-right' : 'slide-left';
 });
 </script>
@@ -17,7 +19,7 @@ watch(() => currentRoute.path, (newPath) => {
         <RouterView v-slot="{ Component, route }">
             <Transition :name="transitionName">
                 <KeepAlive>
-                    <component :is="Component" :key="route.path" />
+                    <component :is="Component" :key="route.matched[0]?.path ?? route.path" />
                 </KeepAlive>
             </Transition>
         </RouterView>

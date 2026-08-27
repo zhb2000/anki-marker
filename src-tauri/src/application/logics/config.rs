@@ -23,9 +23,33 @@ impl BackgroundIcon {
     }
 }
 
+/// 主题模式：跟随系统 / 浅色 / 深色（暗色样式由前端根据此模式驱动）
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThemeMode {
+    /// 跟随系统
+    System,
+    /// 浅色
+    Light,
+    /// 深色
+    Dark,
+}
+
+impl ThemeMode {
+    /// 对应 config.toml 中的字符串值
+    pub fn as_toml_str(self) -> &'static str {
+        return match self {
+            ThemeMode::System => "system",
+            ThemeMode::Light => "light",
+            ThemeMode::Dark => "dark",
+        };
+    }
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
+    theme: ThemeMode,
     #[serde(rename = "ankiConnectURL")]
     anki_connect_url: String,
     deck_name: String,
@@ -46,6 +70,7 @@ pub struct Config {
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PartialConfig {
+    theme: Option<ThemeMode>,
     #[serde(rename = "ankiConnectURL")]
     anki_connect_url: Option<String>,
     deck_name: Option<String>,
@@ -84,6 +109,7 @@ impl Default for Config {
     /// 各键缺省值与 read_config 的缺省回退、配置模板保持一致，用于配置读取失败时的兜底
     fn default() -> Self {
         return Config {
+            theme: ThemeMode::System,
             anki_connect_url: "http://localhost:8765".to_string(),
             deck_name: "划词助手默认牌组".to_string(),
             model_name: "划词助手默认单词模板".to_string(),
@@ -140,6 +166,12 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             .ok_or(r#"toml key "anki-connect-url" does not exist"#)?
             .as_str()
             .ok_or(r#"the value of "anki-connect-url" is not a string"#)?;
+        // 主题模式为后加的键，老配置文件中没有；缺省或非法值回退跟随系统
+        let theme = match doc.get("theme").and_then(|v| v.as_str()) {
+            Some("light") => ThemeMode::Light,
+            Some("dark") => ThemeMode::Dark,
+            _ => ThemeMode::System,
+        };
         let deck_name = doc
             .get("deck-name")
             .ok_or(r#"toml key "deck-name" does not exist"#)?
@@ -206,6 +238,7 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             .unwrap_or("")
             .to_string();
         return Ok(Config {
+            theme,
             anki_connect_url: anki_connect_url.to_string(),
             deck_name: deck_name.to_string(),
             model_name: model_name.to_string(),
@@ -235,6 +268,9 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
                 config_path.display()
             )
         })?;
+        if let Some(theme) = modified.theme {
+            doc["theme"] = toml_edit::value(theme.as_toml_str());
+        }
         if let Some(anki_connect_url) = modified.anki_connect_url {
             doc["anki-connect-url"] = toml_edit::value(anki_connect_url);
         }

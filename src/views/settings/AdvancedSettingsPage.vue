@@ -1,0 +1,102 @@
+<script setup lang="ts">
+import { onBeforeMount, ref } from 'vue';
+
+import * as api from '../../tauri-api';
+import * as cfg from '../../logics/config';
+import * as globals from '../../logics/globals';
+import { FluentButton, FluentSettingCard } from '../../fluent-controls';
+import { useHighlight } from './useHighlight';
+
+// 搜索跳转高亮（见 useHighlight 注释）
+useHighlight();
+
+/** 配置文件对象（只读使用：path / portable）；shell 已完成 store.init，此处 getConfig 直接命中缓存 */
+const config = ref<cfg.Config | null>(null);
+
+onBeforeMount(async () => {
+    config.value = await globals.getConfig();
+});
+
+/** 点击打开配置文件按钮 */
+async function handleOpenFileClick() {
+    if (config.value == null) {
+        return;
+    }
+    try {
+        await cfg.openFile(config.value.path);
+    } catch (error) {
+        console.error(error);
+        await api.dialog.message(String(error), { title: '打开文件失败', kind: 'error' });
+    }
+}
+
+/** 点击打开配置文件所在目录按钮 */
+async function handleShowInExplorerClick() {
+    if (config.value == null) {
+        return;
+    }
+    try {
+        await cfg.showInExplorer(config.value.path);
+    } catch (error) {
+        console.error(error);
+        await api.dialog.message(String(error), { title: '打开目录失败', kind: 'error' });
+    }
+}
+</script>
+
+<template>
+    <div class="settings-page" v-if="config != null">
+        <h2 class="group-title">配置文件</h2>
+        <div class="card-list">
+            <FluentSettingCard header="安装/便携模式" setting-id="portable-mode">
+                <span class="value-text">{{ config.portable ? '便携模式' : '安装模式' }}</span>
+            </FluentSettingCard>
+            <FluentSettingCard header="配置文件路径" setting-id="config-path">
+                <span class="value-text file-path">{{ config.path }}</span>
+            </FluentSettingCard>
+            <FluentSettingCard header="打开配置文件" setting-id="open-config-file">
+                <FluentButton @click="handleOpenFileClick">打开文件</FluentButton>
+                <FluentButton v-if="(['windows', 'macos', 'linux'] as api.os.OsType[]).includes(api.os.type())"
+                    @click="handleShowInExplorerClick">
+                    打开目录
+                </FluentButton>
+            </FluentSettingCard>
+        </div>
+    </div>
+</template>
+
+<style scoped>
+.group-title {
+    margin: 24px 0 6px 2px;
+    padding: 0;
+    font-size: 14px;
+    font-weight: normal;
+    opacity: 0.6;
+    user-select: none;
+    cursor: default;
+}
+
+.group-title:first-child {
+    margin-top: 0;
+}
+
+.card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.value-text {
+    user-select: none;
+    cursor: default;
+}
+
+/* 配置文件路径可选中复制（沿用旧 .file-path 的样式思路） */
+.file-path {
+    user-select: text;
+    cursor: text;
+    overflow-wrap: break-word;
+    word-break: break-all;
+    text-align: right;
+}
+</style>

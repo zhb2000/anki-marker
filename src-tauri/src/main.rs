@@ -126,6 +126,7 @@ fn main() {
             application::shortcut::take_pending_sentence,
             application::shortcut::is_accessibility_trusted,
             application::shortcut::request_accessibility_trust,
+            application::shortcut::get_shortcut_registration,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

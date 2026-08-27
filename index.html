@@ -6,8 +6,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Anki 划词助手</title>
     <script>
-      // 首帧防白闪：在模块加载前同步设置暗色 class，之后由 src/logics/theme.ts 接管
-      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      // 首帧防白闪：在模块加载前同步设置暗色 class，之后由 src/logics/theme.ts 接管。
+      // 主题模式缓存在 localStorage（key 与 theme.ts 的 THEME_MODE_STORAGE_KEY 一致，修改时需同步）：
+      // dark → 直接加 dark class；light → 不加；system/缺省/非法值 → 维持系统媒体查询判断。
+      var themeMode = localStorage.getItem('anki-marker:theme-mode');
+      if (themeMode === 'dark' ||
+        (themeMode !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
         document.documentElement.classList.add('dark');
       }
     </script>

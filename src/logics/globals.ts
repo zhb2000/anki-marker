@@ -11,6 +11,7 @@ import * as utils from './utils';
 import { typeAssertion } from './typing';
 import * as preference from './preference';
 import * as debug from './debug';
+import { initShortcutStatus } from './shortcut-status';
 
 // #region Config
 let config: Config;
@@ -78,7 +79,7 @@ async function probeAnkiConnect(): Promise<void> {
     }
 }
 
-async function ensureAnkiConnectImpl(onProgress?: (message: string) => void): Promise<void> {
+async function ensureAnkiConnectImpl(onProgress?: (message: string) => void, forceLaunch = false): Promise<void> {
     // 先探活，AnkiConnect 可用时直接返回
     try {
         await probeAnkiConnect();
@@ -94,7 +95,9 @@ async function ensureAnkiConnectImpl(onProgress?: (message: string) => void): Pr
         );
     }
     const cfg = await getConfig();
-    if (!cfg.autoLaunchAnki) {
+    // 「自动启动 Anki」设置只约束隐式启动（如添加笔记时顺带拉起）；
+    // 用户显式发起的启动（forceLaunch，如设置页的“启动 Anki”按钮）不受该设置约束
+    if (!cfg.autoLaunchAnki && !forceLaunch) {
         throw new Error('无法连接 AnkiConnect，且未启用自动启动 Anki。请手动启动 Anki，或在设置中开启“自动启动 Anki”。');
     }
     // 拉起 Anki，然后串行轮询等待 AnkiConnect 就绪（上一次探活结束后再 sleep，避免请求堆积）
@@ -123,14 +126,19 @@ async function ensureAnkiConnectImpl(onProgress?: (message: string) => void): Pr
  * 确保 AnkiConnect 服务可用：探活失败且 Anki 未运行时，按配置自动拉起 Anki 并等待其就绪。
  *
  * 并发调用会共享同一次执行（后到的调用等待同一次结果，不会重复启动 Anki），
- * 此时只有第一次调用传入的 `onProgress` 会收到进度回调。
+ * 此时只有第一次调用传入的 `onProgress` 会收到进度回调，启动行为也以第一次调用的参数为准。
  *
  * @param onProgress 进度提示回调（如“正在启动 Anki，请稍候……”）
+ * @param options.forceLaunch 为 true 时无视「自动启动 Anki」设置强制拉起
+ *   （仅用于用户显式发起的启动，如设置页的“启动 Anki”按钮）；缺省 false，隐式启动受该设置约束
  * @throws AnkiConnect 最终不可用时抛出 Error
  */
-export async function ensureAnkiConnect(onProgress?: (message: string) => void): Promise<void> {
+export async function ensureAnkiConnect(
+    onProgress?: (message: string) => void,
+    options?: { forceLaunch?: boolean }
+): Promise<void> {
     if (ensureAnkiConnectInFlight == null) {
-        ensureAnkiConnectInFlight = ensureAnkiConnectImpl(onProgress).finally(() => {
+        ensureAnkiConnectInFlight = ensureAnkiConnectImpl(onProgress, options?.forceLaunch ?? false).finally(() => {
             ensureAnkiConnectInFlight = null;
         });
     }
@@ -492,6 +500,10 @@ export async function initAtAppStart() {
         await api.dialog.message(String(error), { title: '配置文件读取失败', kind: 'error' });
         throw error; // 配置文件读取失败时不继续后续操作
     }
+    // 用配置文件中的主题模式校正 localStorage 缓存（首帧与 initTheme 用的是缓存值，可能与此处漂移）。
+    // theme.ts 已静态 import 本模块的 setElementTheme，此处改用动态 import 避免循环依赖
+    const { setThemeMode } = await import('./theme');
+    setThemeMode(config.theme);
     // 初始化 AnkiService 对象
     await initAnkiService();
     // 启动配置文件监听器
@@ -537,5 +549,7 @@ export async function initAtAppStart() {
             }
         })();
     }
+    // 初始化全局快捷键/辅助功能权限状态（挂常驻监听并主动查询一次，不阻塞启动）
+    void initShortcutStatus();
     initializedAtAppStart = true;
 }

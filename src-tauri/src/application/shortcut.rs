@@ -33,11 +33,24 @@ pub fn take_pending_sentence(pending: State<PendingSentence>) -> Option<String> 
 
 /// 快捷键注册结果，emit 给前端用于设置页反馈
 #[derive(Debug, Clone, serde::Serialize)]
-struct ShortcutRegistration {
+pub struct ShortcutRegistration {
     /// 配置文件中的快捷键字符串，空字符串表示已停用
     shortcut: String,
     success: bool,
     error: Option<String>,
+}
+
+/// 最近一次全局快捷键注册结果的缓存。
+///
+/// 应用启动时的注册发生在前端就绪之前，emit 的事件会丢失，
+/// 故缓存注册结果供前端通过 `get_shortcut_registration` 主动查询补齐；
+/// 静默注册（配置文件监视器兜底）路径同样更新缓存，保证缓存始终为真实状态。
+static LAST_REGISTRATION: Mutex<Option<ShortcutRegistration>> = Mutex::new(None);
+
+/// 查询最近一次全局快捷键注册结果（含启动时前端尚未就绪而错过 emit 的情况）；无记录返回 null
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_shortcut_registration() -> Option<ShortcutRegistration> {
+    return LAST_REGISTRATION.lock().ok().and_then(|guard| guard.clone());
 }
 
 /// 读取配置文件，按其中的 `global-shortcut` 项更新全局快捷键注册，并通知前端注册结果。
@@ -93,6 +106,10 @@ fn apply_shortcut(app: &AppHandle, shortcut: &str, notify: bool) {
             }
         }
     };
+    // 更新缓存（无论是否通知前端，缓存始终反映真实注册状态）
+    if let Ok(mut guard) = LAST_REGISTRATION.lock() {
+        *guard = Some(registration.clone());
+    }
     if notify {
         if let Err(error) = app.emit("shortcut-registration", registration) {
             log::warn!("failed to emit shortcut-registration event: {error}");
