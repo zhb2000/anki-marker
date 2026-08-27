@@ -3,13 +3,20 @@
 //! 实现参考了 yetone/get-selected-text（MIT / Apache-2.0）的 macOS 部分：
 //! 优先通过辅助功能 API（AXUIElement）直接读取选中文字；
 //! 目标应用不兼容时回退为执行 AppleScript——临时静音系统提示音、模拟按下
-//! Cmd+C 读取剪贴板后恢复剪贴板与音量。
+//! Cmd+C 读取剪贴板后恢复剪贴板与音量。「不兼容」包括两种情况：AX 调用报错，
+//! 以及 AX “成功”但返回空串（如 VSCode 的 Monaco 编辑器用 canvas 自绘文本、
+//! 另挂隐藏 textarea 接收输入，AXSelectedText 恒为空，见
+//! docs/selected-text-research.local.md）。
 //! 两条路径均要求在「系统设置 → 隐私与安全性 → 辅助功能」中授权本应用。
 
 #[cfg(target_os = "macos")]
 pub fn get_selected_text() -> Result<String, String> {
     if let Ok(text) = get_selected_text_by_ax() {
-        return Ok(text);
+        if !text.trim().is_empty() {
+            return Ok(text);
+        }
+        // AX “成功”但为空：可能是真的没选中文本，也可能是目标应用不通过 AX
+        // 暴露选区（如 VSCode），无法区分，统一回退到模拟 Cmd+C 再判一次
     }
     return get_selected_text_by_applescript();
 }
@@ -100,7 +107,7 @@ fn get_selected_text_by_ax() -> Result<String, String> {
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::get_selected_text_by_ax;
+    use super::{get_selected_text_by_ax, APPLE_SCRIPT};
 
     /// 冒烟测试：FFI 调用路径不应 panic，结果取决于辅助功能权限与当前焦点元素。
     #[test]
@@ -108,12 +115,35 @@ mod tests {
         let result = get_selected_text_by_ax();
         eprintln!("get_selected_text_by_ax() -> {result:?}");
     }
+
+    /// APPLE_SCRIPT 应能被 osacompile 编译（仅语法检查，不执行脚本）。
+    #[test]
+    fn apple_script_syntax_check() {
+        let target_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
+        std::fs::create_dir_all(&target_dir).expect("failed to create target dir");
+        let output_path = target_dir.join("apple-script-syntax-check.scpt");
+        let output = std::process::Command::new("osacompile")
+            .arg("-e")
+            .arg(APPLE_SCRIPT)
+            .arg("-o")
+            .arg(&output_path)
+            .output()
+            .expect("failed to run osacompile");
+        let _ = std::fs::remove_file(&output_path);
+        assert!(
+            output.status.success(),
+            "osacompile failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 /// 模拟 Cmd+C 读取剪贴板的 AppleScript：
 /// 备份剪贴板 → 临时静音系统提示音 → 模拟 Cmd+C → 读取剪贴板 → 恢复剪贴板与音量。
 ///
-/// 已知限制：若剪贴板当前存放的不是文本（如图片），备份步骤会失败，整个回退随之失败。
+/// 剪贴板备份/恢复是尽力而为的：剪贴板当前内容不是文本（如图片、文件）时
+/// `the clipboard` 读取失败，此时跳过备份与恢复、只做复制读取——牺牲「剪贴板
+/// 无痕」换取回退成功率（代价是此类场景下原剪贴板内容会被复制的文本覆盖）。
 #[cfg(target_os = "macos")]
 const APPLE_SCRIPT: &str = r#"
 use AppleScript version "2.4"
@@ -123,8 +153,12 @@ use framework "AppKit"
 
 set savedAlertVolume to alert volume of (get volume settings)
 
--- Back up clipboard contents:
-set savedClipboard to the clipboard
+-- Back up clipboard contents (best-effort; fails for non-text clipboard, e.g. images):
+set clipboardSaved to false
+try
+    set savedClipboard to the clipboard
+    set clipboardSaved to true
+end try
 
 set thePasteboard to current application's NSPasteboard's generalPasteboard()
 set theCount to thePasteboard's changeCount()
@@ -147,7 +181,11 @@ end if
 
 set theSelectedText to the clipboard
 
-set the clipboard to savedClipboard
+if clipboardSaved then
+    try
+        set the clipboard to savedClipboard
+    end try
+end if
 
 theSelectedText
 "#;
