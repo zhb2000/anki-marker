@@ -77,11 +77,11 @@ const templateFailureDescription = computed(() =>
 /** 是否正在启动 Anki（点击期间禁用按钮防重复） */
 const launchingAnki = ref(false);
 
-/** 启动 Anki：复用 globals 的「探活 → 拉起 → 等待 AnkiConnect 就绪」封装，就绪后自动刷新模板版本 */
+/** 启动 Anki：复用 globals 的“探活 → 拉起 → 等待 AnkiConnect 就绪”封装，就绪后自动刷新模板版本 */
 async function handleLaunchAnkiClick() {
     launchingAnki.value = true;
     try {
-        // 用户显式点击的启动：forceLaunch 无视「自动启动 Anki」设置（该设置只约束添加笔记时的隐式启动）
+        // 用户显式点击的启动：forceLaunch 无视“自动启动 Anki”设置（该设置只约束添加笔记时的隐式启动）
         await globals.ensureAnkiConnect(undefined, { forceLaunch: true });
         await globals.fetchAndSetTemplateVersion(config.modelName);
     } catch (error) {

@@ -233,7 +233,7 @@ async function readSseStream(
 export async function streamChatCompletion(cfg: LlmRequestConfig, opts: StreamChatOptions): Promise<string> {
     const timeoutMs = opts.timeoutMs ?? 20000;
 
-    // 用一个内部 AbortController 统一收口「超时」与「外部 signal」两路中止：
+    // 用一个内部 AbortController 统一收口“超时”与“外部 signal”两路中止：
     // 任一路触发都调用 controller.abort()，使进行中的 fetch/reader reject，
     // 再在 catch 中依据触发源（timedOut 标记）归类为 timeout 或 aborted
     const controller = new AbortController();

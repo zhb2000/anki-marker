@@ -7,7 +7,7 @@ import { LlmError, streamChatCompletion, type ChatMessage, type LlmRequestConfig
  * 流程：并行查询三本词典（或由调用方传入预取结果）→ 组装编号候选 →
  * 流式调用 LLM 做义项消歧 → 容错解析 JSON 结果 → 通过 onUpdate 推进状态。
  *
- * 结果按「句子|单词」做内存缓存，重复搜索直接命中。
+ * 结果按“句子|单词”做内存缓存，重复搜索直接命中。
  */
 
 /** 词典来源 */
@@ -99,7 +99,7 @@ export function makeAiPickCacheKey(sentence: string, word: string): string {
     return `${sentence.trim()}|${word.trim().toLowerCase()}`;
 }
 
-/** 使指定「句子|单词」的缓存结果失效（候选集变化后需要重新优选时使用） */
+/** 使指定“句子|单词”的缓存结果失效（候选集变化后需要重新优选时使用） */
 export function invalidateAiPickCache(sentence: string, word: string): void {
     resultCache.delete(makeAiPickCacheKey(sentence, word));
 }

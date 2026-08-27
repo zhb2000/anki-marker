@@ -95,7 +95,7 @@ async function ensureAnkiConnectImpl(onProgress?: (message: string) => void, for
         );
     }
     const cfg = await getConfig();
-    // 「自动启动 Anki」设置只约束隐式启动（如添加笔记时顺带拉起）；
+    // “自动启动 Anki”设置只约束隐式启动（如添加笔记时顺带拉起）；
     // 用户显式发起的启动（forceLaunch，如设置页的“启动 Anki”按钮）不受该设置约束
     if (!cfg.autoLaunchAnki && !forceLaunch) {
         throw new Error('无法连接 AnkiConnect，且未启用自动启动 Anki。请手动启动 Anki，或在设置中开启“自动启动 Anki”。');
@@ -129,7 +129,7 @@ async function ensureAnkiConnectImpl(onProgress?: (message: string) => void, for
  * 此时只有第一次调用传入的 `onProgress` 会收到进度回调，启动行为也以第一次调用的参数为准。
  *
  * @param onProgress 进度提示回调（如“正在启动 Anki，请稍候……”）
- * @param options.forceLaunch 为 true 时无视「自动启动 Anki」设置强制拉起
+ * @param options.forceLaunch 为 true 时无视“自动启动 Anki”设置强制拉起
  *   （仅用于用户显式发起的启动，如设置页的“启动 Anki”按钮）；缺省 false，隐式启动受该设置约束
  * @throws AnkiConnect 最终不可用时抛出 Error
  */

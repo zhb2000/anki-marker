@@ -294,7 +294,7 @@ async function maybeStartAiPick(word: string) {
     }
     const key = aiPickLogic.makeAiPickCacheKey(sentence.value, trimmed);
     if (key === aiSearchedKey && aiPick.phase !== 'idle') {
-        return; // 同一「句子+单词」已在进行或已有结果（含 error，不自动重试）
+        return; // 同一“句子+单词”已在进行或已有结果（含 error，不自动重试）
     }
     // 快速连点：中止旧请求
     aiAbort?.abort();
@@ -390,7 +390,7 @@ async function initSentenceCapture() {
     try {
         await api.event.listen('sentence-capture-failed', () => {
             void api.dialog.message(
-                '获取选中文本失败。\n\n请在「系统设置 → 隐私与安全性 → 辅助功能」中允许本应用，然后重试。',
+                '获取选中文本失败。\n\n请在“系统设置 → 隐私与安全性 → 辅助功能”中允许本应用，然后重试。',
                 { title: '划词录入失败', kind: 'error' }
             );
         });
@@ -459,7 +459,7 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
  * 切换指定词典中指定条目的加卡状态（添加/取消添加）。
  *
  * 词典参数独立出来，是为了让 AI 优选卡片能跨词典操作其选中的条目（可能与当前 tab 不同）；
- * AI 笔记注入判断仍用 isAiPicked(dictionary, index)，仅命中条目带笔记时写入「笔记」字段
+ * AI 笔记注入判断仍用 isAiPicked(dictionary, index)，仅命中条目带笔记时写入“笔记”字段
  */
 async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', index: number) {
     const item = wordItems[dictionary][index];
@@ -493,7 +493,7 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
         }
         try {
             const fields = anki.makeFields(dictionary, item.item, makeSentenceHTML());
-            // AI 优选联动：若所加条目正是 AI 优选命中的条目且带有笔记，则写入「笔记」字段
+            // AI 优选联动：若所加条目正是 AI 优选命中的条目且带有笔记，则写入“笔记”字段
             if (aiPick.note.length > 0 && isAiPicked(dictionary, index)) {
                 fields['笔记'] = aiPick.note;
             }

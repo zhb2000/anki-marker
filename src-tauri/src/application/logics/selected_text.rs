@@ -3,11 +3,11 @@
 //! 实现参考了 yetone/get-selected-text（MIT / Apache-2.0）的 macOS 部分：
 //! 优先通过辅助功能 API（AXUIElement）直接读取选中文字；
 //! 目标应用不兼容时回退为执行 AppleScript——临时静音系统提示音、模拟按下
-//! Cmd+C 读取剪贴板后恢复剪贴板与音量。「不兼容」包括两种情况：AX 调用报错，
+//! Cmd+C 读取剪贴板后恢复剪贴板与音量。“不兼容”包括两种情况：AX 调用报错，
 //! 以及 AX “成功”但返回空串（如 VSCode 的 Monaco 编辑器用 canvas 自绘文本、
 //! 另挂隐藏 textarea 接收输入，AXSelectedText 恒为空，见
 //! docs/selected-text-research.local.md）。
-//! 两条路径均要求在「系统设置 → 隐私与安全性 → 辅助功能」中授权本应用。
+//! 两条路径均要求在“系统设置 → 隐私与安全性 → 辅助功能”中授权本应用。
 
 #[cfg(target_os = "macos")]
 pub fn get_selected_text() -> Result<String, String> {
@@ -53,9 +53,9 @@ mod ax_ffi {
         ) -> AXError;
     }
 
-    /// 「当前焦点元素」属性名，即 kAXFocusedUIElementAttribute 的值。
+    /// “当前焦点元素”属性名，即 kAXFocusedUIElementAttribute 的值。
     pub const FOCUSED_UI_ELEMENT_ATTRIBUTE: &str = "AXFocusedUIElement";
-    /// 「选中文本」属性名，即 kAXSelectedTextAttribute 的值。
+    /// “选中文本”属性名，即 kAXSelectedTextAttribute 的值。
     pub const SELECTED_TEXT_ATTRIBUTE: &str = "AXSelectedText";
 }
 
@@ -142,8 +142,8 @@ mod tests {
 /// 备份剪贴板 → 临时静音系统提示音 → 模拟 Cmd+C → 读取剪贴板 → 恢复剪贴板与音量。
 ///
 /// 剪贴板备份/恢复是尽力而为的：剪贴板当前内容不是文本（如图片、文件）时
-/// `the clipboard` 读取失败，此时跳过备份与恢复、只做复制读取——牺牲「剪贴板
-/// 无痕」换取回退成功率（代价是此类场景下原剪贴板内容会被复制的文本覆盖）。
+/// `the clipboard` 读取失败，此时跳过备份与恢复、只做复制读取——牺牲“剪贴板
+/// 无痕”换取回退成功率（代价是此类场景下原剪贴板内容会被复制的文本覆盖）。
 #[cfg(target_os = "macos")]
 const APPLE_SCRIPT: &str = r#"
 use AppleScript version "2.4"

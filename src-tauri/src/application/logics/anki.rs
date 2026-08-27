@@ -8,7 +8,7 @@ pub fn launch_anki_impl(anki_executable_path: Option<&str>) -> Result<(), String
     #[cfg(target_os = "macos")]
     fn inner(anki_executable_path: Option<&str>) -> Result<(), String> {
         // 实测结论（2026-08，macOS 26 / Anki 26.x）：open -j/--hide、open -g、
-        // AppleScript launch 等「隐藏/不激活」启动方式均无法阻止 Anki（Qt 应用）
+        // AppleScript launch 等“隐藏/不激活”启动方式均无法阻止 Anki（Qt 应用）
         // 在启动时自行显示并激活主窗口（启动后约 1~2 秒还会二次显示/激活），
         // 故直接使用 open 常规启动，接受其抢占一次前台。
         let app = anki_executable_path.unwrap_or("Anki");

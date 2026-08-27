@@ -6,7 +6,7 @@
 //!   按配置项 `background-icon` 决定——dock 显示 Dock 隐藏托盘、menu-bar 隐藏
 //!   Dock 显示托盘、none 都隐藏。
 //!
-//! 主窗口恢复显示（点击 Dock 图标、划词快捷键、托盘菜单「打开」）时切回前台模式。
+//! 主窗口恢复显示（点击 Dock 图标、划词快捷键、托盘菜单“打开”）时切回前台模式。
 //! 其他平台均为空操作。
 
 use tauri::{AppHandle, Manager};
@@ -46,7 +46,7 @@ pub fn on_config_changed(app: &AppHandle) {
     }
 }
 
-/// 读取配置，返回「关闭窗口时保持后台运行」；读取失败时返回 true（保持默认行为兜底）。
+/// 读取配置，返回“关闭窗口时保持后台运行”；读取失败时返回 true（保持默认行为兜底）。
 ///
 /// 供主窗口关闭事件判断是拦截关闭（仅隐藏窗口）还是直接退出应用。
 #[cfg(target_os = "macos")]
@@ -90,7 +90,7 @@ fn apply_dock_and_tray(app: &AppHandle, dock_visible: bool, tray_visible: bool) 
 /// 创建或更新菜单栏托盘图标，使其可见性与 `tray_visible` 一致。
 ///
 /// 托盘一次性创建（仅在需要显示时），之后仅切换可见性，不销毁重建；
-/// 托盘菜单提供「打开」与「退出」两个入口，保证隐藏 Dock 图标后仍可唤起/退出应用。
+/// 托盘菜单提供“打开”与“退出”两个入口，保证隐藏 Dock 图标后仍可唤起/退出应用。
 #[cfg(target_os = "macos")]
 fn update_tray(app: &AppHandle, tray_visible: bool) {
     if let Some(tray) = app.tray_by_id("main") {
