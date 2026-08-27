@@ -22,11 +22,6 @@ const props = defineProps({
     aiPicked: {
         type: Boolean,
         default: false
-    },
-    /** AI 笔记；非空时在释义区下方显示 */
-    aiNote: {
-        type: String,
-        default: ''
     }
 });
 
@@ -52,7 +47,6 @@ function emitEditBtnClick() {
         <span v-if="item.sense != null"><span v-html="' '"></span><i>{{ item.sense }}</i></span>
         <div v-if="item.enDef != null" v-html="item.enDef"></div>
         <div v-if="item.cnDef != null">{{ item.cnDef }}</div>
-        <div v-if="aiNote.length > 0" class="ai-note">AI 笔记：{{ aiNote }}</div>
     </WordCard>
 </template>
 
@@ -75,11 +69,5 @@ function emitEditBtnClick() {
     user-select: none;
     color: var(--control-accent-text-color);
     background-color: var(--accent);
-}
-
-.ai-note {
-    margin-top: 4px;
-    font-size: 13px;
-    color: var(--control-text-color-active);
 }
 </style>

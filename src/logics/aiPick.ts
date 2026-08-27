@@ -81,7 +81,7 @@ const SYSTEM_PROMPT = `你是词典义项消歧助手。给定英文句子、句
 
 要求：
 - pick.source 与 pick.index 共同指向一条候选（如候选行为 "collins#2"，则 source="collins"、index=2）；认为所有候选都不合适时二者均为 null。
-- contextual_def：目标词在此句语境下的简明中文释义，不超过 20 字。
+- contextual_def：仅当 fallback=true 时才输出，为目标词在此句语境下的简明中文释义，不超过 20 字；从候选中选出义项时不要输出该字段（或给空字符串 ""）。
 - note：一句搭配、用法或易混提示，不超过 30 字；没有合适内容时给空字符串 ""。
 - 候选列表为空时：必须 pick=null、fallback=true，并凭自身知识生成 contextual_def；从候选中选出义项时 fallback=false。
 - 候选列表非空时，只要存在基本契合语境的候选就必须从中选择（pick 指向该候选、fallback=false）；仅当候选为空，或全部候选都明显与语境无关时，才允许 fallback=true 并凭自身知识生成。`;
@@ -154,7 +154,20 @@ export async function requestAiPick(options: RequestAiPickOptions): Promise<void
     const onDelta = (fullText: string): void => {
         // 首个 delta 到达：loading → streaming
         state.phase = 'streaming';
-        // 增量提取 contextual_def 的部分字符串值做打字机效果；提取失败不中断流
+        // pick 字段在 JSON 中排最前：提前部分解析出被选条目，让 UI 尽早渲染；只设置一次
+        if (state.pick == null) {
+            const partialPick = extractPartialPick(fullText, counts);
+            if (partialPick != null) {
+                state.pick = partialPick;
+                console.debug(`[aiPick] 流式提前解析出 pick: ${partialPick.source}#${partialPick.index}`);
+            }
+        }
+        // 增量提取 note 的部分字符串值
+        const partialNote = extractPartialStringField(fullText, 'note');
+        if (partialNote != null) {
+            state.note = partialNote;
+        }
+        // 增量提取 contextual_def 的部分字符串值做打字机效果（fallback 路径用）；提取失败不中断流
         const partial = extractPartialStringField(fullText, 'contextual_def');
         if (partial != null) {
             state.contextualDef = partial;
@@ -320,6 +333,7 @@ export function extractJsonObject(text: string): unknown {
 /**
  * 解析并校验 AI 输出。
  * - pick.source/index 必须指向真实存在的候选，否则置为 null；
+ * - pick 有效时强制 fallback=false（命中候选即非 AI 生成；模型误标 true 会被纠正）；
  * - pick 为 null 但 contextualDef 非空时视为 fallback（AI 凭自身知识生成）；
  * - pick 为 null 且 contextualDef 为空时抛出 'bad_response'。
  */
@@ -335,7 +349,10 @@ export function parseAiPickResult(text: string, counts: Record<DictSource, numbe
     const note = typeof rawNote === 'string' ? rawNote.trim() : '';
     const pick = normalizePick(obj['pick'], counts);
     let fallback = obj['fallback'] === true;
-    if (pick == null && contextualDef.length > 0) {
+    if (pick != null) {
+        // 指向了有效候选：无论模型如何标记都不是 AI 生成
+        fallback = false;
+    } else if (contextualDef.length > 0) {
         // 未指向有效候选但给出了释义：按 AI 生成处理
         fallback = true;
     }
@@ -365,6 +382,25 @@ function normalizePick(raw: unknown, counts: Record<DictSource, number>): AiPick
         return null;
     }
     return { source, index };
+}
+
+/**
+ * 从流式累计文本中提前抠出 pick 对象的 source 与 index（pick 在 JSON 中排最前，通常最早完整）。
+ * 仅 best-effort：两个字段都完整出现且通过 normalizePick 校验才返回，否则 null；
+ * 最终以完整 parse 为准。
+ */
+function extractPartialPick(text: string, counts: Record<DictSource, number>): AiPick | null {
+    const sourceMatch = /"source"\s*:\s*"([A-Za-z]+)"/.exec(text);
+    if (sourceMatch == null || sourceMatch[1] == null) {
+        return null;
+    }
+    // index 需出现在 source 之后（同属 pick 对象区域），跨越空白/换行宽容
+    const rest = text.slice(sourceMatch.index + sourceMatch[0].length);
+    const indexMatch = /"index"\s*:\s*(\d+)/.exec(rest);
+    if (indexMatch == null || indexMatch[1] == null) {
+        return null;
+    }
+    return normalizePick({ source: sourceMatch[1], index: indexMatch[1] }, counts);
 }
 
 /**

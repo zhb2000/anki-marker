@@ -269,10 +269,12 @@ function isAiPicked(source: aiPickLogic.DictSource, index: number): boolean {
     return aiPick.pick != null && aiPick.pick.source === source && aiPick.pick.index === index;
 }
 
-/** 指定条目的 AI 笔记（未命中时为空串，供词典卡片 props 使用） */
-function aiNoteFor(source: aiPickLogic.DictSource, index: number): string {
-    return isAiPicked(source, index) ? aiPick.note : '';
-}
+/** AI 优选命中的词典条目（供 AiPickCard 渲染完整内容）；pick 为空或条目缺失时为 null */
+const aiPickItem = computed(() => {
+    if (aiPick.pick == null) return null;
+    const item = wordItems[aiPick.pick.source][aiPick.pick.index]?.item;
+    return item != null ? { source: aiPick.pick.source, item } : null;
+});
 
 /**
  * 提交一次有效搜索后调用：若启用并配置好了 LLM，则并行搜索三本词典（填满 wordItems，
@@ -659,48 +661,43 @@ onBeforeMount(async () => {
                     class="pronunciation-radio-box" />
             </div>
             <ScrollMemory :show="selectedDict === 'collins'" class="words-container-inner">
-                <!-- AI 优选卡随列表内容滚动，每个词典容器内各放一份（内容同源） -->
+                <!-- AI 优选卡随列表内容滚动，每个词典容器内各放一份（内容同源）；active 标记当前可见实例，仅它播放动画 -->
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
-                    @add-btn-click="handleAiPickAdd" />
+                    :picked-item="aiPickItem" :active="selectedDict === 'collins'" @add-btn-click="handleAiPickAdd" />
                 <CollinsCard v-for="(item, index) in wordItems['collins']" :key="index" :item="item.item" :index="index"
-                    :status="item.status" :ai-picked="isAiPicked('collins', index)"
-                    :ai-note="aiNoteFor('collins', index)" @add-btn-click="changeItemAdded"
+                    :status="item.status" :ai-picked="isAiPicked('collins', index)" @add-btn-click="changeItemAdded"
                     @edit-btn-click="openEditDialog" />
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'oxford'" class="words-container-inner">
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
-                    @add-btn-click="handleAiPickAdd" />
+                    :picked-item="aiPickItem" :active="selectedDict === 'oxford'" @add-btn-click="handleAiPickAdd" />
                 <OxfordCard v-for="(item, index) in wordItems['oxford']" :key="index" :item="item.item" :index="index"
-                    :status="item.status" :ai-picked="isAiPicked('oxford', index)"
-                    :ai-note="aiNoteFor('oxford', index)" @add-btn-click="changeItemAdded"
+                    :status="item.status" :ai-picked="isAiPicked('oxford', index)" @add-btn-click="changeItemAdded"
                     @edit-btn-click="openEditDialog" />
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'youdao'" class="words-container-inner">
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
-                    @add-btn-click="handleAiPickAdd" />
+                    :picked-item="aiPickItem" :active="selectedDict === 'youdao'" @add-btn-click="handleAiPickAdd" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['concise'].length > 0" class="youdao-title">
                     简明释义
                 </div>
                 <YoudaoCard v-for="entry in wordItemsYoudao['concise']" :key="entry.flatIndex" :item="entry.model.item"
                     :index="entry.flatIndex" :status="entry.model.status"
-                    :ai-picked="isAiPicked('youdao', entry.flatIndex)"
-                    :ai-note="aiNoteFor('youdao', entry.flatIndex)" @add-btn-click="changeItemAdded"
+                    :ai-picked="isAiPicked('youdao', entry.flatIndex)" @add-btn-click="changeItemAdded"
                     @edit-btn-click="openEditDialog" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['web'].length > 0" class="youdao-title">
                     网络释义
                 </div>
                 <YoudaoCard v-for="entry in wordItemsYoudao['web']" :key="entry.flatIndex" :item="entry.model.item"
                     :index="entry.flatIndex" :status="entry.model.status"
-                    :ai-picked="isAiPicked('youdao', entry.flatIndex)"
-                    :ai-note="aiNoteFor('youdao', entry.flatIndex)" @add-btn-click="changeItemAdded"
+                    :ai-picked="isAiPicked('youdao', entry.flatIndex)" @add-btn-click="changeItemAdded"
                     @edit-btn-click="openEditDialog" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['phrase'].length > 0" class="youdao-title">
                     短语
                 </div>
                 <YoudaoCard v-for="entry in wordItemsYoudao['phrase']" :key="entry.flatIndex" :item="entry.model.item"
                     :index="entry.flatIndex" :status="entry.model.status"
-                    :ai-picked="isAiPicked('youdao', entry.flatIndex)"
-                    :ai-note="aiNoteFor('youdao', entry.flatIndex)" @add-btn-click="changeItemAdded"
+                    :ai-picked="isAiPicked('youdao', entry.flatIndex)" @add-btn-click="changeItemAdded"
                     @edit-btn-click="openEditDialog" />
             </ScrollMemory>
         </div>
