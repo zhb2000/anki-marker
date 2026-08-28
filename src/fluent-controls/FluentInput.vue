@@ -10,8 +10,11 @@ defineOptions({ inheritAttrs: false });
 const props = withDefaults(defineProps<{
     /** 是否启用清空按钮：有文字时在输入框内部右侧显示 ×，点击清空 v-model 并保持输入框焦点 */
     clearable?: boolean;
+    /** 禁用输入：禁止编辑并弱化显示；清空按钮同时隐藏（避免禁用状态下仍可清空内容） */
+    disabled?: boolean;
 }>(), {
     clearable: false,
+    disabled: false,
 });
 
 const [model, modifiers] = defineModel({
@@ -33,9 +36,9 @@ const attrs = useAttrs();
 /** 内部 input 元素（clearable 结构下用于清空后保持/恢复焦点） */
 const inputEl = ref<HTMLInputElement>();
 
-/** 是否显示清空按钮：clearable 且当前有文字 */
+/** 是否显示清空按钮：clearable、未禁用且当前有文字 */
 const showClearButton = computed(() => {
-    if (!props.clearable || model.value == null) {
+    if (!props.clearable || props.disabled || model.value == null) {
         return false;
     }
     // eslint-disable-next-line @typescript-eslint/no-base-to-string
@@ -58,12 +61,12 @@ function restAttrs() {
 <template>
     <!-- 非 clearable：保持既有 DOM 结构不变（HoverWrapper 直接渲染 input，attrs 全部落在 input 上） -->
     <HoverWrapper v-if="!clearable">
-        <input v-model="model" class="fluent-input" v-bind="$attrs" />
+        <input v-model="model" class="fluent-input" :disabled="disabled" v-bind="$attrs" />
     </HoverWrapper>
     <!-- clearable：包一层相对定位容器，× 按钮绝对定位在输入框内部右侧；class/style 落在容器上 -->
     <div v-else class="fluent-input-clearable" :class="$attrs.class" :style="$attrs.style">
         <HoverWrapper>
-            <input ref="inputEl" v-model="model" class="fluent-input"
+            <input ref="inputEl" v-model="model" class="fluent-input" :disabled="disabled"
                 :class="{ 'with-clear-button': showClearButton }" v-bind="restAttrs()" />
         </HoverWrapper>
         <!-- mousedown.prevent 避免点击时夺走输入框焦点；tabindex="-1" 不进入 Tab 序列 -->
@@ -104,6 +107,13 @@ function restAttrs() {
 
 .fluent-input:focus::placeholder {
     color: var(--placeholder-color-focus)
+}
+
+/* 禁用态：放在 [fluent-hovered] 之后，同优先级时以后者覆盖 hover 底色（对齐 FluentSelect 的规则顺序） */
+.fluent-input:disabled {
+    background-color: var(--control-background-disabled);
+    border-bottom-color: var(--border-color);
+    color: var(--control-text-color-disabled);
 }
 
 /* clearable 结构的相对定位容器：尺寸由使用方的 class（如 card-input）设定，input 填满容器 */

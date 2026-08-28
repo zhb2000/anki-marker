@@ -9,8 +9,11 @@ defineOptions({ inheritAttrs: false });
 const props = withDefaults(defineProps<{
     /** 眼睛按钮的揭示方式：toggle 点击切换明文/掩码；peek 按住时临时显示明文（对齐 WinUI PasswordBox 的 PasswordRevealMode） */
     revealMode?: 'toggle' | 'peek';
+    /** 禁用输入：禁止编辑并弱化显示；眼睛按钮同时隐藏（避免禁用状态下仍可揭示内容） */
+    disabled?: boolean;
 }>(), {
     revealMode: 'toggle',
+    disabled: false,
 });
 
 const [model, modifiers] = defineModel<string>({
@@ -39,8 +42,8 @@ const revealed = ref(false);
 
 const inputType = computed(() => revealed.value ? 'text' : 'password');
 
-/** 内容非空时才显示眼睛按钮（对齐 WinUI PasswordBox 的行为） */
-const revealButtonVisible = computed(() => (model.value ?? '').length > 0);
+/** 内容非空且未禁用时才显示眼睛按钮（对齐 WinUI PasswordBox 的行为） */
+const revealButtonVisible = computed(() => (model.value ?? '').length > 0 && !props.disabled);
 
 /** 内容被清空时恢复掩码，避免按钮隐藏后新输入的内容仍是明文 */
 watch(revealButtonVisible, visible => {
@@ -76,9 +79,9 @@ function handlePeekEnd() {
 
 <template>
     <HoverWrapper>
-        <div class="fluent-password-input" :class="$attrs.class" :style="$attrs.style">
+        <div class="fluent-password-input" :class="[$attrs.class, { disabled }]" :style="$attrs.style">
             <input v-model="model" class="inner-input" spellcheck="false" autocomplete="off" v-bind="restAttrs()"
-                :type="inputType" />
+                :type="inputType" :disabled="disabled" />
             <!-- @mousedown.prevent 阻止按钮抢夺输入框焦点，避免触发外部绑定的 blur 保存逻辑 -->
             <button v-show="revealButtonVisible" type="button" class="reveal-button" :class="{ revealed }"
                 :title="revealed ? '隐藏' : '显示'" :aria-label="revealed ? '隐藏密码' : '显示密码'"
@@ -109,6 +112,16 @@ function handlePeekEnd() {
     background-color: var(--input-text-background-focus);
     border-bottom-width: var(--input-text-border-bottom-width-focus);
     border-bottom-color: var(--accent);
+}
+
+/* 禁用态：放在 [fluent-hovered] 之后，同优先级时以后者覆盖 hover 底色（对齐 FluentSelect 的规则顺序） */
+.fluent-password-input.disabled {
+    background-color: var(--control-background-disabled);
+    border-bottom-color: var(--border-color);
+}
+
+.fluent-password-input.disabled .inner-input {
+    color: var(--control-text-color-disabled);
 }
 
 .inner-input {

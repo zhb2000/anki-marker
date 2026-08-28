@@ -7,7 +7,8 @@
  * - watch(route.query.h)：页面驻留期间同一页面内重复点击不同搜索结果
  *
  * 处理完成后 router.replace 清掉 query.h（保留其他 query），防止激活/再次进入时重复触发。
- * 找不到目标元素时静默忽略（目标可能是条件渲染的卡片，如未开启的 LLM 子项）。
+ * 找不到目标元素时静默忽略（目标可能是条件渲染的卡片，如平台门控的设置组、未设置快捷键时的权限卡）。
+ * 注：被开关关闭的功能子配置项（如 LLM 配置）采用禁用而非隐藏，卡片始终在 DOM 中，锚点不受影响。
  */
 
 import { nextTick, onActivated, onMounted, watch } from 'vue';

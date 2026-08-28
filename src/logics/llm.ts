@@ -19,12 +19,33 @@ export interface LlmRequestConfig {
     apiKey: string;
     /** 模型名 */
     model: string;
-    /** 推理强度；非空时以 OpenAI 风格 reasoning_effort 字段透传，空/undefined 不传 */
+    /**
+     * 单次请求的最大生成 token 数（请求体中的 max_tokens）。
+     * 注意思考模型（reasoning model）的思维链通常计入此配额，预算不足时正文会被截断甚至为空。
+     */
+    maxTokens: number;
+    /** 推理强度；非空时以 OpenAI 风格 reasoning_effort 字段透传（统一转小写），空/undefined 不传 */
     reasoningEffort?: string;
 }
 
 /** 单条聊天消息 */
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+
+/** max_tokens 配置的内置默认值：足以容纳思考模型（如 DeepSeek V4 默认档位）的思维链加正文 */
+export const LLM_DEFAULT_MAX_TOKENS = 8192;
+
+/**
+ * 解析用户配置的最大生成 token 数。
+ * trim 后须为正整数（前导零容忍），空串/非数字/0/超安全整数范围均回退 LLM_DEFAULT_MAX_TOKENS。
+ */
+export function parseMaxTokens(raw: string): number {
+    const trimmed = raw.trim();
+    if (!/^\d+$/.test(trimmed)) {
+        return LLM_DEFAULT_MAX_TOKENS;
+    }
+    const value = Number(trimmed);
+    return Number.isSafeInteger(value) && value > 0 ? value : LLM_DEFAULT_MAX_TOKENS;
+}
 
 /** streamChatCompletion 的可选参数 */
 export interface StreamChatOptions {
@@ -32,14 +53,17 @@ export interface StreamChatOptions {
     messages: ChatMessage[];
     /** 外部中止信号；触发后抛出 kind 为 'aborted' 的 LlmError */
     signal?: AbortSignal;
-    /** 每个增量回调：第一个参数为累计全文，第二个参数为本帧增量 */
+    /** 每个正文增量回调：第一个参数为累计全文，第二个参数为本帧增量 */
     onDelta?: (fullText: string, delta: string) => void;
+    /**
+     * 每个思维链增量回调（思考模型的 reasoning_content）：第一个参数为累计思维链全文，
+     * 第二个参数为本帧增量。非思考模型不触发；可用于区分“等待首字节”与“模型正在思考”
+     */
+    onReasoning?: (fullReasoning: string, delta: string) => void;
     /** true 时请求体加 response_format: { type: 'json_object' }，强制模型输出 JSON */
     jsonMode?: boolean;
     /** 采样温度，默认 0.2 */
     temperature?: number;
-    /** 最大生成 token 数，默认 512 */
-    maxTokens?: number;
     /** 超时时间（毫秒），默认 20000；超时抛出 kind 为 'timeout' 的 LlmError */
     timeoutMs?: number;
 }
@@ -98,13 +122,14 @@ function buildRequestBody(cfg: LlmRequestConfig, opts: StreamChatOptions): Recor
         messages: opts.messages,
         stream: true,
         temperature: opts.temperature ?? 0.2,
-        max_tokens: opts.maxTokens ?? 512,
+        max_tokens: cfg.maxTokens,
     };
     if (opts.jsonMode === true) {
         body.response_format = { type: 'json_object' };
     }
-    // 推理强度为空/空白时整体省略该字段，交由模型使用其默认值
-    const reasoningEffort = cfg.reasoningEffort?.trim();
+    // 推理强度为空/空白时整体省略该字段，交由模型使用其默认值；
+    // trim 后统一转小写再透传（部分服务端对取值大小写敏感，"High" 可能被拒）
+    const reasoningEffort = cfg.reasoningEffort?.trim().toLowerCase();
     if (reasoningEffort != null && reasoningEffort.length > 0) {
         body.reasoning_effort = reasoningEffort;
     }
@@ -113,7 +138,8 @@ function buildRequestBody(cfg: LlmRequestConfig, opts: StreamChatOptions): Recor
 
 /** SSE 单行的解析结果 */
 type SseLine =
-    | { type: 'content'; content: string } // 携带内容增量的 data 行
+    // 携带增量的 data 行：正文（content）与思维链（reasoning）任一存在即有效，可能同时存在
+    | { type: 'content'; content: string | null; reasoning: string | null }
     | { type: 'done' } // data: [DONE]，流式输出结束
     | { type: 'skip' }; // 空行/注释/event 行/解析失败的行
 
@@ -134,42 +160,50 @@ function parseSseLine(line: string): SseLine {
     } catch {
         return { type: 'skip' }; // 单行 JSON 解析失败不中断整个流
     }
-    const content = extractDeltaContent(chunk);
-    return content != null ? { type: 'content', content } : { type: 'skip' };
+    const { content, reasoning } = extractDelta(chunk);
+    return content != null || reasoning != null
+        ? { type: 'content', content, reasoning }
+        : { type: 'skip' };
 }
 
 /**
- * 从 OpenAI 流式 chunk 中取出 choices[0].delta.content。
- * 忽略 reasoning_content；对缺失/异常字段宽容，取不到时返回 null。
+ * 从 OpenAI 流式 chunk 中取出 choices[0].delta 的正文（content）与思维链（reasoning_content）增量。
+ * 思维链常见于思考模型（如 DeepSeek V4、OpenAI o 系列），先于正文输出且通常远长于正文；
+ * 对缺失/异常字段宽容，取不到时对应字段为 null。
  */
-function extractDeltaContent(chunk: unknown): string | null {
+function extractDelta(chunk: unknown): { content: string | null; reasoning: string | null } {
     if (chunk == null || typeof chunk !== 'object') {
-        return null;
+        return { content: null, reasoning: null };
     }
     const choices = (chunk as { choices?: unknown }).choices;
     if (!Array.isArray(choices) || choices.length === 0) {
-        return null;
+        return { content: null, reasoning: null };
     }
     const first = choices[0] as { delta?: unknown } | null;
     if (first == null || typeof first !== 'object') {
-        return null;
+        return { content: null, reasoning: null };
     }
     const delta = first.delta;
     if (delta == null || typeof delta !== 'object') {
-        return null;
+        return { content: null, reasoning: null };
     }
     const content = (delta as { content?: unknown }).content;
-    return typeof content === 'string' ? content : null;
+    const reasoning = (delta as { reasoning_content?: unknown }).reasoning_content;
+    return {
+        content: typeof content === 'string' ? content : null,
+        reasoning: typeof reasoning === 'string' ? reasoning : null,
+    };
 }
 
 /**
- * 逐行读取 SSE 流并累加内容增量，返回完整 content。
+ * 逐行读取 SSE 流并分别累加正文与思维链增量。
  * body 为空/无 reader 时抛出 kind 为 'bad_response' 的 LlmError。
  */
 async function readSseStream(
     response: Response,
-    onDelta?: (fullText: string, delta: string) => void
-): Promise<string> {
+    onDelta?: (fullText: string, delta: string) => void,
+    onReasoning?: (fullReasoning: string, delta: string) => void
+): Promise<{ content: string; reasoning: string }> {
     const body = response.body;
     if (body == null) {
         throw new LlmError('bad_response', undefined, 'response has no readable body');
@@ -178,8 +212,20 @@ async function readSseStream(
     // 用 { stream: true } 增量解码，正确处理跨 chunk 拆分的多字节字符（如中文/emoji）
     const decoder = new TextDecoder();
     let fullText = '';
+    let fullReasoning = '';
     let buffer = ''; // 尚未遇到换行符的残留文本
     let receivedDone = false;
+    /** 累加一条 data 行中的正文/思维链增量并触发对应回调 */
+    const accumulate = (line: { content: string | null; reasoning: string | null }): void => {
+        if (line.reasoning != null) {
+            fullReasoning += line.reasoning;
+            onReasoning?.(fullReasoning, line.reasoning);
+        }
+        if (line.content != null) {
+            fullText += line.content;
+            onDelta?.(fullText, line.content);
+        }
+    };
     try {
         while (!receivedDone) {
             const { done, value } = await reader.read();
@@ -198,8 +244,7 @@ async function readSseStream(
                     break;
                 }
                 if (parsed.type === 'content') {
-                    fullText += parsed.content;
-                    onDelta?.(fullText, parsed.content);
+                    accumulate(parsed);
                 }
                 newlineIndex = buffer.indexOf('\n');
             }
@@ -209,15 +254,14 @@ async function readSseStream(
             buffer += decoder.decode(); // 冲刷多字节字符可能残留的字节
             const parsed = parseSseLine(buffer);
             if (parsed.type === 'content') {
-                fullText += parsed.content;
-                onDelta?.(fullText, parsed.content);
+                accumulate(parsed);
             }
         }
     } finally {
         // 提前退出（[DONE]/异常）时取消底层流以释放连接；流已读完时 cancel 为空操作
         reader.cancel().catch(() => { });
     }
-    return fullText;
+    return { content: fullText, reasoning: fullReasoning };
 }
 
 /**
@@ -229,6 +273,7 @@ async function readSseStream(
  * - 'http'：非 2xx 响应（message 含截断的响应文本，status 含状态码）
  * - 'network'：网络层失败
  * - 'bad_response'：body 为空/无 reader/流结束但 content 为空
+ *   （若收到过思维链则 message 注明，提示思维链可能耗尽了 max_tokens 预算）
  */
 export async function streamChatCompletion(cfg: LlmRequestConfig, opts: StreamChatOptions): Promise<string> {
     const timeoutMs = opts.timeoutMs ?? 20000;
@@ -269,11 +314,16 @@ export async function streamChatCompletion(cfg: LlmRequestConfig, opts: StreamCh
             const text = await response.text();
             throw new LlmError('http', response.status, `HTTP ${response.status}: ${text.slice(0, 300)}`);
         }
-        const fullText = await readSseStream(response, opts.onDelta);
-        if (fullText.length === 0) {
-            throw new LlmError('bad_response', undefined, 'stream ended with empty content');
+        const { content, reasoning } = await readSseStream(response, opts.onDelta, opts.onReasoning);
+        if (content.length === 0) {
+            // 收到过思维链但正文为空：思考模型几乎必然是思维链耗尽了 max_tokens 预算，
+            // 与“流中什么都没有”区分开，便于用户定位（调大最大生成 Token 数或调低思考强度）
+            throw new LlmError('bad_response', undefined, reasoning.length > 0
+                ? `stream ended with empty content after ${reasoning.length} chars of reasoning `
+                    + '(thinking probably exhausted max_tokens; increase it or lower reasoning effort)'
+                : 'stream ended with empty content');
         }
-        return fullText;
+        return content;
     } catch (error) {
         if (error instanceof LlmError) {
             throw error; // 已归一化的业务错误（http/bad_response）直接透传

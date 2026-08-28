@@ -34,6 +34,15 @@ watch(() => state.theme, theme => setThemeMode(theme));
 
 /** 是否为 macOS（窗口行为组仅 macOS 展示，与现设置页一致） */
 const isMacOS = computed(() => api.os.type() === 'macos');
+
+/** 后台图标设置未启用时禁用：卡片常显（搜索跳转锚点始终有效、布局稳定），仅禁用交互 */
+const backgroundIconDisabled = computed(() => !state.keepRunningOnClose);
+
+/** 后台图标卡的说明文案：功能关闭时替换为禁用原因 */
+const backgroundIconDescription = computed(() => backgroundIconDisabled.value
+    ? '需先开启“关闭窗口后保持后台运行”'
+    : '选择窗口关闭后（后台运行期间）应用图标的显示位置；窗口打开时图标始终显示在 Dock 栏'
+);
 </script>
 
 <template>
@@ -59,14 +68,13 @@ const isMacOS = computed(() => api.os.type() === 'macos');
                     </template>
                     <ElSwitch v-model="state.keepRunningOnClose" />
                 </FluentSettingCard>
-                <FluentSettingCard v-if="state.keepRunningOnClose" header="后台运行时显示图标"
-                    description="选择窗口关闭后（后台运行期间）应用图标的显示位置；窗口打开时图标始终显示在 Dock 栏"
-                    setting-id="backgroundIcon">
+                <FluentSettingCard header="后台运行时显示图标" :description="backgroundIconDescription"
+                    setting-id="backgroundIcon" :disabled="backgroundIconDisabled">
                     <template #header-extra>
-                        <ResetButton @click="store.reset('backgroundIcon')" />
+                        <ResetButton :disabled="backgroundIconDisabled" @click="store.reset('backgroundIcon')" />
                     </template>
                     <FluentSelect class="card-input" :options="backgroundIconOptions"
-                        v-model="state.backgroundIcon" />
+                        v-model="state.backgroundIcon" :disabled="backgroundIconDisabled" />
                 </FluentSettingCard>
             </div>
         </template>

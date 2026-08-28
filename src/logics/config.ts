@@ -17,10 +17,11 @@ export interface ConfigModel {
     llmBaseUrl: string;
     llmApiKey: string;
     llmModel: string;
+    llmMaxTokens: string;
     llmReasoningEffort: string;
 }
 
-export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut', 'keepRunningOnClose', 'backgroundIcon', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmReasoningEffort'] as const;
+export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut', 'keepRunningOnClose', 'backgroundIcon', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmMaxTokens', 'llmReasoningEffort'] as const;
 
 /** 配置项的默认值 */
 export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
@@ -38,6 +39,7 @@ export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     llmBaseUrl: '',
     llmApiKey: '',
     llmModel: '',
+    llmMaxTokens: '',
     llmReasoningEffort: '',
 };
 
@@ -82,6 +84,8 @@ export class Config implements ConfigModel {
     public llmApiKey!: string;
     /** LLM 使用的模型名，留空表示未配置 */
     public llmModel!: string;
+    /** LLM 单次请求的最大生成 token 数（字符串存储），留空表示使用内置默认值 */
+    public llmMaxTokens!: string;
     /** LLM 的推理强度（reasoning effort），留空表示使用模型默认值 */
     public llmReasoningEffort!: string;
     /** 存储配置项的对象 */

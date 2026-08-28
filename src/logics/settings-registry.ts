@@ -145,10 +145,17 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         keywords: ['模型', '大模型', 'model', 'deepseek', 'llm'],
     },
     {
+        id: 'llmMaxTokens',
+        page: 'ai',
+        title: '最大生成 Token 数',
+        description: '单次请求的生成上限；思考模型的思维链计入此配额，释义被截断或为空时可调大',
+        keywords: ['最大', 'token', 'tokens', 'max tokens', '生成上限', '生成', '截断', '思维链', '思考', 'max_tokens'],
+    },
+    {
         id: 'llmReasoningEffort',
         page: 'ai',
         title: '思考强度',
-        description: '留空则不传参；常见取值 low / medium / high',
+        description: '常见取值 low / medium / high，实际支持因所配服务而异；留空则不传参',
         keywords: ['思考强度', '推理强度', '思考', 'reasoning', 'effort', 'low', 'medium', 'high'],
     },
     // #endregion

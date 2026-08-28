@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { HoverWrapper } from '../fluent-controls/HoverWrapper';
+
+withDefaults(defineProps<{
+    /** 禁用：所在卡片的功能未启用时置灰并禁止点击 */
+    disabled?: boolean;
+}>(), {
+    disabled: false,
+});
 </script>
 
 <template>
     <HoverWrapper>
-        <button title="重置" class="reset-button">
+        <button title="重置" class="reset-button" :disabled="disabled">
             <slot></slot>
         </button>
     </HoverWrapper>
@@ -48,5 +55,15 @@ import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 
 .reset-button:active {
     filter: var(--icon-button-filter-active);
+}
+
+/* 禁用态：放在 [fluent-hovered] 规则之后，同优先级时以源序覆盖 hover 底色与图标加深；
+   原生 disabled 按钮本身不响应点击，无需脚本拦截 */
+.reset-button:disabled {
+    background-color: transparent;
+}
+
+.reset-button:disabled::after {
+    opacity: 0.3;
 }
 </style>

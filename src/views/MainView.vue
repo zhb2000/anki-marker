@@ -11,7 +11,7 @@ import * as cfg from '../logics/config';
 import * as globals from '../logics/globals';
 import * as preference from '../logics/preference';
 import * as aiPickLogic from '../logics/aiPick';
-import { isLlmReady, type LlmRequestConfig } from '../logics/llm';
+import { isLlmReady, parseMaxTokens, type LlmRequestConfig } from '../logics/llm';
 import AiPickCard from '../components/AiPickCard.vue';
 import { FluentButton, FluentSelect, FluentInput, FluentRadio } from '../fluent-controls';
 import {
@@ -247,9 +247,9 @@ let aiAbort: AbortController | null = null;
 let aiSearchedKey = '';
 /** 本次 AI 请求送入的候选总数快照，用于检测切词典后候选变多（预取缺货）并补触发优选 */
 let aiCandidateTotal = 0;
-/** 是否显示 AI 优选卡片（idle/error 时不渲染） */
+/** 是否显示 AI 优选卡片（idle/error 时不渲染；thinking 为思考模型输出思维链的阶段） */
 const showAiPickCard = computed(() =>
-    aiPick.phase === 'loading' || aiPick.phase === 'streaming' || aiPick.phase === 'done');
+    aiPick.phase === 'loading' || aiPick.phase === 'thinking' || aiPick.phase === 'streaming' || aiPick.phase === 'done');
 
 /** AI 优选卡片加号按钮的状态：跟随 AI 选中的那条词典条目的添加状态 */
 const aiPickCardStatus = computed<CardStatus>(() => {
@@ -286,6 +286,7 @@ async function maybeStartAiPick(word: string) {
         baseUrl: config.llmBaseUrl,
         apiKey: config.llmApiKey,
         model: config.llmModel,
+        maxTokens: parseMaxTokens(config.llmMaxTokens),
         reasoningEffort: config.llmReasoningEffort
     };
     if (trimmed.length === 0 || !config.llmEnabled || !isLlmReady(llmConfig)) {

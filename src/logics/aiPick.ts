@@ -13,8 +13,8 @@ import { LlmError, streamChatCompletion, type ChatMessage, type LlmRequestConfig
 /** 词典来源 */
 export type DictSource = 'collins' | 'oxford' | 'youdao';
 
-/** AI 优选的状态机阶段 */
-export type AiPickPhase = 'idle' | 'loading' | 'streaming' | 'done' | 'error';
+/** AI 优选的状态机阶段：thinking 表示思考模型正在输出思维链（非思考模型跳过该阶段） */
+export type AiPickPhase = 'idle' | 'loading' | 'thinking' | 'streaming' | 'done' | 'error';
 
 /** AI 优选命中的词典条目 */
 export interface AiPick {
@@ -151,8 +151,16 @@ export async function requestAiPick(options: RequestAiPickOptions): Promise<void
     ];
 
     // 3. 流式请求（含 reasoningEffort 兼容重试）
+    const onReasoning = (): void => {
+        // 首个思维链增量到达：loading → thinking（仅推进一次，后续增量不重复触发 UI 更新）
+        if (state.phase === 'loading') {
+            state.phase = 'thinking';
+            console.debug('[aiPick] 模型开始输出思维链');
+            onUpdate({ ...state });
+        }
+    };
     const onDelta = (fullText: string): void => {
-        // 首个 delta 到达：loading → streaming
+        // 首个正文 delta 到达：loading/thinking → streaming
         state.phase = 'streaming';
         // pick 字段在 JSON 中排最前：提前部分解析出被选条目，让 UI 尽早渲染；只设置一次
         if (state.pick == null) {
@@ -174,7 +182,7 @@ export async function requestAiPick(options: RequestAiPickOptions): Promise<void
         }
         onUpdate({ ...state });
     };
-    const requestOptions = { messages, signal, onDelta, jsonMode: true, temperature: 0.2 };
+    const requestOptions = { messages, signal, onDelta, onReasoning, jsonMode: true, temperature: 0.2 };
     let fullText: string;
     try {
         fullText = await streamChatCompletion(config, requestOptions);

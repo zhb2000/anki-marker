@@ -148,6 +148,11 @@ curl -s -X POST http://127.0.0.1:4445/session/$SID/execute/async \
    - 相同消息在 1 秒窗口内会被去重，刷屏停止后输出一条
      `[repeated N times, duplicates suppressed] ...` 汇总（类似 devtools 的重复计数）；
      Vue 组件错误会附带 `[component] App > ... > 出错组件` 组件链路行。
+6. **sendKeys 不遵守 disabled 属性（实测）**。
+   向 `disabled` 的 input 发 `/value` 命令返回成功且值被写入，并会触发 Vue v-model
+   → 自动保存真实配置文件。探针禁用态控件时请改用 DOM 断言（`el.disabled === true`）
+   或点击类操作（原生 disabled 按钮的 click 会被正常抑制）；若已污染配置，用
+   `el.value=...; el.dispatchEvent(new Event("input",{bubbles:true}))` 写回并核对 config.toml。
 
 ## 端到端流程示例
 

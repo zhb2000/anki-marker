@@ -111,6 +111,11 @@ function onBodyAnimationEnd(event: AnimationEvent) {
                     <div class="ai-skeleton-line"></div>
                     <div class="ai-skeleton-line ai-skeleton-line-short"></div>
                 </div>
+                <!-- 思考模型正在输出思维链：三圆点错峰跳动，区别于首字节前的骨架屏与正文打字机 -->
+                <div v-else-if="state.phase === 'thinking'" class="ai-thinking" aria-hidden="true">
+                    <span class="ai-thinking-label">AI 正在思考</span>
+                    <span class="ai-thinking-dots"><span></span><span></span><span></span></span>
+                </div>
                 <!-- key 随 phase 与 pick 是否出现变化：内容形态切换时重挂载，重放淡入动画 -->
                 <div v-else class="ai-pick-body" :key="`${state.phase}:${state.pick != null}`"
                     :class="{ 'anim-body-in': bodyAnimIn }" @animationend="onBodyAnimationEnd">
@@ -267,6 +272,43 @@ function onBodyAnimationEnd(event: AnimationEvent) {
     width: 60%;
 }
 
+/* 思考中提示：文字与三圆点同行基线对齐，整体弱化为辅助信息 */
+.ai-thinking {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 0;
+    user-select: none;
+}
+
+.ai-thinking-label {
+    font-size: 13px;
+    color: var(--control-text-color-active);
+}
+
+/* 三圆点错峰跳动：小幅度上浮 + 呼吸透明度，节奏与 aiPickPulse 的克制风格一致 */
+.ai-thinking-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.ai-thinking-dots span {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background-color: var(--accent);
+    animation: aiPickThinkingDot 1.2s ease-in-out infinite;
+}
+
+.ai-thinking-dots span:nth-child(2) {
+    animation-delay: 0.15s;
+}
+
+.ai-thinking-dots span:nth-child(3) {
+    animation-delay: 0.3s;
+}
+
 @keyframes aiPickCardIn {
     from {
         opacity: 0;
@@ -299,6 +341,21 @@ function onBodyAnimationEnd(event: AnimationEvent) {
     }
 
     50% {
+        opacity: 1;
+    }
+}
+
+@keyframes aiPickThinkingDot {
+
+    0%,
+    60%,
+    100% {
+        transform: translateY(0);
+        opacity: 0.45;
+    }
+
+    30% {
+        transform: translateY(-3px);
         opacity: 1;
     }
 }

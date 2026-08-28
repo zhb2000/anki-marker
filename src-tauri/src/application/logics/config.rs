@@ -64,6 +64,7 @@ pub struct Config {
     llm_base_url: String,
     llm_api_key: String,
     llm_model: String,
+    llm_max_tokens: String,
     llm_reasoning_effort: String,
 }
 
@@ -85,6 +86,7 @@ pub struct PartialConfig {
     llm_base_url: Option<String>,
     llm_api_key: Option<String>,
     llm_model: Option<String>,
+    llm_max_tokens: Option<String>,
     llm_reasoning_effort: Option<String>,
 }
 
@@ -123,6 +125,7 @@ impl Default for Config {
             llm_base_url: String::new(),
             llm_api_key: String::new(),
             llm_model: String::new(),
+            llm_max_tokens: String::new(),
             llm_reasoning_effort: String::new(),
         };
     }
@@ -232,6 +235,12 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        // 单次请求的最大生成 token 数（字符串存储，空串表示使用应用内置默认值）
+        let llm_max_tokens = doc
+            .get("llm-max-tokens")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let llm_reasoning_effort = doc
             .get("llm-reasoning-effort")
             .and_then(|v| v.as_str())
@@ -252,6 +261,7 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             llm_base_url,
             llm_api_key,
             llm_model,
+            llm_max_tokens,
             llm_reasoning_effort,
         });
     }
@@ -309,6 +319,9 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
         }
         if let Some(llm_model) = modified.llm_model {
             doc["llm-model"] = toml_edit::value(llm_model);
+        }
+        if let Some(llm_max_tokens) = modified.llm_max_tokens {
+            doc["llm-max-tokens"] = toml_edit::value(llm_max_tokens);
         }
         if let Some(llm_reasoning_effort) = modified.llm_reasoning_effort {
             doc["llm-reasoning-effort"] = toml_edit::value(llm_reasoning_effort);
