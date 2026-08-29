@@ -7,6 +7,7 @@ export type { FluentSelectOption } from './FluentSelect.vue';
 export { default as FluentInput } from './FluentInput.vue';
 export { default as FluentPasswordInput } from './FluentPasswordInput.vue';
 export { default as FluentRadio } from './FluentRadio.vue';
+export { default as FluentToggleSwitch } from './FluentToggleSwitch.vue';
 export { default as FluentHyperlink } from './FluentHyperlink.vue';
 export { default as FluentSettingCard } from './FluentSettingCard.vue';
 export { default as FluentSettingExpander } from './FluentSettingExpander.vue';

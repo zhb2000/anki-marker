@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { ElSwitch } from 'element-plus';
-
-import { FluentInput, FluentPasswordInput, FluentSettingCard } from '../../fluent-controls';
+import { FluentInput, FluentPasswordInput, FluentSettingCard, FluentToggleSwitch } from '../../fluent-controls';
 import { ResetButton } from '../../components';
 import { useSettingsStore } from '../../logics/settings-store';
 import { useHighlight } from './useHighlight';
@@ -37,7 +35,7 @@ const reasoningEffortDescription = '常见取值 low / medium / high，实际支
                 <template #header-extra>
                     <ResetButton @click="store.reset('llmEnabled')" />
                 </template>
-                <ElSwitch v-model="state.llmEnabled" />
+                <FluentToggleSwitch v-model="state.llmEnabled" />
             </FluentSettingCard>
             <FluentSettingCard header="API 地址" setting-id="llmBaseUrl"
                 :disabled="llmConfigDisabled" :description="llmConfigDisabledReason">

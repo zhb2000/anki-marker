@@ -61,6 +61,27 @@
     --flyout-item-background-hover: #00000009;
     --flyout-item-background-active: #00000006;
     --flyout-item-background-selected: #00000006;
+    /* 开关: WinUI ToggleSwitch_themeresources.xaml 浅色字典。
+       off 轨道 = ControlAltFillColorSecondary，描边 = ControlStrongStrokeColorDefault；
+       off 旋钮 = TextFillColorSecondary；on 旋钮 = TextOnAccentFillColorPrimary；
+       on 轨道描边禁用色 = AccentFillColorDisabled；旋钮环 = CircleElevationBorderBrush 近似
+       （WinUI 颜色为 #AARRGGBB，此处已转换为 CSS 的 #RRGGBBAA） */
+    --switch-fill-off: #00000006;
+    --switch-fill-off-hover: #0000000f;
+    --switch-fill-off-active: #00000018;
+    --switch-fill-off-disabled: transparent;
+    --switch-stroke-off: #00000072;
+    --switch-stroke-off-disabled: #00000037;
+    --switch-fill-on: var(--accent);
+    --switch-fill-on-hover: var(--control-accent-background-hover);
+    --switch-fill-on-active: var(--control-accent-background-active);
+    --switch-fill-on-disabled: #00000037;
+    --switch-stroke-on-disabled: #00000037;
+    --switch-knob-off: #0000009e;
+    --switch-knob-off-disabled: #0000005c;
+    --switch-knob-on: #ffffff;
+    --switch-knob-on-disabled: #ffffff;
+    --switch-knob-ring: #0000001a;
     /* 键盘焦点外框: WinUI FocusStrokeColorOuter */
     --focus-stroke: #00000089;
 }
@@ -127,5 +148,22 @@ html.dark {
     --flyout-item-background-hover: #ffffff0f;
     --flyout-item-background-active: #ffffff0a;
     --flyout-item-background-selected: #ffffff0a;
+    /* 开关: WinUI ToggleSwitch_themeresources.xaml 深色字典 */
+    --switch-fill-off: #00000019;
+    --switch-fill-off-hover: #ffffff0b;
+    --switch-fill-off-active: #ffffff12;
+    --switch-fill-off-disabled: transparent;
+    --switch-stroke-off: #ffffff8b;
+    --switch-stroke-off-disabled: #ffffff28;
+    --switch-fill-on: var(--accent);
+    --switch-fill-on-hover: var(--control-accent-background-hover);
+    --switch-fill-on-active: var(--control-accent-background-active);
+    --switch-fill-on-disabled: #ffffff28;
+    --switch-stroke-on-disabled: #ffffff28;
+    --switch-knob-off: #ffffffc5;
+    --switch-knob-off-disabled: #ffffff5d;
+    --switch-knob-on: #000000;
+    --switch-knob-on-disabled: #ffffff87;
+    --switch-knob-ring: #ffffff1f;
     --focus-stroke: #ffffff;
 }

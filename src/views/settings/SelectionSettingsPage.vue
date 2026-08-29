@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onActivated } from 'vue';
-import { ElSwitch } from 'element-plus';
 
 import * as api from '../../tauri-api';
-import { FluentButton, FluentSettingCard } from '../../fluent-controls';
+import { FluentButton, FluentSettingCard, FluentToggleSwitch } from '../../fluent-controls';
 import { ResetButton, ShortcutRecorder } from '../../components';
 import { useSettingsStore } from '../../logics/settings-store';
 import {
@@ -81,7 +80,7 @@ onActivated(() => {
                     <template #header-extra>
                         <ResetButton @click="store.reset('wordToSentence')" />
                     </template>
-                    <ElSwitch v-model="state.wordToSentence" />
+                    <FluentToggleSwitch v-model="state.wordToSentence" />
                 </FluentSettingCard>
                 <FluentSettingCard v-if="state.globalShortcut.length > 0" header="辅助功能权限"
                     :description="accessibilityTrusted === false ? '辅助功能未授权，划词功能可能无法使用。请点击上方“申请权限”按钮，并按系统提示授权本应用。' : undefined">

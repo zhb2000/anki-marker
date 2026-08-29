@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { ElSwitch } from 'element-plus';
-
-import { FluentInput, FluentSettingCard } from '../../fluent-controls';
+import { FluentInput, FluentSettingCard, FluentToggleSwitch } from '../../fluent-controls';
 import { ResetButton } from '../../components';
 import { useSettingsStore } from '../../logics/settings-store';
 import { useHighlight } from './useHighlight';
@@ -45,14 +43,14 @@ useHighlight();
                 <template #header-extra>
                     <ResetButton @click="store.reset('autoLaunchAnki')" />
                 </template>
-                <ElSwitch v-model="state.autoLaunchAnki" />
+                <FluentToggleSwitch v-model="state.autoLaunchAnki" />
             </FluentSettingCard>
             <FluentSettingCard header="应用启动时启动 Anki" description="应用启动时自动启动 Anki，无需等到添加笔记"
                 setting-id="launchAnkiOnAppStart">
                 <template #header-extra>
                     <ResetButton @click="store.reset('launchAnkiOnAppStart')" />
                 </template>
-                <ElSwitch v-model="state.launchAnkiOnAppStart" />
+                <FluentToggleSwitch v-model="state.launchAnkiOnAppStart" />
             </FluentSettingCard>
             <FluentSettingCard header="Anki 可执行文件路径" setting-id="ankiExecutablePath">
                 <template #header-extra>

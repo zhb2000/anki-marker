@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue';
-import { ElSwitch } from 'element-plus';
 
 import * as api from '../../tauri-api';
-import { FluentSelect, FluentSettingCard, type FluentSelectOption } from '../../fluent-controls';
+import { FluentSelect, FluentSettingCard, FluentToggleSwitch, type FluentSelectOption } from '../../fluent-controls';
 import { ResetButton } from '../../components';
 import { useSettingsStore } from '../../logics/settings-store';
 import { setThemeMode } from '../../logics/theme';
@@ -66,7 +65,7 @@ const backgroundIconDescription = computed(() => backgroundIconDisabled.value
                     <template #header-extra>
                         <ResetButton @click="store.reset('keepRunningOnClose')" />
                     </template>
-                    <ElSwitch v-model="state.keepRunningOnClose" />
+                    <FluentToggleSwitch v-model="state.keepRunningOnClose" />
                 </FluentSettingCard>
                 <FluentSettingCard header="后台运行时显示图标" :description="backgroundIconDescription"
                     setting-id="backgroundIcon" :disabled="backgroundIconDisabled">
