@@ -211,15 +211,33 @@ const editPlaceholder = computed(() => {
         : 'Ctrl + Enter 完成编辑';
 });
 
-/** 文本框中的句子被更改时，更新 tokens */
-watch(sentence, newSentence => {
-    tokens.value = utils.string.tokenize(newSentence).map(token => ({ token, marked: false }));
-});
+/**
+ * 编辑会话的基线分词：进入编辑模式时快照，确认编辑时以此为准重建分词。
+ *
+ * 编辑框中的内容视为草稿：编辑期间逐键输入不重建分词（避免把“拆开单词”的
+ * 中间状态固化下来，导致复原后标记无从恢复），确认（完成）时才一次性以基线
+ * 为基准重建，尽量保留已标记单词。整体替换句子（划词录入、粘贴）会作废草稿。
+ */
+let editBaselineTokens: { token: string; marked: boolean; }[] | null = null;
+
+/**
+ * 程序化整体替换句子（划词录入、粘贴、dev 测试句等）：
+ * 句子与分词同步重建为全新状态（清除已有标记），并作废进行中的编辑草稿。
+ * 值相同也重建——每次整体替换都应是全新状态。
+ */
+function replaceSentence(text: string): void {
+    editBaselineTokens = null;
+    if (sentence.value !== text) {
+        sentence.value = text;
+    }
+    tokens.value = utils.string.tokenize(text).map(token => ({ token, marked: false }));
+}
 
 async function pasteToEdit() {
     const text = await api.clipboard.readText();
     if (text != null) {
-        sentence.value = text.trim();
+        // 粘贴属于整体替换句子：分词同步重建为全新状态，不保留旧的标记，编辑草稿一并作废
+        replaceSentence(text.trim());
         if (showEdit.value) {
             await changeEditStatus();
         }
@@ -229,8 +247,17 @@ async function pasteToEdit() {
 async function changeEditStatus() {
     showEdit.value = !showEdit.value;
     if (showEdit.value) {
+        // 进入编辑模式：快照当前分词作为基线，编辑期间不再重建分词
+        editBaselineTokens = tokens.value.map(({ token, marked }) => ({ token, marked }));
         await nextTick();
         editTextArea.value?.focus();
+    } else {
+        // 确认编辑（完成）：以基线分词为基准重建，尽量保留已标记单词。
+        // 基线为 null 说明编辑期间句子被整体替换（划词录入、粘贴），分词已是全新状态，无需重建
+        if (editBaselineTokens != null) {
+            tokens.value = utils.string.rebuildTokensPreservingMarks(editBaselineTokens, sentence.value);
+            editBaselineTokens = null;
+        }
     }
 }
 
@@ -369,25 +396,20 @@ watch([sentence, searchText], () => {
 // #endregion
 
 // #region 全局快捷键划词录入
-/** 录入捕获的句子：退出编辑模式并替换当前句子，分词与搜索管线随之自动触发；取句模式命中的单词会在分词结果中预选 */
+/** 录入捕获的句子：整体替换当前句子（分词同步重建为全新状态）并退出编辑模式；取句模式命中的单词会在分词结果中预选 */
 async function applyCapturedSentence(payload: CapturedSentencePayload) {
     const trimmed = payload.text.trim();
     if (trimmed.length === 0) {
         return;
     }
+    // 先整体替换：分词同步重建为全新状态（每次捕获都是全新状态），进行中的编辑草稿一并作废
+    replaceSentence(trimmed);
     if (showEdit.value) {
         await changeEditStatus();
     }
-    if (sentence.value === trimmed) {
-        // 句子与上一次相同：ref 值未变，watch(sentence) 不会触发，分词不会被重建，
-        // 需手动重建以清除上一次划词（或手动操作）遗留的标记——每次捕获都应是全新状态
-        tokens.value = utils.string.tokenize(trimmed).map(token => ({ token, marked: false }));
-    }
-    sentence.value = trimmed;
     const word = payload.word?.trim();
     if (word != null && word.length > 0) {
-        // 等待 watch(sentence) 重建 tokens 后再标记命中的单词
-        await nextTick();
+        // replaceSentence 已同步重建分词，可直接标记命中的单词
         markCapturedWord(word);
     }
 }
@@ -675,7 +697,7 @@ onBeforeMount(async () => {
     }
     pageInitialized.value = true;
     if (!await utils.rustInRelease()) {
-        sentence.value = 'The quick brown fox jumps over the lazy dog.'; // test sentence in dev mode
+        replaceSentence('The quick brown fox jumps over the lazy dog.'); // test sentence in dev mode
     }
     // 放在 dev 测试句子之后，捕获的句子可覆盖测试句子
     await initSentenceCapture();
