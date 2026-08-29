@@ -123,7 +123,9 @@ onActivated(() => {
             <main class="content-area">
                 <RouterView v-slot="{ Component }">
                     <Transition name="settings-fade" mode="out-in">
-                        <component :is="Component" />
+                        <KeepAlive>
+                            <component :is="Component" />
+                        </KeepAlive>
                     </Transition>
                 </RouterView>
             </main>

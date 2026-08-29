@@ -10,6 +10,9 @@ export default defineConfig(async () => ({
     // Tauri 使用系统 WebView，显式降低 target 以继续支持较旧的 WebView（如 macOS 12.3+ 的 Safari 15.4）。
     build: {
         target: 'es2022',
+        // 桌面应用从本地加载资源，刻意不做 code-splitting（全部打进单一 bundle），
+        // 覆盖默认 500kB 警告阈值；仍保留 2MB 上限，bundle 异常膨胀时依然会告警
+        chunkSizeWarningLimit: 2000,
     },
     css: {
         postcss: './postcss.config.cjs',

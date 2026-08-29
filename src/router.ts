@@ -2,6 +2,12 @@ import { createRouter, createWebHistory } from 'vue-router';
 
 import MainView from './views/MainView.vue';
 import SettingsView from './views/SettingsView.vue';
+import GeneralSettingsPage from './views/settings/GeneralSettingsPage.vue';
+import SelectionSettingsPage from './views/settings/SelectionSettingsPage.vue';
+import AnkiSettingsPage from './views/settings/AnkiSettingsPage.vue';
+import AiSettingsPage from './views/settings/AiSettingsPage.vue';
+import AdvancedSettingsPage from './views/settings/AdvancedSettingsPage.vue';
+import AboutSettingsPage from './views/settings/AboutSettingsPage.vue';
 
 export const router = createRouter({
     history: createWebHistory(),
@@ -16,37 +22,38 @@ export const router = createRouter({
             name: 'SettingsView',
             component: SettingsView,
             redirect: '/settings/general',
-            // 设置页子路由：/settings 渲染壳（SettingsView），子路由渲染各设置页面（懒加载）
+            // 设置页子路由：/settings 渲染壳（SettingsView），子路由渲染各设置页面
+            // 静态 import（本地桌面应用无需 code-splitting），避免首次点击 tab 时因 chunk 加载加重过渡空窗
             children: [
                 {
                     path: 'general',
                     name: 'GeneralSettingsPage',
-                    component: () => import('./views/settings/GeneralSettingsPage.vue')
+                    component: GeneralSettingsPage
                 },
                 {
                     path: 'selection',
                     name: 'SelectionSettingsPage',
-                    component: () => import('./views/settings/SelectionSettingsPage.vue')
+                    component: SelectionSettingsPage
                 },
                 {
                     path: 'anki',
                     name: 'AnkiSettingsPage',
-                    component: () => import('./views/settings/AnkiSettingsPage.vue')
+                    component: AnkiSettingsPage
                 },
                 {
                     path: 'ai',
                     name: 'AiSettingsPage',
-                    component: () => import('./views/settings/AiSettingsPage.vue')
+                    component: AiSettingsPage
                 },
                 {
                     path: 'advanced',
                     name: 'AdvancedSettingsPage',
-                    component: () => import('./views/settings/AdvancedSettingsPage.vue')
+                    component: AdvancedSettingsPage
                 },
                 {
                     path: 'about',
                     name: 'AboutSettingsPage',
-                    component: () => import('./views/settings/AboutSettingsPage.vue')
+                    component: AboutSettingsPage
                 }
             ]
         }

@@ -13,7 +13,7 @@
 
 import { ref, type Ref } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { setElementTheme } from './globals';
+import { setElementTheme } from './element-theme';
 
 /** 主题模式：跟随系统 / 浅色 / 深色 */
 export type ThemeMode = 'system' | 'light' | 'dark';
