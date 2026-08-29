@@ -31,6 +31,10 @@ export interface SettingsStore {
     flush(): Promise<void>;
     /** 重置某键为默认值（写 state 即触发自动保存） */
     reset<K extends keyof ConfigModel>(key: K): void;
+    /** 某设置项的当前值是否偏离默认值（决定单项重置按钮是否显示） */
+    isModified<K extends keyof ConfigModel>(key: K): boolean;
+    /** 将全部设置恢复为默认值（写 state 即触发自动保存） */
+    resetAll(): void;
 }
 
 /**
@@ -114,7 +118,17 @@ function createSettingsStore(): SettingsStore {
         state[key] = CONFIG_DEFAULTS[key] as ConfigModel[K];
     }
 
-    return { state, ready, init, syncFromConfig, flush, reset };
+    function isModified<K extends keyof ConfigModel>(key: K): boolean {
+        return state[key] !== CONFIG_DEFAULTS[key];
+    }
+
+    function resetAll(): void {
+        for (const key of CONFIG_KEYS) {
+            reset(key);
+        }
+    }
+
+    return { state, ready, init, syncFromConfig, flush, reset, isModified, resetAll };
 }
 
 /** 模块级单例 */

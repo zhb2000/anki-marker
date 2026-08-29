@@ -66,7 +66,7 @@ onActivated(() => {
                     description="在任意应用中选中一段文字后按下此快捷键，所选文字将录入划词面板并自动分词。"
                     setting-id="globalShortcut">
                     <template #header-extra>
-                        <ResetButton @click="store.reset('globalShortcut')" />
+                        <ResetButton setting-key="globalShortcut" />
                     </template>
                     <ShortcutRecorder class="card-input shortcut-input" v-model="state.globalShortcut"
                         @update:model-value="handleShortcutChange" />
@@ -78,7 +78,7 @@ onActivated(() => {
                     description="开启后，只需选中一个单词按下快捷键，即可自动录入该单词所在的整个句子并查询该单词；关闭则需选中完整句子录入。"
                     setting-id="wordToSentence">
                     <template #header-extra>
-                        <ResetButton @click="store.reset('wordToSentence')" />
+                        <ResetButton setting-key="wordToSentence" />
                     </template>
                     <FluentToggleSwitch v-model="state.wordToSentence" />
                 </FluentSettingCard>

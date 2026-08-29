@@ -50,7 +50,7 @@ const backgroundIconDescription = computed(() => backgroundIconDisabled.value
         <div class="card-list">
             <FluentSettingCard header="主题" setting-id="theme">
                 <template #header-extra>
-                    <ResetButton @click="store.reset('theme')" />
+                    <ResetButton setting-key="theme" />
                 </template>
                 <FluentSelect class="card-input" :options="themeOptions" v-model="state.theme" />
             </FluentSettingCard>
@@ -63,14 +63,14 @@ const backgroundIconDescription = computed(() => backgroundIconDisabled.value
                     description="关闭窗口后应用将在后台继续运行，可通过 Dock 图标、菜单栏图标或全局快捷键再次打开"
                     setting-id="keepRunningOnClose">
                     <template #header-extra>
-                        <ResetButton @click="store.reset('keepRunningOnClose')" />
+                        <ResetButton setting-key="keepRunningOnClose" />
                     </template>
                     <FluentToggleSwitch v-model="state.keepRunningOnClose" />
                 </FluentSettingCard>
                 <FluentSettingCard header="后台运行时显示图标" :description="backgroundIconDescription"
                     setting-id="backgroundIcon" :disabled="backgroundIconDisabled">
                     <template #header-extra>
-                        <ResetButton :disabled="backgroundIconDisabled" @click="store.reset('backgroundIcon')" />
+                        <ResetButton setting-key="backgroundIcon" :disabled="backgroundIconDisabled" />
                     </template>
                     <FluentSelect class="card-input" :options="backgroundIconOptions"
                         v-model="state.backgroundIcon" :disabled="backgroundIconDisabled" />

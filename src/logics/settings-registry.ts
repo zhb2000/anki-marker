@@ -185,6 +185,13 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         title: '打开目录',
         keywords: ['打开目录', '打开文件夹', '所在目录', '目录', 'open', 'folder'],
     },
+    {
+        id: 'reset-all',
+        page: 'advanced',
+        title: '恢复全部默认设置',
+        description: '将所有设置（主题、Anki 连接、AI 配置等）恢复为默认值，立即生效',
+        keywords: ['重置', '恢复默认', '默认设置', '还原', '出厂设置', 'reset', 'restore'],
+    },
     // #endregion
 
     // #region 关于

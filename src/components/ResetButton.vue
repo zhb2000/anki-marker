@@ -1,20 +1,47 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+
+import { CONFIG_DEFAULTS, type ConfigModel } from '../logics/config';
+import { useSettingsStore } from '../logics/settings-store';
 import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 
-withDefaults(defineProps<{
+/**
+ * 单项设置的重置按钮：仅在所在设置项偏离默认值时显示（出现本身即"已修改"指示），
+ * tooltip 中展示将要恢复的默认值。与设置仓库耦合，仅用于设置页。
+ */
+const props = withDefaults(defineProps<{
+    /** 对应的设置项键（CONFIG_DEFAULTS 中的键名） */
+    settingKey: keyof ConfigModel;
     /** 禁用：所在卡片的功能未启用时置灰并禁止点击 */
     disabled?: boolean;
 }>(), {
     disabled: false,
 });
+
+const store = useSettingsStore();
+
+/** 当前值等于默认值时不渲染（无意义的 no-op 按钮是噪音） */
+const visible = computed(() => store.isModified(props.settingKey));
+
+/** tooltip 中的默认值文本：布尔转开关、空字符串转"留空"、其余原样展示 */
+const defaultText = computed(() => {
+    const value = CONFIG_DEFAULTS[props.settingKey];
+    if (typeof value === 'boolean') {
+        return value ? '开启' : '关闭';
+    }
+    return value === '' ? '留空' : value;
+});
 </script>
 
 <template>
-    <HoverWrapper>
-        <button title="重置" class="reset-button" :disabled="disabled">
-            <slot></slot>
-        </button>
-    </HoverWrapper>
+    <Transition name="reset-fade">
+        <HoverWrapper v-if="visible">
+            <button :title="`重置为默认值：${defaultText}`" class="reset-button" :disabled="disabled"
+                @click="store.reset(settingKey)">
+                <slot></slot>
+            </button>
+        </HoverWrapper>
+    </Transition>
 </template>
 
 <style scoped>
@@ -41,8 +68,8 @@ withDefaults(defineProps<{
     mask-repeat: no-repeat;
     mask-position: center 60%;
     mask-size: 70% 70%;
-    /* 平时弱化图标，hover 时加深 */
-    opacity: 0.5;
+    /* 静止时弱化图标（辅助操作不与标题争夺注意力），hover/点击时加深 */
+    opacity: 0.7;
 }
 
 .reset-button[fluent-hovered] {
@@ -65,5 +92,16 @@ withDefaults(defineProps<{
 
 .reset-button:disabled::after {
     opacity: 0.3;
+}
+
+/* 出现/消失过渡：修改值时淡入、恢复默认时淡出，避免按钮突然弹出/抽走 */
+.reset-fade-enter-active,
+.reset-fade-leave-active {
+    transition: opacity 0.1s ease;
+}
+
+.reset-fade-enter-from,
+.reset-fade-leave-to {
+    opacity: 0;
 }
 </style>

@@ -17,20 +17,20 @@ useHighlight();
         <div class="card-list">
             <FluentSettingCard header="AnkiConnect 服务" setting-id="ankiConnectURL">
                 <template #header-extra>
-                    <ResetButton @click="store.reset('ankiConnectURL')" />
+                    <ResetButton setting-key="ankiConnectURL" />
                 </template>
                 <FluentInput class="card-input" placeholder="请输入 AnkiConnect 服务的 URL"
                     v-model="state.ankiConnectURL" />
             </FluentSettingCard>
             <FluentSettingCard header="将划词结果添加到哪个牌组" setting-id="deckName">
                 <template #header-extra>
-                    <ResetButton @click="store.reset('deckName')" />
+                    <ResetButton setting-key="deckName" />
                 </template>
                 <FluentInput class="card-input" placeholder="请输入牌组名称" v-model="state.deckName" />
             </FluentSettingCard>
             <FluentSettingCard header="使用的笔记模板名称" setting-id="modelName">
                 <template #header-extra>
-                    <ResetButton @click="store.reset('modelName')" />
+                    <ResetButton setting-key="modelName" />
                 </template>
                 <FluentInput class="card-input" placeholder="请输入笔记模板名称" v-model="state.modelName" />
             </FluentSettingCard>
@@ -41,20 +41,20 @@ useHighlight();
             <FluentSettingCard header="自动启动 Anki"
                 description="添加笔记时若 Anki 未运行，将自动启动 Anki 并等待其就绪" setting-id="autoLaunchAnki">
                 <template #header-extra>
-                    <ResetButton @click="store.reset('autoLaunchAnki')" />
+                    <ResetButton setting-key="autoLaunchAnki" />
                 </template>
                 <FluentToggleSwitch v-model="state.autoLaunchAnki" />
             </FluentSettingCard>
             <FluentSettingCard header="应用启动时启动 Anki" description="应用启动时自动启动 Anki，无需等到添加笔记"
                 setting-id="launchAnkiOnAppStart">
                 <template #header-extra>
-                    <ResetButton @click="store.reset('launchAnkiOnAppStart')" />
+                    <ResetButton setting-key="launchAnkiOnAppStart" />
                 </template>
                 <FluentToggleSwitch v-model="state.launchAnkiOnAppStart" />
             </FluentSettingCard>
             <FluentSettingCard header="Anki 可执行文件路径" setting-id="ankiExecutablePath">
                 <template #header-extra>
-                    <ResetButton @click="store.reset('ankiExecutablePath')" />
+                    <ResetButton setting-key="ankiExecutablePath" />
                 </template>
                 <FluentInput class="card-input" placeholder="留空则自动检测 Anki 路径"
                     v-model="state.ankiExecutablePath" />

@@ -5,10 +5,14 @@ import * as api from '../../tauri-api';
 import * as cfg from '../../logics/config';
 import * as globals from '../../logics/globals';
 import { FluentButton, FluentSettingCard } from '../../fluent-controls';
+import { setThemeMode } from '../../logics/theme';
+import { useSettingsStore } from '../../logics/settings-store';
 import { useHighlight } from './useHighlight';
 
 // 搜索跳转高亮（见 useHighlight 注释）
 useHighlight();
+
+const store = useSettingsStore();
 
 /** 配置文件对象（只读使用：path / portable）；shell 已完成 store.init，此处 getConfig 直接命中缓存 */
 const config = ref<cfg.Config | null>(null);
@@ -28,6 +32,25 @@ async function handleOpenFileClick() {
         console.error(error);
         await api.dialog.message(String(error), { title: '打开文件失败', kind: 'error' });
     }
+}
+
+/** 点击恢复默认设置按钮：确认后把全部设置写回默认值（写 state 即触发自动保存） */
+async function handleResetAllClick() {
+    const confirmed = await api.dialog.confirm(
+        '确定要将所有设置恢复为默认值吗？此操作不可撤销。',
+        {
+            title: '恢复默认设置',
+            kind: 'warning',
+            okLabel: '恢复默认设置',
+            cancelLabel: '取消',
+        },
+    );
+    if (!confirmed) {
+        return;
+    }
+    store.resetAll();
+    // 主题不在本页展示，通用页未挂载时其 watch 不会生效，这里显式同步一次
+    setThemeMode(store.state.theme);
 }
 
 /** 点击打开配置文件所在目录按钮 */
@@ -60,6 +83,14 @@ async function handleShowInExplorerClick() {
                     @click="handleShowInExplorerClick">
                     打开目录
                 </FluentButton>
+            </FluentSettingCard>
+        </div>
+
+        <h2 class="group-title">重置</h2>
+        <div class="card-list">
+            <FluentSettingCard header="恢复全部默认设置"
+                description="将所有设置（主题、Anki 连接、AI 配置等）恢复为默认值，立即生效" setting-id="reset-all">
+                <FluentButton @click="handleResetAllClick">恢复默认设置</FluentButton>
             </FluentSettingCard>
         </div>
     </div>
