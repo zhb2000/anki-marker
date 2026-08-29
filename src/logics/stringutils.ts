@@ -1,10 +1,18 @@
+/**
+ * 判断词元是否为可标记的单词：拉丁字母（含 café 等重音字母）、数字与下划线组成，
+ * 词内的撇号（直 ' 与弯 ’）和连字符参与连接（don't、well-being 是单个词元）；
+ * 引号、句点等标点不参与连接（'hello' 的引号、U.S.A. 的句点仍为分隔符）。
+ * CJK 等其他文字不视为单词，保持不可点击，避免误查词典。
+ */
 export function isWord(token: string): boolean {
-    return /^\w+$/.test(token);
+    return /^[\p{Script=Latin}0-9_]+(?:['’-][\p{Script=Latin}0-9_]+)*$/u.test(token);
 }
 
 export function tokenize(text: string): string[] {
     const tokens = [];
-    const regex = /\w+/g;
+    // 字符类与 isWord 保持一致：拉丁字母（含重音）/数字/下划线为词内字符，
+    // 词内撇号与连字符连接成单个词元（don't、well-being），CJK 等其他文字落入非词词元
+    const regex = /[\p{Script=Latin}0-9_]+(?:['’-][\p{Script=Latin}0-9_]+)*/gu;
     let lastEnd = 0;
     for (let match = regex.exec(text); match != null; match = regex.exec(text)) {
         const token = match[0];
