@@ -22,11 +22,11 @@ const themeOptions: FluentSelectOption[] = [
     { value: 'dark', label: '深色' },
 ];
 
-/** 后台运行图标下拉的选项：Dock 栏图标 / 菜单栏图标 / 都不显示 */
+/** 后台运行图标下拉的选项：Dock 栏图标 / 菜单栏图标 / 不显示图标 */
 const backgroundIconOptions: FluentSelectOption[] = [
     { value: 'dock', label: 'Dock 栏图标' },
     { value: 'menu-bar', label: '菜单栏图标' },
-    { value: 'none', label: '都不显示' },
+    { value: 'none', label: '不显示图标' },
 ];
 
 // 主题切换即时生效：全窗口共享同一 DOM，setThemeMode 直接切换 dark class，无需等待保存

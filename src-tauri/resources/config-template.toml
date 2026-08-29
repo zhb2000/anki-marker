@@ -35,6 +35,6 @@ word-to-sentence = true
 keep-running-on-close = true
 
 # 后台运行（关闭窗口保持运行）期间，应用图标显示的位置（仅 macOS）
-# 可选值：dock = Dock 栏（默认）、menu-bar = 屏幕顶部菜单栏、none = 都不显示
+# 可选值：menu-bar = 屏幕顶部菜单栏（默认）、dock = Dock 栏、none = 不显示图标
 # 窗口打开时图标始终显示在 Dock 栏、不显示在菜单栏
-background-icon = "dock"
+background-icon = "menu-bar"

@@ -36,6 +36,11 @@ tauri-plugin-webdriver = { version = "0.2", optional = true }
 tauri-plugin-global-shortcut = "2.3"
 core-foundation = "0.9"
 macos-accessibility-client = "0.0.2"
+# Dock 图标菜单：Tauri 未提供 Dock 菜单 API，需运行时向 NSApplication 代理
+# 注入 applicationDockMenu: 方法（objc2）并直接用 muda 构建菜单。
+# 二者均为依赖树中已有的库，版本与 Cargo.lock 保持一致
+objc2 = "0.6"
+muda = { version = "0.19", default-features = false }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

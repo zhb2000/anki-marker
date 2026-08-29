@@ -8,7 +8,7 @@ pub enum BackgroundIcon {
     Dock,
     /// 屏幕顶部菜单栏图标
     MenuBar,
-    /// 都不显示
+    /// 不显示图标
     None,
 }
 
@@ -128,7 +128,7 @@ impl Default for Config {
             global_shortcut: String::new(),
             word_to_sentence: true,
             keep_running_on_close: true,
-            background_icon: BackgroundIcon::Dock,
+            background_icon: BackgroundIcon::MenuBar,
             llm_enabled: false,
             llm_base_url: String::new(),
             llm_api_key: String::new(),
@@ -222,11 +222,11 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             .get("keep-running-on-close")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
-        // 后台运行期间图标位置为后加的键，老配置文件中没有；缺省或非法值回退 Dock
+        // 后台运行期间图标位置为后加的键，老配置文件中没有；缺省或非法值回退菜单栏图标
         let background_icon = match doc.get("background-icon").and_then(|v| v.as_str()) {
-            Some("menu-bar") => BackgroundIcon::MenuBar,
+            Some("dock") => BackgroundIcon::Dock,
             Some("none") => BackgroundIcon::None,
-            _ => BackgroundIcon::Dock,
+            _ => BackgroundIcon::MenuBar,
         };
         // AI 优选释义相关为后加的键，老配置文件中没有这些键，必须带缺省回退
         let llm_enabled = doc

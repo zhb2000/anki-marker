@@ -91,6 +91,13 @@ fn main() {
             #[cfg(target_os = "macos")]
             application::shortcut::update_from_config(app.handle());
 
+            // 托盘/Dock 图标菜单：注册共用的菜单事件处理，并安装 Dock 图标菜单（仅 macOS）
+            #[cfg(target_os = "macos")]
+            {
+                application::menubar::register_menu_event_handler(app.handle());
+                application::menubar::install_dock_menu(app.handle());
+            }
+
             // 防启动闪屏的兜底：窗口初始隐藏（tauri.conf.json 中 visible: false），
             // 正常由前端应用主题后调用 show() 显示；
             // 若前端异常迟迟未显示窗口，3 秒后强制显示，避免应用“隐形”。

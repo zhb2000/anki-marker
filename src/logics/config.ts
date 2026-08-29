@@ -36,7 +36,7 @@ export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     globalShortcut: '',
     wordToSentence: true,
     keepRunningOnClose: true,
-    backgroundIcon: 'dock',
+    backgroundIcon: 'menu-bar',
     llmEnabled: false,
     llmBaseUrl: '',
     llmApiKey: '',
@@ -78,7 +78,7 @@ export class Config implements ConfigModel {
     public wordToSentence!: boolean;
     /** 关闭窗口时是否保持应用在后台运行（仅 macOS） */
     public keepRunningOnClose!: boolean;
-    /** 后台运行期间应用图标的显示位置（仅 macOS）：dock=Dock 栏、menu-bar=菜单栏、none=都不显示 */
+    /** 后台运行期间应用图标的显示位置（仅 macOS）：dock=Dock 栏、menu-bar=菜单栏、none=不显示图标 */
     public backgroundIcon!: 'dock' | 'menu-bar' | 'none';
     /** 是否启用 AI 优选释义（LLM） */
     public llmEnabled!: boolean;
