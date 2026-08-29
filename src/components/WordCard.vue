@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, PropType } from 'vue';
 
-import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 import AddButton from './AddButton.vue';
+import EditButton from './EditButton.vue';
 import type { CardStatus } from './CardStatus';
 
 const props = defineProps({
@@ -53,9 +53,7 @@ function handleAnimationEnd() {
             </div>
             <div class="flex-shrink-0">
                 <AddButton :status="status" class="card-button" @click="emitAddBtnClick" />
-                <HoverWrapper v-show="status === 'is-added'">
-                    <button class="card-button edit-button" title="编辑笔记" @click="emitEditBtnClick"></button>
-                </HoverWrapper>
+                <EditButton v-show="status === 'is-added'" @click="emitEditBtnClick" />
             </div>
         </div>
     </div>
@@ -138,22 +136,5 @@ function handleAnimationEnd() {
     margin-bottom: 8px;
     width: 16px;
     height: 16px;
-}
-
-.edit-button {
-    padding: 0;
-    border: none;
-    border-radius: var(--border-radius);
-    background-color: var(--icon-button-background);
-    /* 使用 mask-image 后，用 background 设置图标的颜色 */
-    mask-image: url('../assets/edit.svg');
-}
-
-.edit-button[fluent-hovered] {
-    background-color: var(--accent);
-}
-
-.edit-button:active {
-    background-color: var(--control-accent-background-active);
 }
 </style>

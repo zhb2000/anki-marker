@@ -4,6 +4,7 @@ import { computed, ref, watch, type PropType } from 'vue';
 import type { AiPickState, DictSource } from '../logics/aiPick';
 import type { CollinsItem, OxfordItem, YoudaoItem } from '../logics/dict';
 import AddButton from './AddButton.vue';
+import EditButton from './EditButton.vue';
 import type { CardStatus } from './CardStatus';
 
 const props = defineProps({
@@ -30,13 +31,27 @@ const props = defineProps({
 
 const emit = defineEmits<{
     'add-btn-click': [];
+    'edit-btn-click': [];
+    'stop': [];
+    'regenerate': [];
 }>();
 
 /** 完成态且命中真实词典条目（非 fallback）时才显示加号，语义等同该条目卡片上的加号 */
 const showAddButton = computed(() => props.state.phase === 'done' && props.state.pick != null);
 
+/** 已添加到 Anki 且命中真实词典条目时显示编辑按钮，语义等同该条目卡片上的编辑按钮 */
+const showEditButton = computed(() => showAddButton.value && props.status === 'is-added');
+
+/** AI 请求进行中的阶段：显示停止按钮 */
+const inProgress = computed(() =>
+    props.state.phase === 'loading' || props.state.phase === 'thinking' || props.state.phase === 'streaming');
+
 function emitAddBtnClick() {
     emit('add-btn-click');
+}
+
+function emitEditBtnClick() {
+    emit('edit-btn-click');
 }
 
 /** 词典来源的显示名 */
@@ -106,6 +121,11 @@ function onBodyAnimationEnd(event: AnimationEvent) {
                     <span v-else-if="state.phase === 'done' && state.fallback" class="ai-source-badge ai-source-warning">
                         AI 生成，非词典条目
                     </span>
+                    <!-- 停止/重新生成：进行中可停止；完成态可重新生成（含 fallback 重新生成） -->
+                    <span class="ai-pick-actions">
+                        <button v-if="inProgress" class="ai-action-btn" @click="emit('stop')">停止</button>
+                        <button v-else-if="state.phase === 'done'" class="ai-action-btn" @click="emit('regenerate')">重新生成</button>
+                    </span>
                 </div>
                 <div v-if="state.phase === 'loading'" class="ai-skeleton" aria-hidden="true">
                     <div class="ai-skeleton-line"></div>
@@ -154,6 +174,7 @@ function onBodyAnimationEnd(event: AnimationEvent) {
             </div>
             <div v-if="showAddButton" class="flex-shrink-0">
                 <AddButton :status="status" class="card-button" @click="emitAddBtnClick" />
+                <EditButton v-if="showEditButton" @click="emitEditBtnClick" />
             </div>
         </div>
     </div>
@@ -238,6 +259,31 @@ function onBodyAnimationEnd(event: AnimationEvent) {
 
 .ai-source-warning {
     color: var(--warning-text-color);
+}
+
+/* 停止/重新生成按钮：右对齐的小号幽灵按钮，弱于内容区的视觉权重 */
+.ai-pick-actions {
+    margin-left: auto;
+}
+
+.ai-action-btn {
+    padding: 2px 8px;
+    font-size: 12px;
+    line-height: 1.4;
+    border: none;
+    border-radius: var(--border-radius);
+    background-color: transparent;
+    color: var(--control-text-color-active);
+    cursor: pointer;
+    user-select: none;
+}
+
+.ai-action-btn:hover {
+    background-color: var(--control-background-hover);
+}
+
+.ai-action-btn:active {
+    color: var(--control-accent-text-color-active);
 }
 
 .ai-contextual-def {

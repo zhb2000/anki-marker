@@ -336,7 +336,7 @@ const aiPickItem = computed(() => {
 
 /**
  * 提交一次有效搜索后调用：若启用并配置好了 LLM，则并行搜索三本词典（填满 wordItems，
- * 保证候选与界面条目索引对齐、切 tab 即时）并发起 AI 优选；否则在无进行中请求时重置为 idle。
+ * 保证候选与界面条目索引对齐、切 tab 即时）并发起 AI 优选；否则中止遗留请求并重置为 idle。
  */
 async function maybeStartAiPick(word: string) {
     const trimmed = word.trim();
@@ -348,9 +348,11 @@ async function maybeStartAiPick(word: string) {
         reasoningEffort: config.llmReasoningEffort
     };
     if (trimmed.length === 0 || !config.llmEnabled || !isLlmReady(llmConfig)) {
-        if (aiAbort == null) {
-            resetAiPick();
-        }
+        // 与 watch([sentence, searchText]) 的取消逻辑一致，作其他调用路径的兜底：
+        // 文本已无效（空词/未启用/未配置），进行中的请求不会有人再取消，必须在此中止
+        aiAbort?.abort();
+        aiAbort = null;
+        resetAiPick();
         return;
     }
     const key = aiPickLogic.makeAiPickCacheKey(sentence.value, trimmed);
@@ -412,12 +414,46 @@ async function submitSearch() {
     void maybeStartAiPick(searchText.value);
 }
 
-/** sentence 或 searchText 变化时，若无进行中的 AI 请求，则把 AI 卡片重置为 idle */
+/**
+ * sentence 或 searchText 变化时，中止进行中的 AI 请求并重置卡片：
+ * 进行中的结果只对旧的“句子+单词”有效，文本已变就该立即取消，而不是等新搜索发起时才中止
+ * （否则 searchText 变空时 maybeStartAiPick 会静默早退，旧请求会继续跑完并把结果上屏）。
+ *
+ * 时序安全性：本 watch 在 flush 阶段执行，早于因本次文本变化而发起的新请求创建 controller
+ * （maybeStartAiPick 要等 searchAndUpdate 的 await 之后才开始运行），因此不会误杀新请求；
+ * maybeStartAiPick 入口的“快速连点”abort 仍保留，覆盖同文本重入（预取窗口内重复查询）的场景。
+ */
 watch([sentence, searchText], () => {
-    if (aiAbort == null && aiPick.phase !== 'idle') {
+    aiAbort?.abort();
+    aiAbort = null;
+    if (aiPick.phase !== 'idle') {
         resetAiPick();
     }
 });
+
+/**
+ * 停止按钮：中止进行中的 AI 请求并隐藏卡片。
+ * 中止属静默结束（requestAiPick 内部对 aborted 不回调 error 态，onUpdate 有 controller 校验），
+ * 此处立即重置即可；清空 aiSearchedKey 使同一“句子+单词”再次搜索时可重新触发。
+ */
+function stopAiPick() {
+    aiAbort?.abort();
+    aiAbort = null;
+    resetAiPick();
+}
+
+/**
+ * 重新生成按钮：作废结果缓存后重置卡片并重新发起优选。
+ * 仅 done 态可点（进行中显示的是停止按钮）；aiAbort 非空的防御分支理论上不可达。
+ */
+function regenerateAiPick() {
+    if (aiAbort != null) {
+        return;
+    }
+    aiPickLogic.invalidateAiPickCache(sentence.value, searchText.value);
+    resetAiPick();
+    void maybeStartAiPick(searchText.value);
+}
 // #endregion
 
 // #region 全局快捷键划词录入
@@ -665,12 +701,11 @@ async function handleAiPickAdd() {
  *
  * Anki 26.08 重构了编辑窗口（移除了 Ui_Dialog 的 buttonBox），导致 AnkiConnect 的
  * guiEditNote 报错。
- * 
+ *
  * 因此在 guiEditNote 失败时降级为打开 Anki 卡片浏览器并定位到该笔记，卡片浏览器中可直接编辑。
  */
-async function openEditDialog(index: number) {
-    const selected = selectedDict.value;
-    const item = wordItems[selected][index];
+async function openEditDialogOf(dictionary: 'collins' | 'oxford' | 'youdao', index: number) {
+    const item = wordItems[dictionary][index];
     if (item.id == null) {
         console.error('item.id is null when openEditDialog, item:', item);
         return;
@@ -689,6 +724,18 @@ async function openEditDialog(index: number) {
             console.error(fallbackError);
             await api.dialog.message(String(error), { title: '打开编辑对话框失败', kind: 'error' });
         }
+    }
+}
+
+/** 词典卡片的编辑入口：操作当前所选词典中的条目 */
+async function openEditDialog(index: number) {
+    await openEditDialogOf(selectedDict.value, index);
+}
+
+/** AI 优选卡片的编辑入口：操作 AI 选中的那条真实词典条目，可能与当前 tab 不同词典 */
+async function handleAiPickEdit() {
+    if (aiPick.pick != null) {
+        await openEditDialogOf(aiPick.pick.source, aiPick.pick.index);
     }
 }
 
@@ -770,21 +817,24 @@ onBeforeMount(async () => {
             <ScrollMemory :show="selectedDict === 'collins'" class="words-container-inner">
                 <!-- AI 优选卡随列表内容滚动，每个词典容器内各放一份（内容同源）；active 标记当前可见实例，仅它播放动画 -->
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
-                    :picked-item="aiPickItem" :active="selectedDict === 'collins'" @add-btn-click="handleAiPickAdd" />
+                    :picked-item="aiPickItem" :active="selectedDict === 'collins'" @add-btn-click="handleAiPickAdd"
+                    @edit-btn-click="handleAiPickEdit" @stop="stopAiPick" @regenerate="regenerateAiPick" />
                 <CollinsCard v-for="(item, index) in wordItems['collins']" :key="index" :item="item.item" :index="index"
                     :status="item.status" :ai-picked="isAiPicked('collins', index)" @add-btn-click="changeItemAdded"
                     @edit-btn-click="openEditDialog" />
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'oxford'" class="words-container-inner">
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
-                    :picked-item="aiPickItem" :active="selectedDict === 'oxford'" @add-btn-click="handleAiPickAdd" />
+                    :picked-item="aiPickItem" :active="selectedDict === 'oxford'" @add-btn-click="handleAiPickAdd"
+                    @edit-btn-click="handleAiPickEdit" @stop="stopAiPick" @regenerate="regenerateAiPick" />
                 <OxfordCard v-for="(item, index) in wordItems['oxford']" :key="index" :item="item.item" :index="index"
                     :status="item.status" :ai-picked="isAiPicked('oxford', index)" @add-btn-click="changeItemAdded"
                     @edit-btn-click="openEditDialog" />
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'youdao'" class="words-container-inner">
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
-                    :picked-item="aiPickItem" :active="selectedDict === 'youdao'" @add-btn-click="handleAiPickAdd" />
+                    :picked-item="aiPickItem" :active="selectedDict === 'youdao'" @add-btn-click="handleAiPickAdd"
+                    @edit-btn-click="handleAiPickEdit" @stop="stopAiPick" @regenerate="regenerateAiPick" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['concise'].length > 0" class="youdao-title">
                     简明释义
                 </div>
