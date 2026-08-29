@@ -11,24 +11,24 @@ const props = defineProps({
     }
 });
 
+const emit = defineEmits<{
+    /** 在词元上按下鼠标（含非单词词元，由父组件过滤） */
+    press: [event: MouseEvent];
+    /** 鼠标进入词元（拖刷手势经过时由父组件处理） */
+    enter: [event: MouseEvent];
+}>();
+
 const marked = defineModel<boolean>('marked', { required: true });
 
 const isWord = computed(() => utils.string.isWord(props.token));
 
 const title = computed(() => {
     if (isWord.value) {
-        return marked.value ? '已标记，点击取消' : '点击以标记';
+        return marked.value ? '已标记，点击取消' : '点击标记，按住拖动可连续标记';
     } else {
         return undefined;
     }
 });
-
-function handleClick() {
-    // 只有单词才能标记
-    if (isWord.value) {
-        marked.value = !marked.value;
-    }
-}
 </script>
 
 <template>
@@ -37,7 +37,7 @@ function handleClick() {
             marked: marked,
             'is-word': isWord,
             'not-word': !isWord
-        }" :title="title" @click="handleClick">{{ token }}</span>
+        }" :title="title" @mousedown="emit('press', $event)" @mouseenter="emit('enter', $event)">{{ token }}</span>
     </HoverWrapper>
 </template>
 
@@ -53,6 +53,11 @@ function handleClick() {
     user-select: none;
     cursor: default;
     transition: background-color 0.2s, color 0.2s, font-weight 0.2s;
+}
+
+/* 单词词元可点击（按下标记或拖刷连标） */
+.token.is-word {
+    cursor: pointer;
 }
 
 .token.is-word.marked {

@@ -83,15 +83,34 @@ const searchingOrSearchedWords = {
 /** 所选的发音 */
 const selectedPronunciation = ref<'en' | 'us'>('us');
 
-/** tokens 的选中状态改变时，更新 searchText 并搜索新单词 */
-watch(tokens, async newTokens => {
-    const newSearchText = newTokens
+/** 拖刷手势进行中：词元标记在手势内连续变化，抑制逐词搜索，手势结束后统一提交一次 */
+const painting = ref(false);
+
+/** 按当前标记状态同步 searchText 并提交搜索 */
+function syncSearchFromTokens() {
+    const newSearchText = tokens.value
         .filter(token => token.marked)
         .map(token => token.token)
         .join(' ');
     searchText.value = newSearchText;
-    await submitSearch();
+    return submitSearch();
+}
+
+/** tokens 的选中状态改变时，更新 searchText 并搜索新单词；拖刷手势进行中则等手势结束再统一搜索 */
+watch(tokens, () => {
+    if (!painting.value) {
+        void syncSearchFromTokens();
+    }
 }, { deep: true });
+
+function onPaintStart(): void {
+    painting.value = true;
+}
+
+function onPaintEnd(): void {
+    painting.value = false;
+    void syncSearchFromTokens();
+}
 
 /** 所选的词典改变时，在所选词典中搜索新单词 */
 watch(selectedDict, async newSelected => {
@@ -724,7 +743,7 @@ onBeforeMount(async () => {
                 :update-available="globals.appUpdateAvailable.value || globals.templateUpdateAvailable.value" />
         </div>
         <div class="sentence-container">
-            <SentencePanel :tokens="tokens" v-if="!showEdit" />
+            <SentencePanel :tokens="tokens" v-if="!showEdit" @paint-start="onPaintStart" @paint-end="onPaintEnd" />
             <textarea class="fluent-textarea" v-model.trim="sentence" v-if="showEdit" ref="editTextArea"
                 :placeholder="editPlaceholder" @keydown="handleEditTextAreaKeydown"></textarea>
         </div>
