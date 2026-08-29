@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onActivated } from 'vue';
+import { ElSwitch } from 'element-plus';
 
 import * as api from '../../tauri-api';
 import { FluentButton, FluentSettingCard } from '../../fluent-controls';
@@ -73,6 +74,14 @@ onActivated(() => {
                     <div v-if="showShortcutError" class="status-text status-warning shortcut-error">
                         ⚠️ 快捷键注册失败（可能被其他应用占用）：{{ shortcutError }}
                     </div>
+                </FluentSettingCard>
+                <FluentSettingCard header="选词取句"
+                    description="开启后，只需选中一个单词按下快捷键，即可自动录入该单词所在的整个句子并查询该单词；关闭则需选中完整句子录入。"
+                    setting-id="wordToSentence">
+                    <template #header-extra>
+                        <ResetButton @click="store.reset('wordToSentence')" />
+                    </template>
+                    <ElSwitch v-model="state.wordToSentence" />
                 </FluentSettingCard>
                 <FluentSettingCard v-if="state.globalShortcut.length > 0" header="辅助功能权限"
                     :description="accessibilityTrusted === false ? '辅助功能未授权，划词功能可能无法使用。请点击上方“申请权限”按钮，并按系统提示授权本应用。' : undefined">

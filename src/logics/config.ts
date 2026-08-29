@@ -11,6 +11,7 @@ export interface ConfigModel {
     launchAnkiOnAppStart: boolean;
     ankiExecutablePath: string;
     globalShortcut: string;
+    wordToSentence: boolean;
     keepRunningOnClose: boolean;
     backgroundIcon: 'dock' | 'menu-bar' | 'none';
     llmEnabled: boolean;
@@ -21,7 +22,7 @@ export interface ConfigModel {
     llmReasoningEffort: string;
 }
 
-export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut', 'keepRunningOnClose', 'backgroundIcon', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmMaxTokens', 'llmReasoningEffort'] as const;
+export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut', 'wordToSentence', 'keepRunningOnClose', 'backgroundIcon', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmMaxTokens', 'llmReasoningEffort'] as const;
 
 /** 配置项的默认值 */
 export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
@@ -33,6 +34,7 @@ export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     launchAnkiOnAppStart: false,
     ankiExecutablePath: '',
     globalShortcut: '',
+    wordToSentence: true,
     keepRunningOnClose: true,
     backgroundIcon: 'dock',
     llmEnabled: false,
@@ -72,6 +74,8 @@ export class Config implements ConfigModel {
     public ankiExecutablePath!: string;
     /** 划词录入句子的全局快捷键，空字符串表示未设置 */
     public globalShortcut!: string;
+    /** 选词取句：开启后划词只需选中单词即可录入所在句子（仅 macOS） */
+    public wordToSentence!: boolean;
     /** 关闭窗口时是否保持应用在后台运行（仅 macOS） */
     public keepRunningOnClose!: boolean;
     /** 后台运行期间应用图标的显示位置（仅 macOS）：dock=Dock 栏、menu-bar=菜单栏、none=都不显示 */

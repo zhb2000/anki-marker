@@ -39,6 +39,12 @@ interface ItemModel<T> {
     id: number | null;
 }
 
+/** 划词捕获结果：text 为录入文本（取句成功时是整句），word 为取句模式命中的单词（用于预选，可能为 null） */
+interface CapturedSentencePayload {
+    text: string;
+    word: string | null;
+}
+
 /** 划词面板的词元 */
 const tokens = ref<{ token: string, marked: boolean; }[]>([]);
 /** 所选的字典 */
@@ -363,16 +369,63 @@ watch([sentence, searchText], () => {
 // #endregion
 
 // #region 全局快捷键划词录入
-/** 录入捕获的句子：退出编辑模式并替换当前句子，分词与搜索管线随之自动触发 */
-async function applyCapturedSentence(text: string) {
-    const trimmed = text.trim();
+/** 录入捕获的句子：退出编辑模式并替换当前句子，分词与搜索管线随之自动触发；取句模式命中的单词会在分词结果中预选 */
+async function applyCapturedSentence(payload: CapturedSentencePayload) {
+    const trimmed = payload.text.trim();
     if (trimmed.length === 0) {
         return;
     }
     if (showEdit.value) {
         await changeEditStatus();
     }
+    if (sentence.value === trimmed) {
+        // 句子与上一次相同：ref 值未变，watch(sentence) 不会触发，分词不会被重建，
+        // 需手动重建以清除上一次划词（或手动操作）遗留的标记——每次捕获都应是全新状态
+        tokens.value = utils.string.tokenize(trimmed).map(token => ({ token, marked: false }));
+    }
     sentence.value = trimmed;
+    const word = payload.word?.trim();
+    if (word != null && word.length > 0) {
+        // 等待 watch(sentence) 重建 tokens 后再标记命中的单词
+        await nextTick();
+        markCapturedWord(word);
+    }
+}
+
+/**
+ * 在分词结果中标记捕获的单词：先精确匹配单词元，再忽略大小写，最后按连续词元序列匹配短语；都不匹配则不预选
+ */
+function markCapturedWord(word: string): void {
+    const list = tokens.value;
+    // 单词匹配：精确，失败再忽略大小写
+    let index = list.findIndex(t => t.token === word);
+    if (index < 0) {
+        const lower = word.toLowerCase();
+        index = list.findIndex(t => t.token.toLowerCase() === lower);
+    }
+    if (index >= 0) {
+        list[index].marked = true;
+        return;
+    }
+    // 短语匹配：按空白切分后，在词元下标序列上找连续的一段与各部分忽略大小写相等
+    const parts = word.split(/\s+/).filter(part => part.length > 0);
+    if (parts.length > 1) {
+        const wordIndexes = list
+            .map((t, i) => ({ token: t.token, index: i }))
+            .filter(t => utils.string.isWord(t.token))
+            .map(t => t.index);
+        outer: for (let start = 0; start + parts.length <= wordIndexes.length; start++) {
+            for (let offset = 0; offset < parts.length; offset++) {
+                if (list[wordIndexes[start + offset]].token.toLowerCase() !== parts[offset].toLowerCase()) {
+                    continue outer;
+                }
+            }
+            for (let offset = 0; offset < parts.length; offset++) {
+                list[wordIndexes[start + offset]].marked = true;
+            }
+            return;
+        }
+    }
 }
 
 /** 监听划词句子事件，并取走可能在主窗口重建期间暂存的句子 */
@@ -380,10 +433,10 @@ async function initSentenceCapture() {
     // 主窗口被关闭后按快捷键会重建窗口，前端就绪之前 emit 的事件会丢失，
     // 此时通过 take_pending_sentence 取回 Rust 侧暂存的句子
     try {
-        await api.event.listen<string>('sentence-captured', event => {
+        await api.event.listen<CapturedSentencePayload>('sentence-captured', event => {
             void applyCapturedSentence(event.payload);
         });
-        const pending = await utils.invoke<string | null>('take_pending_sentence');
+        const pending = await utils.invoke<CapturedSentencePayload | null>('take_pending_sentence');
         if (pending != null) {
             await applyCapturedSentence(pending);
         }

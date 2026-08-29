@@ -58,6 +58,7 @@ pub struct Config {
     launch_anki_on_app_start: bool,
     anki_executable_path: String,
     global_shortcut: String,
+    word_to_sentence: bool,
     keep_running_on_close: bool,
     background_icon: BackgroundIcon,
     llm_enabled: bool,
@@ -80,6 +81,7 @@ pub struct PartialConfig {
     launch_anki_on_app_start: Option<bool>,
     anki_executable_path: Option<String>,
     global_shortcut: Option<String>,
+    word_to_sentence: Option<bool>,
     keep_running_on_close: Option<bool>,
     background_icon: Option<BackgroundIcon>,
     llm_enabled: Option<bool>,
@@ -94,6 +96,11 @@ impl Config {
     /// 划词录入句子的全局快捷键，空字符串表示未设置
     pub fn global_shortcut(&self) -> &str {
         return &self.global_shortcut;
+    }
+
+    /// 选词取句：开启后划词只需选中一个单词，自动录入该词所在的整个句子（仅 macOS）
+    pub fn word_to_sentence(&self) -> bool {
+        return self.word_to_sentence;
     }
 
     /// 关闭窗口时应用是否保持后台运行（仅 macOS 生效）
@@ -119,6 +126,7 @@ impl Default for Config {
             launch_anki_on_app_start: false,
             anki_executable_path: String::new(),
             global_shortcut: String::new(),
+            word_to_sentence: true,
             keep_running_on_close: true,
             background_icon: BackgroundIcon::Dock,
             llm_enabled: false,
@@ -204,6 +212,11 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        // 选词取句为后加的键，老配置文件中没有；缺键或非法值回退开启
+        let word_to_sentence = doc
+            .get("word-to-sentence")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
         // 关闭行为相关为后加的键，老配置文件中没有这些键，必须带缺省回退
         let keep_running_on_close = doc
             .get("keep-running-on-close")
@@ -255,6 +268,7 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             launch_anki_on_app_start,
             anki_executable_path,
             global_shortcut,
+            word_to_sentence,
             keep_running_on_close,
             background_icon,
             llm_enabled,
@@ -301,6 +315,9 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
         }
         if let Some(global_shortcut) = modified.global_shortcut {
             doc["global-shortcut"] = toml_edit::value(global_shortcut);
+        }
+        if let Some(word_to_sentence) = modified.word_to_sentence {
+            doc["word-to-sentence"] = toml_edit::value(word_to_sentence);
         }
         if let Some(keep_running_on_close) = modified.keep_running_on_close {
             doc["keep-running-on-close"] = toml_edit::value(keep_running_on_close);

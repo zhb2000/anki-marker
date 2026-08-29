@@ -26,6 +26,10 @@ anki-executable-path = ""
 # 格式如 "Cmd+Shift+KeyS"（修饰键 Cmd/Ctrl/Alt/Shift + 键名），目前仅 macOS 支持
 global-shortcut = ""
 
+# 选词取句：开启后，划词时只需选中一个单词，即可自动录入该单词所在的整个句子（仅 macOS）
+# 关闭后需选中完整句子再按快捷键录入
+word-to-sentence = true
+
 # 关闭窗口时应用是否在后台继续运行（仅 macOS）
 # 保持运行时窗口仅被隐藏，可由 Dock 图标、菜单栏图标或划词快捷键再次唤起
 keep-running-on-close = true

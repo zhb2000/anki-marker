@@ -27,6 +27,7 @@ tauri-plugin-clipboard-manager = "2.3"
 tauri-plugin-log = "2.9"
 log = "0.4"
 sanitise-file-name = "1.0"
+unicode-segmentation = "1"
 # WebDriver automation server, for debugging/testing only. Enabled via the `webdriver` feature.
 tauri-plugin-webdriver = { version = "0.2", optional = true }
 

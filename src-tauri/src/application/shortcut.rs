@@ -3,6 +3,9 @@
 //! 目前仅实现 macOS：读取选中文本优先走辅助功能 API（A11y），
 //! 目标应用不兼容时自动回退为模拟 Cmd+C 并读取剪贴板，
 //! 二者均要求在“系统设置 → 隐私与安全性 → 辅助功能”中授权本应用。
+//! 选词取句（word-to-sentence）开启时，划词只需选中一个单词即可自动录入
+//! 其所在的整个句子；捕获结果（录入文本 + 取句命中的单词）以
+//! sentence-captured 事件发给前端。
 
 use std::sync::Mutex;
 
@@ -11,13 +14,23 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use super::config::ConfigPath;
 use super::logics;
 
-/// 暂存的句子。
+/// 划词捕获结果（sentence-captured 事件载荷与暂存类型）：serde camelCase，前端键 text/word
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapturedSentence {
+    /// 录入文本：取句成功为整句，降级或关闭取句时为所选原文
+    text: String,
+    /// 取句模式命中的单词（供前端预选），非取句路径为 None
+    word: Option<String>,
+}
+
+/// 暂存的划词捕获结果。
 ///
 /// 主窗口可能已被用户关闭（macOS 点红点仅关窗、进程仍在），此时快捷键触发会重建窗口；
-/// 前端重新加载完成之前 emit 的事件会丢失，因此先暂存句子，由前端就绪后通过
+/// 前端重新加载完成之前 emit 的事件会丢失，因此先暂存捕获结果，由前端就绪后通过
 /// `take_pending_sentence` 取走。
 #[derive(Debug)]
-pub struct PendingSentence(pub Mutex<Option<String>>);
+pub struct PendingSentence(pub Mutex<Option<CapturedSentence>>);
 
 impl PendingSentence {
     pub fn new() -> Self {
@@ -25,9 +38,27 @@ impl PendingSentence {
     }
 }
 
-/// 取走暂存的句子，若无暂存则返回 null。由前端在页面就绪时调用。
+impl CapturedSentence {
+    /// 从选词取句结果构造事件载荷；录入文本为空（未选中任何内容）时返回 None。
+    /// 单词 trim 后为空则视为无命中（word 置 None）。
+    fn from_selected_context(
+        context: logics::selected_text::SelectedContext,
+    ) -> Option<CapturedSentence> {
+        let text = context.text.trim().to_string();
+        if text.is_empty() {
+            return None;
+        }
+        let word = context
+            .word
+            .map(|word| word.trim().to_string())
+            .filter(|word| !word.is_empty());
+        return Some(CapturedSentence { text, word });
+    }
+}
+
+/// 取走暂存的划词捕获结果，若无暂存则返回 null。由前端在页面就绪时调用。
 #[tauri::command(rename_all = "snake_case")]
-pub fn take_pending_sentence(pending: State<PendingSentence>) -> Option<String> {
+pub fn take_pending_sentence(pending: State<PendingSentence>) -> Option<CapturedSentence> {
     return pending.0.lock().ok().and_then(|mut guard| guard.take());
 }
 
@@ -158,8 +189,27 @@ pub fn request_accessibility_trust() {
 #[cfg(target_os = "macos")]
 pub fn on_shortcut_pressed(app: AppHandle) {
     std::thread::spawn(move || {
-        let text = match logics::selected_text::get_selected_text() {
-            Ok(text) => text.trim().to_string(),
+        // 选词取句开关：每次触发时读配置，读取失败默认开启（与配置缺省值一致）
+        let word_to_sentence = logics::config::read_config(app.state::<ConfigPath>().0.as_str())
+            .map(|config| config.word_to_sentence())
+            .unwrap_or(true);
+        // 后台重试命中（无障碍树异步物化的应用，如 Word）时的补发：
+        // 更新暂存并 emit，前端用完整的取句结果覆盖先到的仅词结果
+        let retry_app = app.clone();
+        let context = match logics::selected_text::get_selected_context(
+            word_to_sentence,
+            move |context| {
+                if let Some(captured) = CapturedSentence::from_selected_context(context) {
+                    if let Ok(mut pending) = retry_app.state::<PendingSentence>().0.lock() {
+                        *pending = Some(captured.clone());
+                    }
+                    if let Err(error) = retry_app.emit("sentence-captured", captured) {
+                        log::warn!("failed to emit sentence-captured event (retry): {error}");
+                    }
+                }
+            },
+        ) {
+            Ok(context) => context,
             Err(_) => {
                 // 常见原因：未在系统设置中授予本应用辅助功能权限
                 if let Err(error) = app.emit("sentence-capture-failed", ()) {
@@ -168,17 +218,18 @@ pub fn on_shortcut_pressed(app: AppHandle) {
                 return;
             }
         };
-        if text.is_empty() {
-            return; // 未选中任何文本，静默忽略
-        }
+        let captured = match CapturedSentence::from_selected_context(context) {
+            Some(captured) => captured,
+            None => return, // 未选中任何文本，静默忽略
+        };
         if let Err(error) = show_and_focus_main_window(&app) {
             log::warn!("failed to show main window: {error}");
         }
-        // 暂存句子：若主窗口刚被重建、前端尚未就绪，事件会丢失，前端启动时会取回暂存内容
+        // 暂存捕获结果：若主窗口刚被重建、前端尚未就绪，事件会丢失，前端启动时会取回暂存内容
         if let Ok(mut pending) = app.state::<PendingSentence>().0.lock() {
-            *pending = Some(text.clone());
+            *pending = Some(captured.clone());
         }
-        if let Err(error) = app.emit("sentence-captured", text) {
+        if let Err(error) = app.emit("sentence-captured", captured) {
             log::warn!("failed to emit sentence-captured event: {error}");
         }
     });
