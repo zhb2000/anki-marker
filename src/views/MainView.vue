@@ -12,6 +12,7 @@ import * as globals from '../logics/globals';
 import * as preference from '../logics/preference';
 import * as aiPickLogic from '../logics/aiPick';
 import { isLlmReady, parseMaxTokens, type LlmRequestConfig } from '../logics/llm';
+import { useSettingsStore } from '../logics/settings-store';
 import AiPickCard from '../components/AiPickCard.vue';
 import { FluentButton, FluentSelect, FluentInput, FluentRadio } from '../fluent-controls';
 import {
@@ -420,6 +421,12 @@ async function applyCapturedSentence(payload: CapturedSentencePayload) {
     const trimmed = payload.text.trim();
     if (trimmed.length === 0) {
         return;
+    }
+    // 按快捷键取词时应用可能停留在设置页：切回主界面，避免句子已被替换但用户看到的仍是设置页；
+    // 离开前立即落盘设置页可能还未防抖保存的修改（与设置页返回按钮行为一致）
+    if (router.currentRoute.value.path !== '/') {
+        await useSettingsStore().flush();
+        await router.push('/');
     }
     // 先整体替换：分词同步重建为全新状态（每次捕获都是全新状态），进行中的编辑草稿一并作废
     replaceSentence(trimmed);
