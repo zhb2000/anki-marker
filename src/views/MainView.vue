@@ -113,6 +113,11 @@ function onPaintEnd(): void {
     void syncSearchFromTokens();
 }
 
+/** SentencePanel 上报的标记写入：tokens 的写入收敛于此（整体替换与编辑重建除外），搜索仍由上方 deep watch 统一触发 */
+function onMarkToken(index: number, value: boolean): void {
+    tokens.value[index].marked = value;
+}
+
 /** 所选的词典改变时，在所选词典中搜索新单词 */
 watch(selectedDict, async newSelected => {
     const succeeded = await searchAndUpdate(searchText.value, newSelected);
@@ -750,7 +755,7 @@ onBeforeMount(async () => {
                 :update-available="globals.appUpdateAvailable.value || globals.templateUpdateAvailable.value" />
         </div>
         <div class="sentence-container">
-            <SentencePanel :tokens="tokens" v-if="!showEdit" @paint-start="onPaintStart" @paint-end="onPaintEnd" />
+            <SentencePanel :tokens="tokens" v-if="!showEdit" @mark="onMarkToken" @paint-start="onPaintStart" @paint-end="onPaintEnd" />
             <textarea class="fluent-textarea" v-model.trim="sentence" v-if="showEdit" ref="editTextArea"
                 :placeholder="editPlaceholder" @keydown="handleEditTextAreaKeydown"></textarea>
         </div>

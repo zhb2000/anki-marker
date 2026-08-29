@@ -4,6 +4,7 @@ import { onBeforeUnmount, PropType, ref } from 'vue';
 import TokenItem from "./TokenItem.vue";
 import * as utils from '../logics/utils';
 
+/** 词元列表：本组件只读展示；标记写入一律通过 mark 事件上行，由父组件完成 */
 const props = defineProps({
     tokens: {
         type: Object as PropType<{
@@ -15,6 +16,8 @@ const props = defineProps({
 });
 
 const emit = defineEmits<{
+    /** 将第 index 个词元的标记状态置为 value（tokens 的唯一写入方在父组件） */
+    mark: [index: number, value: boolean];
     /** 拖刷手势开始：父组件应抑制逐词触发的搜索 */
     'paint-start': [];
     /** 拖刷手势结束：父组件应按最终标记状态统一提交一次搜索 */
@@ -37,7 +40,7 @@ function markRange(from: number, to: number, value: boolean): void {
     const [start, end] = from <= to ? [from, to] : [to, from];
     for (let i = start; i <= end; i++) {
         if (isWordIndex(i)) {
-            props.tokens[i].marked = value;
+            emit('mark', i, value);
         }
     }
 }
@@ -89,13 +92,14 @@ function onPress(index: number, event: MouseEvent): void {
         if (lastPressIndex >= 0 && lastPressIndex !== index) {
             markRange(lastPressIndex, index, value);
         } else {
-            props.tokens[index].marked = value;
+            emit('mark', index, value);
         }
         lastPressIndex = index;
         return;
     }
-    props.tokens[index].marked = !props.tokens[index].marked;
-    paintValue.value = props.tokens[index].marked;
+    const value = !props.tokens[index].marked;
+    emit('mark', index, value);
+    paintValue.value = value;
     lastPressIndex = index;
     painting.value = true;
     addWindowListeners();
@@ -105,7 +109,7 @@ function onPress(index: number, event: MouseEvent): void {
 /** 拖刷经过词元：将扫过的单词词元置为刷子值（标点与空白跳过，不打断手势） */
 function onEnter(index: number): void {
     if (painting.value && isWordIndex(index)) {
-        props.tokens[index].marked = paintValue.value;
+        emit('mark', index, paintValue.value);
     }
 }
 
@@ -114,8 +118,8 @@ onBeforeUnmount(removeWindowListeners);
 
 <template>
     <div class="sentence-panel">
-        <TokenItem v-for="(token, index) in tokens" :key="index" :token="token.token" v-model:marked="token.marked"
-            @press="onPress(index, $event)" @enter="onEnter(index)" />
+        <TokenItem v-for="(token, index) in tokens" :key="index" :token="token.token" :marked="token.marked"
+            @update:marked="emit('mark', index, $event)" @press="onPress(index, $event)" @enter="onEnter(index)" />
     </div>
 </template>
 
