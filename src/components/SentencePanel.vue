@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, PropType, ref } from 'vue';
+import { onBeforeUnmount, PropType, ref, watch } from 'vue';
 
 import TokenItem from "./TokenItem.vue";
 import * as utils from '../logics/utils';
@@ -26,8 +26,14 @@ const emit = defineEmits<{
 
 /** 拖刷手势进行中 */
 const painting = ref(false);
-/** 拖刷的刷子值：手势起点词元切换后的状态，扫过的单词词元一律置为该值（向后扫为标记、向回扫为取消） */
-const paintValue = ref(false);
+/** 刷子值：锚点词元在按下时切换后的状态，区间内单词词元一律置为该值 */
+let paintValue = false;
+/** 拖刷锚点词元索引：标记区间恒为锚点与当前词元之间的连续区间（类比文本选择） */
+let anchorIndex = -1;
+/** 手势起点的标记状态快照：词元离开区间时还原到该状态，保证标记结果连续 */
+let baselineMarks: boolean[] = [];
+/** 本手势已置为刷子值的词元索引：区间收缩时据此还原离开区间的词元 */
+let touchedIndices = new Set<number>();
 /** 最近一次普通按下的词元索引，作为 Shift+按下范围标记的锚点 */
 let lastPressIndex = -1;
 
@@ -43,6 +49,30 @@ function markRange(from: number, to: number, value: boolean): void {
             emit('mark', i, value);
         }
     }
+}
+
+/**
+ * 把标记区间重算为 [from, to]（锚点与当前词元间的连续区间）：区间内的单词词元置为刷子值，
+ * 本手势曾置值但已离开区间的词元还原到手势前状态。路径无关——跨行拖动扫过的区间外语元
+ * 不会残留标记（标点与空白不可标记，跳过）。
+ */
+function applyPaintRange(from: number, to: number): void {
+    const [start, end] = from <= to ? [from, to] : [to, from];
+    const range = new Set<number>();
+    for (let i = start; i <= end; i++) {
+        if (isWordIndex(i)) {
+            range.add(i);
+            if (!touchedIndices.has(i)) {
+                emit('mark', i, paintValue);
+            }
+        }
+    }
+    for (const i of touchedIndices) {
+        if (!range.has(i)) {
+            emit('mark', i, baselineMarks[i]);
+        }
+    }
+    touchedIndices = range;
 }
 
 function addWindowListeners(): void {
@@ -75,7 +105,8 @@ function onWindowBlur(): void {
 
 /**
  * 在词元上按下鼠标：
- * - 普通按下 = 切换该词元并以切换后的状态为刷子值，进入拖刷手势（未离开首词元时松开即等价单击）；
+ * - 普通按下 = 切换该词元并以切换后的状态为刷子值，以该词元为锚点进入拖刷手势；标记区间
+ *   恒为锚点与当前词元间的连续区间（类比文本选择，路径无关），未离开首词元时松开即等价单击；
  * - Shift+按下 = 以最近按下的词元为锚点，将锚点与当前词元之间的单词词元统一置为当前词元切换后的状态。
  */
 function onPress(index: number, event: MouseEvent): void {
@@ -97,21 +128,28 @@ function onPress(index: number, event: MouseEvent): void {
         lastPressIndex = index;
         return;
     }
-    const value = !props.tokens[index].marked;
-    emit('mark', index, value);
-    paintValue.value = value;
+    paintValue = !props.tokens[index].marked;
+    anchorIndex = index;
+    baselineMarks = props.tokens.map(token => token.marked);
+    touchedIndices = new Set();
+    applyPaintRange(index, index);
     lastPressIndex = index;
     painting.value = true;
     addWindowListeners();
     emit('paint-start');
 }
 
-/** 拖刷经过词元：将扫过的单词词元置为刷子值（标点与空白跳过，不打断手势） */
+/** 拖刷经过词元：把标记区间重算为锚点与当前词元间的连续区间（跨行路径无关，标点与空白跳过） */
 function onEnter(index: number): void {
     if (painting.value && isWordIndex(index)) {
-        emit('mark', index, paintValue.value);
+        applyPaintRange(anchorIndex, index);
     }
 }
+
+/** 父组件整体替换分词（划词录入、粘贴等）时收尾进行中的手势：区间基线快照与词元索引已失效 */
+watch(() => props.tokens, () => {
+    endPainting();
+});
 
 onBeforeUnmount(removeWindowListeners);
 </script>
