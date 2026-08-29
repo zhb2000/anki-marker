@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">
+  <defs>
+    <!-- 挖出笔周围的透明留白（笔形状外扩 0.8px） -->
+    <mask id="gap">
+      <rect width="18" height="18" fill="#fff"/>
+      <g transform="translate(12.25 11.75) rotate(45)" fill="#000" stroke="#000" stroke-linejoin="round">
+        <rect x="-1.5" y="-5.15" width="3" height="7.8" rx="0.6" stroke-width="1.6"/>
+        <path d="M-1.5 2.4 L0 5.15 L1.5 2.4 Z" stroke-width="2.6"/>
+      </g>
+    </mask>
+  </defs>
+  <g fill="#000" stroke="#000" stroke-width="0.5" stroke-linejoin="round">
+    <!-- 五角星：中心 (7.7,9.3) 外径 7.4 内径 2.9，右下臂被笔盖住 -->
+    <path mask="url(#gap)" d="M7.7 1.9 L9.4 6.95 L14.74 7.01 L10.46 10.2 L12.05 15.29 L7.7 12.2 L3.35 15.29 L4.94 10.2 L0.66 7.01 L6 6.95 Z"/>
+    <!-- 记号笔：笔身宽 3，笔尖朝左下 -->
+    <g transform="translate(12.25 11.75) rotate(45)">
+      <rect x="-1.5" y="-5.15" width="3" height="7.8" rx="0.6"/>
+      <path d="M-1.5 2.4 L0 5.15 L1.5 2.4 Z"/>
+    </g>
+  </g>
+</svg>

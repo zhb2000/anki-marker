@@ -135,12 +135,11 @@ fn update_tray(app: &AppHandle, tray_visible: bool) {
         .menu(&menu)
         .show_menu_on_left_click(true);
     // 菜单事件由 register_menu_event_handler 在应用级统一处理（托盘与 Dock 菜单共用）
-    // 托盘图标使用应用默认窗口图标；缺失时跳过设置（托盘仍可用，仅无图标）
-    if let Some(icon) = app.default_window_icon() {
-        builder = builder.icon(icon.clone());
-    } else {
-        log::warn!("no default window icon available for the tray icon");
-    }
+    // 托盘使用单色模板图标（纯黑+alpha，源文件 icons/tray/tray-icon.svg）；
+    // 设为模板后由系统自动适配菜单栏明暗模式与高亮反色，无需为深色模式单独出图
+    builder = builder
+        .icon(tauri::include_image!("icons/tray/tray-icon.png"))
+        .icon_as_template(true);
     if let Err(error) = builder.build(app) {
         log::warn!("failed to build tray icon: {error}");
     }
