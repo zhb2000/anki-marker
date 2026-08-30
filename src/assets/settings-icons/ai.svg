@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- AI 优选：大四角星（凹弧边，控制点收在大星中心）+ 右上小四角星 -->
+  <path d="M11 8Q11 13.5 16.5 13.5Q11 13.5 11 19Q11 13.5 5.5 13.5Q11 13.5 11 8Z"/>
+  <path d="M16.75 5Q16.75 7.25 19 7.25Q16.75 7.25 16.75 9.5Q16.75 7.25 14.5 7.25Q16.75 7.25 16.75 5Z"/>
+</svg>

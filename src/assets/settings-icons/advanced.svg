@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- 高级：三条滑轨 + 交错圆钮（右/左/中），WinUI 设置滑杆惯例，替代 🔧 -->
+  <path d="M4.5 6h8M17.5 6h2"/>
+  <circle cx="15" cy="6" r="2.25"/>
+  <path d="M4.5 12h2M11.5 12h8"/>
+  <circle cx="9" cy="12" r="2.25"/>
+  <path d="M4.5 18h6M15.5 18h4"/>
+  <circle cx="13" cy="18" r="2.25"/>
+</svg>

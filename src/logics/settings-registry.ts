@@ -10,23 +10,26 @@
 /** 设置页 id（与 /settings/<id> 路由路径段一致） */
 export type SettingsPageId = 'general' | 'selection' | 'anki' | 'ai' | 'advanced' | 'about';
 
+/** 设置导航图标的 SVG 图标名（对应 src/assets/settings-icons/<name>.svg） */
+export type SettingsNavIconName = 'general' | 'selection' | 'anki' | 'ai' | 'advanced' | 'about';
+
 export interface SettingsPageMeta {
     id: SettingsPageId;
     title: string;
-    /** Unicode 符号图标，由 shell 统一字号渲染 */
-    icon: string;
+    /** SVG 图标名，由 SettingsNavIcon 组件统一渲染 */
+    icon: SettingsNavIconName;
     /** 仅 macOS 显示的导航项 */
     macOnly?: boolean;
 }
 
 /** 左侧导航的页面列表，顺序即导航顺序 */
 export const SETTINGS_PAGES: SettingsPageMeta[] = [
-    { id: 'general', title: '通用', icon: '⚙' },
-    { id: 'selection', title: '划词', icon: '⌨', macOnly: true },
-    { id: 'anki', title: 'Anki', icon: '📇' },
-    { id: 'ai', title: 'AI 优选', icon: '✨' },
-    { id: 'advanced', title: '高级', icon: '🔧' },
-    { id: 'about', title: '关于', icon: 'ℹ' },
+    { id: 'general', title: '通用', icon: 'general' },
+    { id: 'selection', title: '划词', icon: 'selection', macOnly: true },
+    { id: 'anki', title: 'Anki', icon: 'anki' },
+    { id: 'ai', title: 'AI 优选', icon: 'ai' },
+    { id: 'advanced', title: '高级', icon: 'advanced' },
+    { id: 'about', title: '关于', icon: 'about' },
 ];
 
 /** 可搜索的设置项/动作条目 */

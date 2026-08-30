@@ -12,3 +12,10 @@ declare module "*.vue" {
   const component: DefineComponent<{}, {}, any>;
   export default component;
 }
+
+/** vite-svg-loader：带 ?component 查询的 SVG 导入为 Vue 组件（默认 *.svg 仍是 string） */
+declare module "*.svg?component" {
+  import type { FunctionalComponent, SVGAttributes } from "vue";
+  const component: FunctionalComponent<SVGAttributes>;
+  export default component;
+}

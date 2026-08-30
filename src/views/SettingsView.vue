@@ -11,7 +11,7 @@ import {
 import * as globals from '../logics/globals';
 import { accessibilityTrusted, checkAccessibilityTrust, shortcutError } from '../logics/shortcut-status';
 import { FluentInput } from '../fluent-controls';
-import { ReturnButton } from '../components';
+import { ReturnButton, SettingsNavIcon } from '../components';
 
 const router = useRouter();
 const route = useRoute();
@@ -102,7 +102,7 @@ onActivated(() => {
                     <template v-if="!isSearching">
                         <RouterLink v-for="page in visiblePages" :key="page.id" :to="`/settings/${page.id}`"
                             class="nav-item" :class="{ active: isActivePage(page.id) }">
-                            <span class="nav-icon">{{ page.icon }}</span>
+                            <span class="nav-icon"><SettingsNavIcon :name="page.icon" /></span>
                             <span>{{ page.title }}</span>
                             <span v-if="hasAttentionBadge(page.id)" class="nav-dot" title="有需要关注的项"></span>
                         </RouterLink>
@@ -207,13 +207,13 @@ onActivated(() => {
     box-shadow: inset 3px 0 0 var(--accent);
 }
 
-/* 图标为 Unicode 符号，统一字号容器渲染，保证对齐与暗色可读 */
+/* 导航 SVG 图标：固定宽度容器居中渲染，颜色随文字 currentColor 继承 */
 .nav-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
     width: 20px;
-    font-size: 14px;
-    line-height: 20px;
-    text-align: center;
 }
 
 /* 关注红点：右对齐的小圆点，提示该分类下有需要用户关注的项（更新/权限/快捷键冲突） */
