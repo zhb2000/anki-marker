@@ -61,6 +61,12 @@
     --flyout-item-background-hover: #00000009;
     --flyout-item-background-active: #00000006;
     --flyout-item-background-selected: #00000006;
+    /* 侧边栏导航项: 基于 WinUI NavigationViewItem 的 Subtle 系列 token，
+       在原生值（Secondary/Tertiary = 3.5%/2.4% 黑）基础上加深一档，
+       保证与窗口底色可辨 */
+    --nav-item-background-hover: #0000000a;
+    --nav-item-background-pressed: #0000000f;
+    --nav-item-background-selected: #00000014;
     /* 开关: WinUI ToggleSwitch_themeresources.xaml 浅色字典。
        off 轨道 = ControlAltFillColorSecondary，描边 = ControlStrongStrokeColorDefault；
        off 旋钮 = TextFillColorSecondary；on 旋钮 = TextOnAccentFillColorPrimary；
@@ -148,6 +154,10 @@ html.dark {
     --flyout-item-background-hover: #ffffff0f;
     --flyout-item-background-active: #ffffff0a;
     --flyout-item-background-selected: #ffffff0a;
+    /* 侧边栏导航项: 同浅色，在原生 Subtle 值（6%/4% 白）基础上加深一档 */
+    --nav-item-background-hover: #ffffff12;
+    --nav-item-background-pressed: #ffffff1a;
+    --nav-item-background-selected: #ffffff1f;
     /* 开关: WinUI ToggleSwitch_themeresources.xaml 深色字典 */
     --switch-fill-off: #00000019;
     --switch-fill-off-hover: #ffffff0b;
