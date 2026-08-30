@@ -1,0 +1,51 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- macOS-style base: 412x412 rounded rect, radius 92.5 -->
+    <rect id="base" x="50" y="50" width="412" height="412" rx="92.5"/>
+    <clipPath id="baseClip"><rect x="50" y="50" width="412" height="412" rx="92.5"/></clipPath>
+
+    <linearGradient id="starFill" x1="256" y1="80" x2="256" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#06DCFF"/>
+      <stop offset="0.39" stop-color="#01B4FF"/>
+      <stop offset="1" stop-color="#0169EE"/>
+    </linearGradient>
+    <linearGradient id="starStroke" x1="256" y1="70" x2="256" y2="460" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0FA0E4"/>
+      <stop offset="0.4" stop-color="#0272C4"/>
+      <stop offset="1" stop-color="#073F84"/>
+    </linearGradient>
+    <!-- barrel gradient along pen axis (45 deg, shoulder -> tip end) -->
+    <linearGradient id="bodyGrad" x1="345" y1="345" x2="480" y2="480" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4EC7FA"/>
+      <stop offset="0.25" stop-color="#26B4F8"/>
+      <stop offset="0.55" stop-color="#0084EE"/>
+      <stop offset="1" stop-color="#0A50D6"/>
+    </linearGradient>
+  </defs>
+
+  <use href="#base" fill="#FFFFFF"/>
+
+  <g clip-path="url(#baseClip)">
+    <g transform="translate(256 258) scale(0.92) translate(-256 -258)">
+      <!-- star: dark outline layer + gradient fill -->
+      <path d="M 209.1 175.5 L 241.6 111.4 Q 252.5 90.0 263.4 111.4 L 295.9 175.5 Q 303.6 190.6 320.4 193.3 L 391.4 204.4 Q 415.1 208.2 398.1 225.1 L 347.3 275.9 Q 335.2 287.9 337.9 304.7 L 349.2 375.6 Q 353.0 399.3 331.6 388.4 L 267.6 355.7 Q 252.5 348.0 237.4 355.7 L 173.4 388.4 Q 152.0 399.3 155.8 375.6 L 167.1 304.7 Q 169.8 287.9 157.7 275.9 L 106.9 225.1 Q 89.9 208.2 113.6 204.4 L 184.6 193.3 Q 201.4 190.6 209.1 175.5 Z" fill="url(#starStroke)" stroke="url(#starStroke)" stroke-width="21"/>
+      <path d="M 209.1 175.5 L 241.6 111.4 Q 252.5 90.0 263.4 111.4 L 295.9 175.5 Q 303.6 190.6 320.4 193.3 L 391.4 204.4 Q 415.1 208.2 398.1 225.1 L 347.3 275.9 Q 335.2 287.9 337.9 304.7 L 349.2 375.6 Q 353.0 399.3 331.6 388.4 L 267.6 355.7 Q 252.5 348.0 237.4 355.7 L 173.4 388.4 Q 152.0 399.3 155.8 375.6 L 167.1 304.7 Q 169.8 287.9 157.7 275.9 L 106.9 225.1 Q 89.9 208.2 113.6 204.4 L 184.6 193.3 Q 201.4 190.6 209.1 175.5 Z" fill="url(#starFill)"/>
+
+      <!-- marker -->
+      <g transform="translate(256 258) rotate(45)">
+        <!-- white keyline halo -->
+        <g fill="#FFFFFF" stroke="#FFFFFF" stroke-width="21" stroke-linejoin="round">
+          <path d="M 62.0 -11.0 Q 94.0 -20.0 120.0 -28.0 L 120.0 28.0 Q 94.0 20.0 62.0 11.0 Q 49.0 0 62.0 -11.0 Z"/>
+          <path d="M 120.0 -38.0 Q 120.0 -64.0 146.0 -64.0 L 350.0 -64.0 Q 376.0 -64.0 376.0 -38.0 L 376.0 38.0 Q 376.0 64.0 350.0 64.0 L 146.0 64.0 Q 120.0 64.0 120.0 38.0 Z"/>
+        </g>
+        <!-- dark navy silhouette -->
+        <g fill="#002B50">
+          <path d="M 62.0 -11.0 Q 94.0 -20.0 120.0 -28.0 L 120.0 28.0 Q 94.0 20.0 62.0 11.0 Q 49.0 0 62.0 -11.0 Z"/>
+          <path d="M 120.0 -38.0 Q 120.0 -64.0 146.0 -64.0 L 350.0 -64.0 Q 376.0 -64.0 376.0 -38.0 L 376.0 38.0 Q 376.0 64.0 350.0 64.0 L 146.0 64.0 Q 120.0 64.0 120.0 38.0 Z"/>
+        </g>
+        <!-- blue core with inner white ring -->
+        <path d="M 134.0 -22.0 Q 134.0 -44.0 156.0 -44.0 L 328.0 -44.0 Q 350.0 -44.0 350.0 -22.0 L 350.0 22.0 Q 350.0 44.0 328.0 44.0 L 156.0 44.0 Q 134.0 44.0 134.0 22.0 Z" fill="url(#bodyGrad)" stroke="#FFFFFF" stroke-width="12"/>
+      </g>
+    </g>
+  </g>
+</svg>
