@@ -92,6 +92,8 @@ const listboxId = generateUniqueId('fluent-select-listbox');
 
 const popupStyle = ref<Record<string, string>>({});
 const listMaxHeight = ref('');
+/** 弹层相对按钮的展开方向：决定开合动画的位移方向（主体在下方→向下展开，反之向上） */
+const openDirection = ref<'down' | 'up'>('down');
 
 /** 打字搜索缓冲 */
 let searchBuffer = '';
@@ -152,6 +154,9 @@ function updatePopupPosition() {
     const width = Math.min(Math.max(rect.width, popupEl.value?.offsetWidth ?? 0), maxWidth);
     const maxLeft = Math.max(POPUP_MARGIN, viewportWidth - POPUP_MARGIN - width);
     const left = Math.min(Math.max(rect.left, POPUP_MARGIN), maxLeft);
+
+    // 依据弹层主体与按钮的相对位置判断展开方向（对齐 WinUI 从锚点向外展开的动画语义）
+    openDirection.value = top + maxHeight / 2 >= rect.top + rect.height / 2 ? 'down' : 'up';
 
     popupStyle.value = {
         top: `${Math.round(top)}px`,
@@ -402,7 +407,8 @@ onBeforeUnmount(() => {
     </HoverWrapper>
     <Teleport to="body">
         <Transition name="fluent-select-flyout">
-            <div v-if="open" ref="popupEl" class="fluent-select-flyout" :style="popupStyle">
+            <div v-if="open" ref="popupEl" class="fluent-select-flyout"
+                :class="{ 'open-up': openDirection === 'up' }" :style="popupStyle">
                 <ul :id="listboxId" ref="listEl" role="listbox" class="fluent-select-list"
                     :style="{ maxHeight: listMaxHeight }">
                     <li v-for="(option, index) in items" :key="option.value" :id="`${listboxId}-option-${index}`"
@@ -506,6 +512,7 @@ onBeforeUnmount(() => {
 }
 
 .fluent-select-item {
+    position: relative;
     display: flex;
     align-items: center;
     height: 32px;
@@ -527,6 +534,32 @@ onBeforeUnmount(() => {
     background-color: var(--flyout-item-background-selected);
 }
 
+/* 选中项左侧的 accent 指示条（对齐 WinUI ComboBoxItem 模板中的 Pill：
+   3×16、圆角 1.5、AccentFill、垂直居中于高亮块左缘，仅选中态可见） */
+.fluent-select-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: calc(50% - 8px);
+    width: 3px;
+    height: 16px;
+    border-radius: 1.5px;
+    background-color: var(--accent);
+    opacity: 0;
+    transform: scaleY(1);
+    pointer-events: none;
+}
+
+.fluent-select-item.selected::before {
+    opacity: 1;
+}
+
+/* 按下选中项时指示条纵向压缩（对齐 WinUI SelectedPressed 的 Pill 缩放，0.167s） */
+.fluent-select-item.selected:active::before {
+    transform: scaleY(0.625);
+    transition: transform 0.167s cubic-bezier(0, 0, 0, 1);
+}
+
 .fluent-select-item.highlighted,
 .fluent-select-item.selected.highlighted {
     background-color: var(--flyout-item-background-hover);
@@ -541,21 +574,43 @@ onBeforeUnmount(() => {
     background-color: transparent;
 }
 
-/* 弹层进出动画：WinUI 弹层的快速淡入 + 轻微下移 */
+/* 弹层进出动画：对齐 WinUI 弹层 motion（FastOutSlowIn 缓动，打开 250ms / 关闭 150ms）。
+   打开时沿展开方向从锚点外侧 8px 轻移入位，关闭时向锚点回落 4px */
 .fluent-select-flyout-enter-active {
-    transition: opacity 0.12s ease-out, transform 0.12s ease-out;
+    transition: opacity 0.25s cubic-bezier(0.1, 0.9, 0.2, 1), transform 0.25s cubic-bezier(0.1, 0.9, 0.2, 1);
 }
 
 .fluent-select-flyout-leave-active {
-    transition: opacity 0.08s ease-in;
+    transition: opacity 0.15s cubic-bezier(0.1, 0.9, 0.2, 1), transform 0.15s cubic-bezier(0.1, 0.9, 0.2, 1);
 }
 
 .fluent-select-flyout-enter-from {
     opacity: 0;
-    transform: translateY(-2px);
+    transform: translateY(-8px);
+}
+
+.fluent-select-flyout.open-up.fluent-select-flyout-enter-from {
+    transform: translateY(8px);
 }
 
 .fluent-select-flyout-leave-to {
     opacity: 0;
+    transform: translateY(-4px);
+}
+
+.fluent-select-flyout.open-up.fluent-select-flyout-leave-to {
+    transform: translateY(4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fluent-select-flyout-enter-active,
+    .fluent-select-flyout-leave-active {
+        transition-duration: 0.1s;
+    }
+
+    .fluent-select-flyout-enter-from,
+    .fluent-select-flyout-leave-to {
+        transform: none;
+    }
 }
 </style>
