@@ -67,6 +67,12 @@ const sourceLabel = computed(() => {
     return pick != null ? DICT_LABELS[pick.source] : null;
 });
 
+/** 左上角徽标：生成阶段显示“AI”，结果明确后为“AI 优选”（含流式中提前解析出 pick）或“AI 生成”（done 且 fallback） */
+const badgeLabel = computed(() => {
+    if (props.state.pick != null) return 'AI 优选';
+    return props.state.phase === 'done' ? 'AI 生成' : 'AI';
+});
+
 /** 按来源窄化后的被优选条目，三者至多一个非空（模板按此选择对应词典的内容版式） */
 const collinsItem = computed(() => props.pickedItem?.source === 'collins' ? props.pickedItem.item as CollinsItem : null);
 const oxfordItem = computed(() => props.pickedItem?.source === 'oxford' ? props.pickedItem.item as OxfordItem : null);
@@ -114,12 +120,12 @@ function onBodyAnimationEnd(event: AnimationEvent) {
         <div class="display-flex">
             <div class="flex-grow-1">
                 <div class="ai-pick-header">
-                    <span class="ai-badge">AI</span>
+                    <span class="ai-badge">{{ badgeLabel }}</span>
                     <span v-if="state.phase === 'done' && sourceLabel != null" class="ai-source-badge">
-                        优选 · {{ sourceLabel }}
+                        {{ sourceLabel }}
                     </span>
                     <span v-else-if="state.phase === 'done' && state.fallback" class="ai-source-badge ai-source-warning">
-                        AI 生成，非词典条目
+                        非词典条目
                     </span>
                     <!-- 停止/重新生成：进行中可停止；完成态可重新生成（含 fallback 重新生成） -->
                     <span class="ai-pick-actions">
