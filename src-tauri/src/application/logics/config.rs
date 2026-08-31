@@ -115,13 +115,14 @@ impl Config {
 }
 
 impl Default for Config {
-    /// 各键缺省值与 read_config 的缺省回退、配置模板保持一致，用于配置读取失败时的兜底
+    /// 各键缺省值与 read_config 的缺省回退、配置模板保持一致，用于配置读取失败时的兜底。
+    /// 文本键的存储缺省值为空串，“留空 = 使用内置默认”的生效值由前端消费端回退
     fn default() -> Self {
         return Config {
             theme: ThemeMode::System,
-            anki_connect_url: "http://localhost:8765".to_string(),
-            deck_name: "划词助手默认牌组".to_string(),
-            model_name: "划词助手默认单词模板".to_string(),
+            anki_connect_url: String::new(),
+            deck_name: String::new(),
+            model_name: String::new(),
             auto_launch_anki: true,
             launch_anki_on_app_start: false,
             anki_executable_path: String::new(),
@@ -172,11 +173,13 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
                 config_path.display()
             )
         })?;
+        // AnkiConnect URL / 牌组名 / 模板名遵循“留空 = 使用内置默认”的语义（生效值由前端消费端回退），
+        // 因此缺键（老模板或手工精简的配置文件）与非字符串值一律回退空串，绝不因缺键而报错
         let anki_connect_url = doc
             .get("anki-connect-url")
-            .ok_or(r#"toml key "anki-connect-url" does not exist"#)?
-            .as_str()
-            .ok_or(r#"the value of "anki-connect-url" is not a string"#)?;
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         // 主题模式为后加的键，老配置文件中没有；缺省或非法值回退跟随系统
         let theme = match doc.get("theme").and_then(|v| v.as_str()) {
             Some("light") => ThemeMode::Light,
@@ -185,14 +188,14 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
         };
         let deck_name = doc
             .get("deck-name")
-            .ok_or(r#"toml key "deck-name" does not exist"#)?
-            .as_str()
-            .ok_or(r#"the value of "deck-name" is not a string"#)?;
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let model_name = doc
             .get("model-name")
-            .ok_or(r#"toml key "model-name" does not exist"#)?
-            .as_str()
-            .ok_or(r#"the value of "model-name" is not a string"#)?;
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         // 新增键必须带缺省回退：老用户的配置文件中没有这些键，绝不能因缺键而报错
         let auto_launch_anki = doc
             .get("auto-launch-anki")
@@ -261,9 +264,9 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             .to_string();
         return Ok(Config {
             theme,
-            anki_connect_url: anki_connect_url.to_string(),
-            deck_name: deck_name.to_string(),
-            model_name: model_name.to_string(),
+            anki_connect_url,
+            deck_name,
+            model_name,
             auto_launch_anki,
             launch_anki_on_app_start,
             anki_executable_path,

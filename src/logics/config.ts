@@ -24,12 +24,17 @@ export interface ConfigModel {
 
 export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut', 'wordToSentence', 'keepRunningOnClose', 'backgroundIcon', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmMaxTokens', 'llmReasoningEffort'] as const;
 
-/** 配置项的默认值 */
+/**
+ * 配置项的默认值（即“未设置”状态下的存储值）。
+ *
+ * 文本类设置项统一遵循“留空 = 交给程序处理”的语义：存储默认值为空字符串，
+ * 留空时程序实际使用的内置生效值见 TEXT_SETTING_FALLBACKS。
+ */
 export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     theme: 'system',
-    ankiConnectURL: 'http://localhost:8765',
-    deckName: '划词助手默认牌组',
-    modelName: '划词助手默认单词模板',
+    ankiConnectURL: '',
+    deckName: '',
+    modelName: '',
     autoLaunchAnki: true,
     launchAnkiOnAppStart: false,
     ankiExecutablePath: '',
@@ -46,6 +51,29 @@ export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
 };
 
 /**
+ * 文本设置项留空时的内置生效值（与设置页“留空使用默认 …”的文案对应）。
+ * “留空 ≡ 默认”的等价性由消费端通过 effectiveTextSetting 落地。
+ */
+export const TEXT_SETTING_FALLBACKS = {
+    ankiConnectURL: 'http://localhost:8765',
+    deckName: '划词助手默认牌组',
+    modelName: '划词助手默认单词模板',
+} as const;
+
+/** 有内置生效值的文本设置项键名 */
+export type TextSettingFallbackKey = keyof typeof TEXT_SETTING_FALLBACKS;
+
+/**
+ * 文本设置项的生效值：trim 后为空视为未设置，回退到内置默认值。
+ * 所有消费 config 中 TEXT_SETTING_FALLBACKS 相关键的地方都必须经过本函数，
+ * 保证“留空”与“显式设置为默认值”行为完全一致。
+ */
+export function effectiveTextSetting(key: TextSettingFallbackKey, value: string): string {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : TEXT_SETTING_FALLBACKS[key];
+}
+
+/**
  * 将 source 中指定键的值同步到 target。
  * 以泛型键参数而非联合类型索引赋值，避免 TypeScript 将联合键的写入类型收窄为 never。
  */
@@ -60,11 +88,11 @@ export class Config implements ConfigModel {
     public readonly portable: boolean;
     /** 主题模式：跟随系统/浅色/深色 */
     public theme!: 'system' | 'light' | 'dark';
-    /** Anki Connect 服务的 URL */
+    /** Anki Connect 服务的 URL，留空表示使用内置默认（TEXT_SETTING_FALLBACKS.ankiConnectURL） */
     public ankiConnectURL!: string;
-    /** 将划词结果添加到的牌组名 */
+    /** 将划词结果添加到的牌组名，留空表示使用内置默认牌组（TEXT_SETTING_FALLBACKS.deckName） */
     public deckName!: string;
-    /** 划词结果使用的笔记模板名 */
+    /** 划词结果使用的笔记模板名，留空表示使用内置默认模板（TEXT_SETTING_FALLBACKS.modelName） */
     public modelName!: string;
     /** 添加笔记时若 Anki 未运行，是否自动启动 Anki */
     public autoLaunchAnki!: boolean;

@@ -24,6 +24,9 @@ let ankiService: anki.AnkiService;
 let appVersion: string;
 const markdownIt = new MarkdownIt();
 
+/** 笔记模板名称的生效值（留空表示使用内置默认模板，见 config.ts 的 TEXT_SETTING_FALLBACKS） */
+const effectiveModelName = computed(() => cfg.effectiveTextSetting('modelName', config.modelName));
+
 // #region 更新应用
 /** 是否打开应用更新说明对话框 */
 const appReleaseNoteDialogVisible = ref(false);
@@ -83,7 +86,7 @@ async function handleLaunchAnkiClick() {
     try {
         // 用户显式点击的启动：forceLaunch 无视“自动启动 Anki”设置（该设置只约束添加笔记时的隐式启动）
         await globals.ensureAnkiConnect(undefined, { forceLaunch: true });
-        await globals.fetchAndSetTemplateVersion(config.modelName);
+        await globals.fetchAndSetTemplateVersion(effectiveModelName.value);
     } catch (error) {
         console.error(error);
         ElMessage.error(error instanceof Error ? error.message : String(error));
@@ -99,7 +102,7 @@ const renderedTemplateReleaseNote = markdownIt.render(TEMPLATE_RELEASE_NOTE);
 
 async function handleUpdateTemplateClick() {
     try {
-        await ankiService.updateMarkerModel(config.modelName);
+        await ankiService.updateMarkerModel(effectiveModelName.value);
     } catch (error) {
         console.error(error);
         await api.dialog.message(String(error), { title: '笔记模板更新失败', kind: 'error' });
@@ -107,7 +110,7 @@ async function handleUpdateTemplateClick() {
     }
     ElMessage.success('笔记模板更新成功');
     templateReleaseNoteDialogVisible.value = false;
-    await globals.fetchAndSetTemplateVersion(config.modelName); // 刷新笔记模板版本
+    await globals.fetchAndSetTemplateVersion(effectiveModelName.value); // 刷新笔记模板版本
 }
 // #endregion
 
@@ -124,9 +127,9 @@ onActivated(async () => {
     // 打开设置页面时获取/刷新一次笔记模板版本
     // 由于 vue 的生命周期钩子不会等待 async 函数执行完毕，
     // 所以即使 onActivated 在 onBeforeMount 之后执行，页面的 config 变量仍可能未初始化（undefined）
-    await globals.fetchAndSetTemplateVersion((await globals.getConfig()).modelName);
-});
-</script>
+    await globals.fetchAndSetTemplateVersion(
+        cfg.effectiveTextSetting('modelName', (await globals.getConfig()).modelName));
+});</script>
 
 <template>
     <div class="settings-page" v-if="pageInitialized">
@@ -153,7 +156,7 @@ onActivated(async () => {
             <FluentSettingCard header="Anki 内笔记模板版本" setting-id="update-template"
                 :description="templateFailureDescription">
                 <span class="value-text">{{ templateVersionDisplay }}</span>
-                <FluentButton class="small-button" @click="globals.fetchAndSetTemplateVersion(config.modelName)">
+                <FluentButton class="small-button" @click="globals.fetchAndSetTemplateVersion(effectiveModelName)">
                     刷新
                 </FluentButton>
                 <FluentButton v-if="templateVersionError != null" class="small-button" :disabled="launchingAnki"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeMount, ref } from 'vue';
+import { onBeforeMount, computed, ref } from 'vue';
 
 import * as api from '../../tauri-api';
 import * as cfg from '../../logics/config';
@@ -13,6 +13,9 @@ import { useHighlight } from './useHighlight';
 useHighlight();
 
 const store = useSettingsStore();
+
+/** 已修改（偏离默认值）的设置项数量；为 0 时恢复默认按钮无意义，应置灰 */
+const modifiedCount = computed(() => cfg.CONFIG_KEYS.filter(key => store.isModified(key)).length);
 
 /** 配置文件对象（只读使用：path / portable）；shell 已完成 store.init，此处 getConfig 直接命中缓存 */
 const config = ref<cfg.Config | null>(null);
@@ -37,7 +40,7 @@ async function handleOpenFileClick() {
 /** 点击恢复默认设置按钮：确认后把全部设置写回默认值（写 state 即触发自动保存） */
 async function handleResetAllClick() {
     const confirmed = await api.dialog.confirm(
-        '确定要将所有设置恢复为默认值吗？此操作不可撤销。',
+        `将把 ${modifiedCount.value} 项已修改的设置恢复为默认值，此操作不可撤销。`,
         {
             title: '恢复默认设置',
             kind: 'warning',
@@ -89,8 +92,12 @@ async function handleShowInExplorerClick() {
         <h2 class="group-title">重置</h2>
         <div class="card-list">
             <FluentSettingCard header="恢复全部默认设置"
-                description="将所有设置（主题、Anki 连接、AI 配置等）恢复为默认值，立即生效" setting-id="reset-all">
-                <FluentButton @click="handleResetAllClick">恢复默认设置</FluentButton>
+                :description="modifiedCount > 0
+                    ? `当前有 ${modifiedCount} 项设置与默认值不同；恢复立即生效且不可撤销`
+                    : '所有设置均为默认值'"
+                setting-id="reset-all">
+                <FluentButton @click="handleResetAllClick" :disabled="modifiedCount === 0">恢复默认设置
+                </FluentButton>
             </FluentSettingCard>
         </div>
     </div>

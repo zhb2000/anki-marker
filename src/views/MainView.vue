@@ -630,7 +630,10 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
             closeProgressMessage();
         }
         try {
-            await prepareDeckAndModel(config.deckName, config.modelName);
+            await prepareDeckAndModel(
+                cfg.effectiveTextSetting('deckName', config.deckName),
+                cfg.effectiveTextSetting('modelName', config.modelName),
+            );
         } catch (error) {
             item.status = 'not-added';
             console.error(error);
@@ -654,8 +657,8 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
             }
             const audioFilename = await dict.makePronunciationFilename(word, pronunciationType, audioResult.dict);
             const id = await ankiService.addMarkerNote(
-                config.deckName,
-                config.modelName,
+                cfg.effectiveTextSetting('deckName', config.deckName),
+                cfg.effectiveTextSetting('modelName', config.modelName),
                 fields,
                 audioResult.url,
                 audioFilename

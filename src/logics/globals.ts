@@ -3,7 +3,7 @@ import * as api from '../tauri-api';
 import { fetch } from '@tauri-apps/plugin-http';
 import * as semver from 'semver';
 
-import { Config } from './config';
+import { Config, effectiveTextSetting } from './config';
 import * as anki from './anki';
 import { AnkiService } from './anki';
 import * as utils from './utils';
@@ -39,10 +39,10 @@ async function initAnkiService() {
         return;
     }
     const cfg = await getConfig();
-    ankiService = new AnkiService(cfg.ankiConnectURL);
-    /** 监听 config 的 anki-connect-url 更新，并同步到 ankiService */
+    ankiService = new AnkiService(effectiveTextSetting('ankiConnectURL', cfg.ankiConnectURL));
+    /** 监听 config 的 anki-connect-url 更新，并同步到 ankiService（留空视为使用内置默认） */
     watch(
-        () => config!.ankiConnectURL,
+        () => effectiveTextSetting('ankiConnectURL', config!.ankiConnectURL),
         newURL => ankiService!.url = newURL
     );
 }
@@ -438,11 +438,14 @@ export async function initAtAppStart() {
         // 配置文件监听失败时仅弹窗报错，不阻止后续操作
     }
     // 获取笔记模板版本，不等待结果。
-    // 当模板名称或 AnkiConnect URL 改变时，重新获取模板版本。
+    // 当模板名称或 AnkiConnect URL 改变时，重新获取模板版本（两者留空时取内置默认值）
     watch(
         // Use a getter function as the watch source to watch properties of a reactive object.
         // See https://vuejs.org/guide/essentials/watchers.html#watch-source-types
-        () => [config.modelName, config.ankiConnectURL],
+        () => [
+            effectiveTextSetting('modelName', config.modelName),
+            effectiveTextSetting('ankiConnectURL', config.ankiConnectURL),
+        ],
         async ([newModelName]) => await fetchAndSetTemplateVersion(newModelName),
         { immediate: true }
     );

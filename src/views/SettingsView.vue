@@ -9,6 +9,7 @@ import {
     type SettingEntry, type SettingsPageId,
 } from '../logics/settings-registry';
 import * as globals from '../logics/globals';
+import { effectiveTextSetting } from '../logics/config';
 import { accessibilityTrusted, checkAccessibilityTrust, shortcutError } from '../logics/shortcut-status';
 import { FluentInput } from '../fluent-controls';
 import { ReturnButton, SettingsNavIcon } from '../components';
@@ -172,7 +173,8 @@ onActivated(() => {
     store.syncFromConfig();
     // 刷新导航红点的数据源：辅助功能权限状态、Anki 内笔记模板版本
     void checkAccessibilityTrust();
-    void globals.getConfig().then(config => globals.fetchAndSetTemplateVersion(config.modelName));
+    void globals.getConfig().then(config =>
+        globals.fetchAndSetTemplateVersion(effectiveTextSetting('modelName', config.modelName)));
 });
 </script>
 

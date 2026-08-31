@@ -4,14 +4,14 @@ __minimal-version__ = "0.0.1"
 # 主题模式：system = 跟随系统（默认）、light = 浅色、dark = 深色
 theme = "system"
 
-# AnkiConnect 服务的 URL
-anki-connect-url = "http://localhost:8765"
+# AnkiConnect 服务的 URL，留空使用默认 http://localhost:8765
+anki-connect-url = ""
 
-# 将划词结果添加到哪个牌组
-deck-name = "划词助手默认牌组"
+# 将划词结果添加到哪个牌组，留空使用默认“划词助手默认牌组”
+deck-name = ""
 
-# 使用的笔记模板名称
-model-name = "划词助手默认单词模板"
+# 使用的笔记模板名称，留空使用默认“划词助手默认单词模板”
+model-name = ""
 
 # 添加卡片时若 Anki 未运行，是否自动启动 Anki
 auto-launch-anki = true

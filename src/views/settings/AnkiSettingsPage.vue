@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { FluentInput, FluentSettingCard, FluentToggleSwitch } from '../../fluent-controls';
 import { ResetButton } from '../../components';
+import { TEXT_SETTING_FALLBACKS } from '../../logics/config';
 import { useSettingsStore } from '../../logics/settings-store';
+import { createSettingInputBinder } from '../../logics/setting-input';
 import { useHighlight } from './useHighlight';
 
 const store = useSettingsStore();
 const state = store.state;
+const { bind } = createSettingInputBinder(store);
 
 // 搜索跳转高亮（见 useHighlight 注释）
 useHighlight();
@@ -15,24 +18,29 @@ useHighlight();
     <div class="settings-page">
         <h2 class="group-title">Anki</h2>
         <div class="card-list">
-            <FluentSettingCard header="AnkiConnect 服务" setting-id="ankiConnectURL">
+            <FluentSettingCard header="AnkiConnect 服务" setting-id="ankiConnectURL"
+                :description="`AnkiConnect 插件的服务地址，留空使用默认 ${TEXT_SETTING_FALLBACKS.ankiConnectURL}`">
                 <template #header-extra>
                     <ResetButton setting-key="ankiConnectURL" />
                 </template>
-                <FluentInput class="card-input" placeholder="请输入 AnkiConnect 服务的 URL"
-                    v-model="state.ankiConnectURL" />
+                <FluentInput class="card-input" :placeholder="`默认：${TEXT_SETTING_FALLBACKS.ankiConnectURL}`"
+                    v-bind="bind('ankiConnectURL')" />
             </FluentSettingCard>
-            <FluentSettingCard header="将划词结果添加到哪个牌组" setting-id="deckName">
+            <FluentSettingCard header="将划词结果添加到哪个牌组" setting-id="deckName"
+                :description="`留空使用默认“${TEXT_SETTING_FALLBACKS.deckName}”`">
                 <template #header-extra>
                     <ResetButton setting-key="deckName" />
                 </template>
-                <FluentInput class="card-input" placeholder="请输入牌组名称" v-model="state.deckName" />
+                <FluentInput class="card-input" :placeholder="`默认：${TEXT_SETTING_FALLBACKS.deckName}`"
+                    v-bind="bind('deckName')" />
             </FluentSettingCard>
-            <FluentSettingCard header="使用的笔记模板名称" setting-id="modelName">
+            <FluentSettingCard header="使用的笔记模板名称" setting-id="modelName"
+                :description="`留空使用默认“${TEXT_SETTING_FALLBACKS.modelName}”`">
                 <template #header-extra>
                     <ResetButton setting-key="modelName" />
                 </template>
-                <FluentInput class="card-input" placeholder="请输入笔记模板名称" v-model="state.modelName" />
+                <FluentInput class="card-input" :placeholder="`默认：${TEXT_SETTING_FALLBACKS.modelName}`"
+                    v-bind="bind('modelName')" />
             </FluentSettingCard>
         </div>
 
@@ -52,12 +60,13 @@ useHighlight();
                 </template>
                 <FluentToggleSwitch v-model="state.launchAnkiOnAppStart" />
             </FluentSettingCard>
-            <FluentSettingCard header="Anki 可执行文件路径" setting-id="ankiExecutablePath">
+            <FluentSettingCard header="Anki 可执行文件路径" setting-id="ankiExecutablePath"
+                description="留空时自动检测 Anki 的安装位置">
                 <template #header-extra>
                     <ResetButton setting-key="ankiExecutablePath" />
                 </template>
-                <FluentInput class="card-input" placeholder="留空则自动检测 Anki 路径"
-                    v-model="state.ankiExecutablePath" />
+                <FluentInput class="card-input" placeholder="留空自动检测"
+                    v-bind="bind('ankiExecutablePath')" />
             </FluentSettingCard>
         </div>
     </div>
@@ -86,6 +95,6 @@ useHighlight();
 
 .card-input {
     height: 32px;
-    width: min(320px, 100%);
+    width: min(400px, 100%);
 }
 </style>

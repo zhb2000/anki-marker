@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import { CONFIG_DEFAULTS, type ConfigModel } from '../logics/config';
+import { CONFIG_DEFAULTS, TEXT_SETTING_FALLBACKS, type ConfigModel } from '../logics/config';
 import { useSettingsStore } from '../logics/settings-store';
 import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 
@@ -23,20 +23,24 @@ const store = useSettingsStore();
 /** 当前值等于默认值时不渲染（无意义的 no-op 按钮是噪音） */
 const visible = computed(() => store.isModified(props.settingKey));
 
-/** tooltip 中的默认值文本：布尔转开关、空字符串转"留空"、其余原样展示 */
-const defaultText = computed(() => {
-    const value = CONFIG_DEFAULTS[props.settingKey];
-    if (typeof value === 'boolean') {
-        return value ? '开启' : '关闭';
+/** tooltip 文案：留空语义的文本项说明清空后的实际生效值，其余展示默认值本身 */
+const tooltip = computed(() => {
+    const key = props.settingKey;
+    if (key === 'ankiConnectURL' || key === 'deckName' || key === 'modelName') {
+        return `清空并使用默认值：${TEXT_SETTING_FALLBACKS[key]}`;
     }
-    return value === '' ? '留空' : value;
+    const value = CONFIG_DEFAULTS[key];
+    if (typeof value === 'boolean') {
+        return `重置为默认值：${value ? '开启' : '关闭'}`;
+    }
+    return `重置为默认值：${value === '' ? '留空' : value}`;
 });
 </script>
 
 <template>
     <Transition name="reset-fade">
         <HoverWrapper v-if="visible">
-            <button :title="`重置为默认值：${defaultText}`" class="reset-button" :disabled="disabled"
+            <button :title="tooltip" class="reset-button" :disabled="disabled"
                 @click="store.reset(settingKey)">
                 <slot></slot>
             </button>

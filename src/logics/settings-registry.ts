@@ -4,8 +4,11 @@
  * - SETTINGS_PAGES：左侧导航的页面列表，顺序即导航顺序
  * - SETTING_ENTRIES：可搜索的设置项/动作条目；设置项 id 用 config 键名（与卡片 data-setting-id 一致），
  *   关于/高级页的动作条目用短横线 id
- * - 条目的 title/description 与 SettingsView.vue 中的文案保持一致（新增 theme 项除外）
+ * - 条目的 title/description 与各设置子页面的文案保持一致
  */
+
+import { TEXT_SETTING_FALLBACKS } from './config';
+import { LLM_DEFAULT_MAX_TOKENS } from './llm';
 
 /** 设置页 id（与 /settings/<id> 路由路径段一致） */
 export type SettingsPageId = 'general' | 'selection' | 'anki' | 'ai' | 'advanced' | 'about';
@@ -84,18 +87,21 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         id: 'ankiConnectURL',
         page: 'anki',
         title: 'AnkiConnect 服务',
+        description: `AnkiConnect 插件的服务地址，留空使用默认 ${TEXT_SETTING_FALLBACKS.ankiConnectURL}`,
         keywords: ['ankiconnect', 'anki connect', '服务地址', '服务', '地址', 'url', '接口'],
     },
     {
         id: 'deckName',
         page: 'anki',
         title: '将划词结果添加到哪个牌组',
+        description: `留空使用默认“${TEXT_SETTING_FALLBACKS.deckName}”`,
         keywords: ['牌组', '卡组', '划词结果', '添加', 'deck'],
     },
     {
         id: 'modelName',
         page: 'anki',
         title: '使用的笔记模板名称',
+        description: `留空使用默认“${TEXT_SETTING_FALLBACKS.modelName}”`,
         keywords: ['笔记模板', '模板名称', '模板', '单词模板', 'model', 'note type'],
     },
     {
@@ -116,7 +122,7 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         id: 'ankiExecutablePath',
         page: 'anki',
         title: 'Anki 可执行文件路径',
-        description: '留空则自动检测 Anki 路径',
+        description: '留空时自动检测 Anki 的安装位置',
         keywords: ['可执行文件', '路径', '安装路径', 'anki', 'path', 'exe', 'executable'],
     },
     // #endregion
@@ -139,6 +145,7 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         id: 'llmApiKey',
         page: 'ai',
         title: 'API Key',
+        description: '仅保存在本地配置文件',
         keywords: ['api key', 'key', '密钥', '令牌', 'token', 'apikey'],
     },
     {
@@ -151,7 +158,7 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         id: 'llmMaxTokens',
         page: 'ai',
         title: '最大生成 Token 数',
-        description: '单次请求的生成上限；思考模型的思维链计入此配额，释义被截断或为空时可调大',
+        description: `单次请求的生成上限；思考模型的思维链计入此配额，释义被截断或为空时可调大；留空使用默认 ${LLM_DEFAULT_MAX_TOKENS}`,
         keywords: ['最大', 'token', 'tokens', 'max tokens', '生成上限', '生成', '截断', '思维链', '思考', 'max_tokens'],
     },
     {
@@ -192,7 +199,7 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         id: 'reset-all',
         page: 'advanced',
         title: '恢复全部默认设置',
-        description: '将所有设置（主题、Anki 连接、AI 配置等）恢复为默认值，立即生效',
+        description: '将所有已修改的设置恢复为默认值，立即生效且不可撤销',
         keywords: ['重置', '恢复默认', '默认设置', '还原', '出厂设置', 'reset', 'restore'],
     },
     // #endregion
