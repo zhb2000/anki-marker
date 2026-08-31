@@ -152,7 +152,14 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         id: 'llmModel',
         page: 'ai',
         title: '模型',
-        keywords: ['模型', '大模型', 'model', 'deepseek', 'llm'],
+        keywords: ['模型', '大模型', 'model', 'deepseek', 'llm', '模型列表', '获取模型'],
+    },
+    {
+        id: 'llmTestConnection',
+        page: 'ai',
+        title: '测试连接',
+        description: '向上游发送一条极小的测试消息，验证 API 地址、Key 与模型真实可用',
+        keywords: ['测试连接', '测试', '连通性', '验证', '可用', '延迟', 'test', 'connection', 'ping'],
     },
     {
         id: 'llmMaxTokens',

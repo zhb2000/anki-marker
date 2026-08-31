@@ -115,6 +115,22 @@ function buildChatCompletionsUrl(baseUrl: string): string {
     return `${root}/chat/completions`;
 }
 
+/**
+ * 归一化 baseUrl 并拼接 models 列表端点（GET /models）。
+ * 归一化规则与 buildChatCompletionsUrl 一致；若用户把完整对话端点粘进了 baseUrl
+ * （以 /chat/completions 结尾），先剥掉该后缀再拼 /models，保证列表与对话打向同一服务。
+ */
+function buildModelsUrl(baseUrl: string): string {
+    let root = baseUrl.trim().replace(/\/+$/, '');
+    if (root.endsWith('/chat/completions')) {
+        root = root.slice(0, -'/chat/completions'.length).replace(/\/+$/, '');
+    }
+    if (root.endsWith('/models')) {
+        return root;
+    }
+    return `${root}/models`;
+}
+
 /** 组装 OpenAI 兼容的请求体 */
 function buildRequestBody(cfg: LlmRequestConfig, opts: StreamChatOptions): Record<string, unknown> {
     const body: Record<string, unknown> = {
@@ -340,3 +356,176 @@ export async function streamChatCompletion(cfg: LlmRequestConfig, opts: StreamCh
         externalSignal?.removeEventListener('abort', onExternalAbort);
     }
 }
+
+// #region 模型列表拉取与连接测试（设置页辅助能力，与流式对话共用归一化/鉴权/错误体系）
+
+/** fetchAvailableModels / testLlmConnection 的超时上限（毫秒） */
+const FETCH_MODELS_TIMEOUT_MS = 10000;
+const TEST_CONNECTION_TIMEOUT_MS = 15000;
+
+/** fetchAvailableModels 返回的单个远端模型信息 */
+export interface RemoteModelInfo {
+    /** 模型 id（/models 响应中 data[].id，即请求体 model 字段应填的值） */
+    id: string;
+    /** 模型归属方（data[].owned_by，部分服务不返回该字段） */
+    ownedBy?: string;
+}
+
+/**
+ * 启发式判断模型 id 是否“疑似非对话模型”。
+ * 聚合站（one-api/new-api 等）的 /models 会混入 embedding、语音、绘图等无法用于 chat
+ * completions 的模型，按常见命名关键词排除。仅用于模型列表的默认过滤（UI 保留“显示全部”
+ * 开关），启发式不保证准确，不能作为模型可用性的判定依据。
+ */
+export function isLikelyNonChatModel(id: string): boolean {
+    return NON_CHAT_MODEL_PATTERN.test(id);
+}
+
+/** 疑似非对话模型的命名关键词（大小写不敏感的子串匹配） */
+const NON_CHAT_MODEL_PATTERN = new RegExp([
+    'embedding', 'embed', 'bge-', 'e5-', 'gte-',                          // 向量模型
+    'rerank',                                                             // 重排模型
+    'whisper', 'tts', 'speech', 'audio', 'transcri',                      // 语音模型
+    'dall-e', 'dalle', 'stable-diffusion', 'sdxl', 'sd3', 'flux', 'midjourney',
+    'image', 'cogview', 'seedream',                                       // 绘图模型
+    'moderation', 'guard',                                                // 内容审核
+    'clip',                                                               // 多模态向量
+].join('|'), 'i');
+
+/**
+ * 非流式请求的统一传输封装（供 fetchAvailableModels / testLlmConnection 复用）：
+ * 合并“超时”与“外部 signal”两路中止，超时/中止/网络层失败分别抛出对应 kind 的 LlmError。
+ * 返回的 Response 由调用方自行检查 ok 与解析。
+ */
+async function fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+    externalSignal?: AbortSignal
+): Promise<Response> {
+    const controller = new AbortController();
+    let timedOut = false;
+    const onExternalAbort = () => controller.abort();
+    if (externalSignal != null) {
+        if (externalSignal.aborted) {
+            throw new LlmError('aborted');
+        }
+        externalSignal.addEventListener('abort', onExternalAbort);
+    }
+    const timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, timeoutMs);
+    try {
+        return await fetch(url, { ...init, signal: controller.signal });
+    } catch (error) {
+        if (controller.signal.aborted) {
+            throw timedOut ? new LlmError('timeout') : new LlmError('aborted');
+        }
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new LlmError('network', undefined, detail);
+    } finally {
+        clearTimeout(timeoutId);
+        externalSignal?.removeEventListener('abort', onExternalAbort);
+    }
+}
+
+/**
+ * 拉取 OpenAI 兼容服务的可用模型列表（GET /models，Bearer 鉴权，10s 超时）。
+ *
+ * 解析对非标准服务宽容：标准响应为 { data: [...] }，个别服务直接返回顶层数组；
+ * 忽略 id 缺失/非字符串的条目，按 id 去重并排序（数字感知、大小写不敏感）。
+ * 返回空数组表示服务成功响应但未给出任何模型。
+ *
+ * 失败时抛出 LlmError（kind 与 streamChatCompletion 一致；'http' 的 status 可用于
+ * 区分 401 鉴权失败与 404 端点未实现）。
+ */
+export async function fetchAvailableModels(
+    cfg: Pick<LlmRequestConfig, 'baseUrl' | 'apiKey'>,
+    signal?: AbortSignal
+): Promise<RemoteModelInfo[]> {
+    const response = await fetchWithTimeout(buildModelsUrl(cfg.baseUrl), {
+        method: 'GET',
+        headers: {
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${cfg.apiKey}`,
+        },
+    }, FETCH_MODELS_TIMEOUT_MS, signal);
+    if (!response.ok) {
+        const text = await response.text();
+        throw new LlmError('http', response.status, `HTTP ${response.status}: ${text.slice(0, 300)}`);
+    }
+    let payload: unknown;
+    try {
+        payload = await response.json();
+    } catch {
+        throw new LlmError('bad_response', undefined, 'models response is not valid JSON');
+    }
+    const items = Array.isArray(payload)
+        ? payload
+        : Array.isArray((payload as { data?: unknown } | null)?.data)
+            ? (payload as { data: unknown[] }).data
+            : [];
+    // Map 按 id 去重（部分聚合站会返回重复条目），保留首次出现的 owned_by
+    const models = new Map<string, RemoteModelInfo>();
+    for (const item of items) {
+        if (item == null || typeof item !== 'object') {
+            continue;
+        }
+        const id = (item as { id?: unknown }).id;
+        if (typeof id !== 'string' || id.trim().length === 0 || models.has(id)) {
+            continue;
+        }
+        const ownedBy = (item as { owned_by?: unknown }).owned_by;
+        models.set(id, {
+            id,
+            ownedBy: typeof ownedBy === 'string' && ownedBy.length > 0 ? ownedBy : undefined,
+        });
+    }
+    return [...models.values()].sort((a, b) =>
+        a.id.localeCompare(b.id, undefined, { sensitivity: 'base', numeric: true }));
+}
+
+/**
+ * 发送一条极小的非流式补全（"hi"）以验证 API 地址、Key 与模型真实可用，返回耗时（毫秒）。
+ *
+ * 与 streamChatCompletion 同端点同鉴权。不传 max_tokens：部分模型族（OpenAI o/gpt-5 系
+ * 要求 max_completion_tokens）与中转实现（Azure 最小 16）对 max_tokens=1 存在兼容性坑，
+ * 而 "hi" 本身的消耗可以忽略。15s 超时对深度思考模型可能偏紧，属预期内的失败信号。
+ * 非 2xx 抛 'http'（message 含上游错误原文，便于定位 key/额度/模型名问题）。
+ */
+export async function testLlmConnection(
+    cfg: Pick<LlmRequestConfig, 'baseUrl' | 'apiKey' | 'model'>,
+    signal?: AbortSignal
+): Promise<number> {
+    const startedAt = performance.now();
+    const response = await fetchWithTimeout(buildChatCompletionsUrl(cfg.baseUrl), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${cfg.apiKey}`,
+        },
+        body: JSON.stringify({
+            model: cfg.model,
+            messages: [{ role: 'user', content: 'hi' }],
+            stream: false,
+        }),
+    }, TEST_CONNECTION_TIMEOUT_MS, signal);
+    if (!response.ok) {
+        const text = await response.text();
+        throw new LlmError('http', response.status, `HTTP ${response.status}: ${text.slice(0, 300)}`);
+    }
+    let payload: unknown;
+    try {
+        payload = await response.json();
+    } catch {
+        throw new LlmError('bad_response', undefined, 'response is not valid JSON');
+    }
+    const choices = (payload as { choices?: unknown } | null)?.choices;
+    if (!Array.isArray(choices) || choices.length === 0) {
+        throw new LlmError('bad_response', undefined, 'response has no choices');
+    }
+    return Math.round(performance.now() - startedAt);
+}
+// #endregion
