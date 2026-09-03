@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import { FluentInput, FluentToggleSwitch } from '../fluent-controls';
+import { computed, nextTick, ref, watch } from 'vue';
+import { FluentDialogShell, FluentInput, FluentToggleSwitch } from '../fluent-controls';
 import { isLikelyNonChatModel, type RemoteModelInfo } from '../logics/llm';
 
 /**
@@ -9,10 +9,7 @@ import { isLikelyNonChatModel, type RemoteModelInfo } from '../logics/llm';
  * 展示从 GET /models 拉取的远端模型列表：顶部搜索（匹配模型 id 与归属方 owned_by）+
  * “显示全部”开关（默认隐藏疑似非对话模型，见 isLikelyNonChatModel），点击条目即选中回填。
  * 加载/错误/空态由父组件通过 props 传入；刷新与关闭通过事件交回父组件处理（拉取与缓存放
- * 在设置页侧，本组件保持无副作用）。
- *
- * 视觉规格对齐 WinUI ContentDialog：smoke 遮罩（30% 黑）、弹层用 flyout token（8px 圆角、
- * SurfaceStroke 描边、双层阴影）、底部通栏命令条（44px 高、中缝 1px 分隔、无圆角的扁平按钮）。
+ * 在设置页侧，本组件保持无副作用）。弹窗框架由 FluentDialogShell 提供。
  */
 
 const props = defineProps<{
@@ -61,7 +58,20 @@ const hiddenCount = computed(() =>
     showAll.value ? 0 : props.models.filter(model => isLikelyNonChatModel(model.id)).length
 );
 
-// #region 打开/关闭的生命周期：重置过滤条件、聚焦搜索框、Esc 关闭
+const commands = computed(() => [
+    { key: 'refresh', label: '重新获取', disabled: props.loading },
+    { key: 'close', label: '关闭' },
+]);
+
+function onCommand(key: string): void {
+    if (key === 'refresh') {
+        emit('refresh');
+    } else if (key === 'close') {
+        emit('close');
+    }
+}
+
+// #region 打开时的重置与聚焦（Esc/遮罩关闭由 FluentDialogShell 负责）
 const searchRef = ref<{ $el: HTMLElement } | null>(null);
 
 function focusSearch(): void {
@@ -71,126 +81,60 @@ function focusSearch(): void {
     input?.focus();
 }
 
-function onKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') {
-        emit('close');
-    }
-}
-
 watch(() => props.open, open => {
     if (open) {
         search.value = '';
         showAll.value = false;
         void nextTick(() => focusSearch());
-        window.addEventListener('keydown', onKeydown);
-    } else {
-        window.removeEventListener('keydown', onKeydown);
     }
 });
-
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 // #endregion
 </script>
 
 <template>
-    <Teleport to="body">
-        <!-- mousedown.self：仅点击遮罩空白处关闭，弹窗内部的点击不受影响 -->
-        <div v-if="open" class="model-dialog-backdrop" @mousedown.self="emit('close')">
-            <div class="model-dialog" role="dialog" aria-modal="true" aria-label="获取模型列表">
-                <div class="dialog-title">获取模型列表</div>
-                <div class="dialog-body">
-                    <div class="dialog-toolbar">
-                        <FluentInput ref="searchRef" class="search-input" placeholder="搜索模型或归属方"
-                            clearable v-model="search" />
-                        <label class="show-all">
-                            <FluentToggleSwitch v-model="showAll" />
-                            <span>显示全部</span>
-                        </label>
-                    </div>
-                    <div class="list-area">
-                        <div v-if="loading" class="state-hint">正在获取模型列表…</div>
-                        <div v-else-if="error != null" class="state-error">
-                            <div class="state-error-title">获取模型列表失败</div>
-                            <div class="state-error-detail">{{ error }}</div>
-                            <div class="state-error-hint">
-                                可点击下方“重新获取”重试；也可以直接关闭弹窗手动输入模型名。
-                            </div>
-                        </div>
-                        <div v-else-if="visibleModels.length === 0" class="state-hint">
-                            {{ models.length === 0 ? '服务未返回任何模型' : '没有匹配的模型' }}
-                        </div>
-                        <ul v-else class="model-list">
-                            <li v-for="model in visibleModels" :key="model.id">
-                                <button type="button" class="model-item"
-                                    :class="{ selected: model.id === currentModel }" :title="model.id"
-                                    @click="emit('select', model.id)">
-                                    <span class="model-text">
-                                        <span class="model-id">{{ model.id }}</span>
-                                        <span v-if="model.ownedBy" class="model-owned">{{ model.ownedBy }}</span>
-                                    </span>
-                                    <span v-if="model.id === currentModel" class="model-check">✓</span>
-                                </button>
-                            </li>
-                        </ul>
-                    </div>
-                    <div v-if="hiddenCount > 0" class="filter-hint">
-                        已按启发式规则隐藏 {{ hiddenCount }} 个疑似非对话模型（嵌入/语音/绘图等）
-                    </div>
-                </div>
-                <div class="dialog-commands">
-                    <button type="button" class="command-button" :disabled="loading" @click="emit('refresh')">
-                        重新获取
-                    </button>
-                    <button type="button" class="command-button command-separator" @click="emit('close')">关闭</button>
+    <FluentDialogShell :open="open" title="获取模型列表" :commands="commands"
+        @close="emit('close')" @command="onCommand">
+        <div class="dialog-toolbar">
+            <FluentInput ref="searchRef" class="search-input" placeholder="搜索模型或归属方"
+                clearable v-model="search" />
+            <label class="show-all">
+                <FluentToggleSwitch v-model="showAll" />
+                <span>显示全部</span>
+            </label>
+        </div>
+        <div class="list-area">
+            <div v-if="loading" class="state-hint">正在获取模型列表…</div>
+            <div v-else-if="error != null" class="state-error">
+                <div class="state-error-title">获取模型列表失败</div>
+                <div class="state-error-detail">{{ error }}</div>
+                <div class="state-error-hint">
+                    可点击下方“重新获取”重试；也可以直接关闭弹窗手动输入模型名。
                 </div>
             </div>
+            <div v-else-if="visibleModels.length === 0" class="state-hint">
+                {{ models.length === 0 ? '服务未返回任何模型' : '没有匹配的模型' }}
+            </div>
+            <ul v-else class="model-list">
+                <li v-for="model in visibleModels" :key="model.id">
+                    <button type="button" class="model-item"
+                        :class="{ selected: model.id === currentModel }" :title="model.id"
+                        @click="emit('select', model.id)">
+                        <span class="model-text">
+                            <span class="model-id">{{ model.id }}</span>
+                            <span v-if="model.ownedBy" class="model-owned">{{ model.ownedBy }}</span>
+                        </span>
+                        <span v-if="model.id === currentModel" class="model-check">✓</span>
+                    </button>
+                </li>
+            </ul>
         </div>
-    </Teleport>
+        <div v-if="hiddenCount > 0" class="filter-hint">
+            已按启发式规则隐藏 {{ hiddenCount }} 个疑似非对话模型（嵌入/语音/绘图等）
+        </div>
+    </FluentDialogShell>
 </template>
 
 <style scoped>
-/* 遮罩：WinUI ContentDialog 的 smoke 背板（30% 黑） */
-.model-dialog-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    display: grid;
-    place-items: center;
-    background-color: rgba(0, 0, 0, 0.3);
-}
-
-/* 弹层容器：flyout token（8px 圆角/SurfaceStroke 描边/双层阴影），纵向布局；
-   宽度对齐 ContentDialog 的常规尺寸，超高时整体收缩，内部列表自行滚动 */
-.model-dialog {
-    display: flex;
-    flex-direction: column;
-    width: min(480px, calc(100vw - 48px));
-    max-height: calc(100vh - 48px);
-    overflow: hidden;
-    color: var(--control-text-color);
-    font-family: var(--font-family);
-    background-color: var(--flyout-background);
-    border: 1px solid var(--flyout-border-color);
-    border-radius: var(--flyout-border-radius);
-    box-shadow: var(--flyout-shadow);
-}
-
-.dialog-title {
-    flex-shrink: 0;
-    padding: 20px 24px 12px;
-    font-size: 20px;
-    font-weight: 600;
-    user-select: none;
-}
-
-.dialog-body {
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 auto;
-    min-height: 0;
-    padding: 0 24px;
-}
-
 .dialog-toolbar {
     display: flex;
     align-items: center;
@@ -332,46 +276,5 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
     font-size: 12px;
     opacity: 0.55;
     user-select: none;
-}
-
-/* 底部命令条：ContentDialog 规格——44px 高、通栏对分、中缝 1px 分隔、扁平无圆角 */
-.dialog-commands {
-    display: grid;
-    flex-shrink: 0;
-    grid-template-columns: 1fr 1fr;
-    height: 44px;
-    margin-top: 12px;
-    border-top: 1px solid var(--border-color);
-}
-
-.command-button {
-    border: none;
-    background-color: transparent;
-    color: var(--control-text-color);
-    font-family: var(--font-family);
-    font-size: 14px;
-    cursor: pointer;
-}
-
-.command-button:hover {
-    background-color: var(--flyout-item-background-hover);
-}
-
-.command-button:active {
-    background-color: var(--flyout-item-background-active);
-}
-
-.command-button:disabled {
-    color: var(--control-text-color-disabled);
-    cursor: default;
-}
-
-.command-button:focus-visible {
-    outline: 2px solid var(--focus-stroke);
-    outline-offset: -2px;
-}
-
-.command-separator {
-    border-left: 1px solid var(--border-color);
 }
 </style>

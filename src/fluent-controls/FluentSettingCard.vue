@@ -4,12 +4,18 @@ withDefaults(defineProps<{
     header: string;
     /** 副标题/说明（标题下方，小字弱化）；disabled 时的原因说明也写在这里 */
     description?: string;
+    /**
+     * 说明文案的语义类型：normal 为常规弱化描述；warning 为警示色（如“API 地址已更换，
+     * 请同步更换 Key”这类需要用户动作的提醒），不加弱化以保证可读性
+     */
+    descriptionType?: 'normal' | 'warning';
     /** 搜索高亮锚点：渲染为根元素的 data-setting-id 属性，供 useHighlight 定位 */
     settingId?: string;
     /** 禁用时整卡弱化（仅视觉弱化，不禁止交互——内部控件的禁用由使用方自行控制） */
     disabled?: boolean;
 }>(), {
     description: undefined,
+    descriptionType: 'normal',
     settingId: undefined,
     disabled: false,
 });
@@ -27,7 +33,8 @@ withDefaults(defineProps<{
                 <!-- 标题右侧小操作区：放 ResetButton 等轻量操作 -->
                 <slot name="header-extra"></slot>
             </div>
-            <div v-if="description" class="card-description">{{ description }}</div>
+            <div v-if="description" class="card-description"
+                :class="{ 'description-warning': descriptionType === 'warning' }">{{ description }}</div>
         </div>
         <!-- 右侧操作区：卡片的主控件；空间不足时整体换行到下方 -->
         <div v-if="$slots.default" class="card-actions">
@@ -87,6 +94,13 @@ withDefaults(defineProps<{
     font-size: 12px;
     /* 弱化说明文字：两主题下统一用透明度衰减，不引入新颜色 token */
     opacity: 0.6;
+}
+
+/* 警示说明：语义色 + 不弱化（须排在 .card-description 之后以覆盖其 opacity）。
+   配色复用必填提示的 --warning-text-color（WinUI SystemFillColorWarning 两主题近似值） */
+.card-description.description-warning {
+    opacity: 1;
+    color: var(--warning-text-color);
 }
 
 .card-actions {

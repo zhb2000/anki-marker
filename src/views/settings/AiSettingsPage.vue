@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { FluentButton, FluentInput, FluentPasswordInput, FluentSettingCard, FluentToggleSwitch } from '../../fluent-controls';
-import { ModelListDialog, ResetButton } from '../../components';
+import { ModelListDialog, ProviderPresetDialog, ResetButton } from '../../components';
 import {
     LLM_DEFAULT_MAX_TOKENS,
     LlmError,
@@ -9,6 +9,7 @@ import {
     testLlmConnection,
     type RemoteModelInfo,
 } from '../../logics/llm';
+import { matchProviderPreset, type LlmProviderPreset } from '../../logics/llm-presets';
 import { useSettingsStore } from '../../logics/settings-store';
 import { createSettingInputBinder } from '../../logics/setting-input';
 import { useHighlight } from './useHighlight';
@@ -138,6 +139,52 @@ function applyModel(id: string): void {
 }
 // #endregion
 
+// #region 预设服务商（“预设服务商…”按钮 + 弹窗；输入框仍是唯一事实来源，本表只负责填充）
+const presetDialogOpen = ref(false);
+
+function applyPreset(preset: LlmProviderPreset): void {
+    state.llmBaseUrl = preset.baseUrl;
+    presetDialogOpen.value = false;
+}
+// #endregion
+
+// #region 换源提醒：API 地址变更后提示同步更换 Key（会话内状态，不进配置）
+/**
+ * 上次提交 API Key 时，API 地址命中的预设 id（null = 自定义地址）。
+ * 只有 Key 提交才会更新该基准，因此“地址换了但 Key 还没动过”的状态可被感知。
+ */
+let keyPresetId: string | null = matchProviderPreset(state.llmBaseUrl)?.id ?? null;
+
+const showKeyChangeHint = ref(false);
+
+watch(() => state.llmApiKey, () => {
+    // Key 重新提交：以当前地址重置基准，提醒随之解除
+    keyPresetId = matchProviderPreset(state.llmBaseUrl)?.id ?? null;
+    showKeyChangeHint.value = false;
+});
+
+watch(() => state.llmBaseUrl, () => {
+    // 地址提交（手动编辑落盘或预设填充）：与 Key 的基准服务商不一致时提醒
+    const currentPresetId = matchProviderPreset(state.llmBaseUrl)?.id ?? null;
+    showKeyChangeHint.value = currentPresetId !== keyPresetId;
+});
+
+/** API Key 卡片说明：默认文案与换源提醒二选一 */
+const apiKeyDescription = computed(() => {
+    if (llmConfigDisabled.value) {
+        return llmConfigDisabledReason.value;
+    }
+    return showKeyChangeHint.value
+        ? 'API 地址已更换，请同步更换 API Key，并重新获取模型列表'
+        : '仅保存在本地配置文件';
+});
+
+/** 提醒文案用警示色与普通描述区分；禁用态显示的是禁用原因，不作警示 */
+const apiKeyDescriptionType = computed(() =>
+    showKeyChangeHint.value && !llmConfigDisabled.value ? 'warning' : 'normal'
+);
+// #endregion
+
 // #region 测试连接（常驻卡片，发送一条极小的真实补全验证可用性）
 interface TestConnectionState {
     phase: 'idle' | 'testing' | 'success' | 'fail';
@@ -241,12 +288,19 @@ function describeTestError(error: LlmError): string {
                 <template #header-extra>
                     <ResetButton setting-key="llmBaseUrl" :disabled="llmConfigDisabled" />
                 </template>
-                <FluentInput class="card-input" placeholder="如 https://api.deepseek.com"
-                    v-bind="bind('llmBaseUrl')" :disabled="llmConfigDisabled" />
+                <div class="field-actions">
+                    <FluentInput class="card-input" placeholder="如 https://api.deepseek.com"
+                        v-bind="bind('llmBaseUrl')" :disabled="llmConfigDisabled" />
+                    <FluentButton class="action-button" :disabled="llmConfigDisabled"
+                        title="从预设服务商列表填充官方 API 地址" @click="presetDialogOpen = true">
+                        预设服务商…
+                    </FluentButton>
+                </div>
                 <div v-if="isRequiredMissing('llmBaseUrl')" class="required-hint">必填</div>
             </FluentSettingCard>
             <FluentSettingCard header="API Key" setting-id="llmApiKey"
-                :disabled="llmConfigDisabled" :description="llmConfigDisabledReason ?? '仅保存在本地配置文件'">
+                :disabled="llmConfigDisabled" :description="apiKeyDescription"
+                :description-type="apiKeyDescriptionType">
                 <template #header-extra>
                     <ResetButton setting-key="llmApiKey" :disabled="llmConfigDisabled" />
                 </template>
@@ -259,7 +313,7 @@ function describeTestError(error: LlmError): string {
                 <template #header-extra>
                     <ResetButton setting-key="llmModel" :disabled="llmConfigDisabled" />
                 </template>
-                <div class="model-actions">
+                <div class="field-actions">
                     <FluentInput class="card-input" placeholder="如 deepseek-v4-flash"
                         v-bind="bind('llmModel')" :disabled="llmConfigDisabled" />
                     <FluentButton class="action-button" :disabled="fetchModelsDisabled" :title="fetchModelsTitle"
@@ -292,6 +346,8 @@ function describeTestError(error: LlmError): string {
         <ModelListDialog :open="modelDialogOpen" :loading="modelListLoading" :error="modelListError"
             :models="modelList" :current-model="state.llmModel.trim()"
             @close="modelDialogOpen = false" @refresh="refreshModelList" @select="applyModel" />
+        <ProviderPresetDialog :open="presetDialogOpen"
+            @close="presetDialogOpen = false" @select="applyPreset" />
     </div>
 </template>
 
@@ -321,8 +377,8 @@ function describeTestError(error: LlmError): string {
     width: min(400px, 100%);
 }
 
-/* 模型卡片操作区：输入框 + “获取模型列表”按钮同行（空间不足时随卡片整体换行） */
-.model-actions {
+/* 卡片操作区：输入框 + 辅助按钮同行（空间不足时随卡片整体换行） */
+.field-actions {
     display: flex;
     align-items: center;
     gap: 8px;

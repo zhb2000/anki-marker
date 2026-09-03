@@ -2,6 +2,8 @@ export { useHover } from './useHover';
 export { generateUniqueId } from './generateUniqueId';
 export { HoverWrapper } from './HoverWrapper';
 export { default as FluentButton } from './FluentButton.vue';
+export { default as FluentDialogShell } from './FluentDialogShell.vue';
+export type { FluentDialogCommand } from './FluentDialogShell.vue';
 export { default as FluentSelect } from './FluentSelect.vue';
 export type { FluentSelectOption } from './FluentSelect.vue';
 export { default as FluentInput } from './FluentInput.vue';

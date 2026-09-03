@@ -139,7 +139,7 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         id: 'llmBaseUrl',
         page: 'ai',
         title: 'API 地址',
-        keywords: ['api', '地址', '接口地址', 'base url', 'url', 'deepseek', 'llm'],
+        keywords: ['api', '地址', '接口地址', 'base url', 'url', 'deepseek', 'llm', '服务商', '预设', 'provider'],
     },
     {
         id: 'llmApiKey',
