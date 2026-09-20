@@ -41,6 +41,12 @@ macos-accessibility-client = "0.0.2"
 # 二者均为依赖树中已有的库，版本与 Cargo.lock 保持一致
 objc2 = "0.6"
 muda = { version = "0.19", default-features = false }
+# 透明标题栏下的窗口底色：NSWindow.setBackgroundColor（与前端 --window-background 同步）
+objc2-app-kit = { version = "0.3", features = ["std", "NSColor", "NSWindow", "objc2-core-foundation"] }
+# WKWebView 页面背后底色（underPageBackgroundColor，macOS 12+ 公开 API），
+# 避免 zoom 动画期间 WKWebView 自身底层露出白色
+objc2-web-kit = { version = "0.3", features = ["std", "WKWebView", "objc2-app-kit"] }
+objc2-foundation = { version = "0.3", features = ["std", "NSProcessInfo"] }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
