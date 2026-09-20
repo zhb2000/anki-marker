@@ -156,7 +156,6 @@ function handlePeekEnd() {
     border: none;
     border-radius: 4px;
     background: transparent;
-    cursor: pointer;
 }
 
 /* 悬停时给出轻微底色（复用超链接悬停的语义色） */

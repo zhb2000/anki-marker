@@ -16,6 +16,7 @@ import { HoverWrapper } from './HoverWrapper';
     text-decoration: none;
     border: 0 solid;
     border-radius: var(--border-radius);
+    cursor: pointer;
 }
 
 .fluent-hyperlink:visited {

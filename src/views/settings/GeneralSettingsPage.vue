@@ -52,15 +52,14 @@ const backgroundIconDescription = computed(() => backgroundIconDisabled.value
                 <template #header-extra>
                     <ResetButton setting-key="theme" />
                 </template>
-                <FluentSelect class="card-input" :options="themeOptions" v-model="state.theme" />
+                <FluentSelect :options="themeOptions" v-model="state.theme" />
             </FluentSettingCard>
         </div>
 
         <template v-if="isMacOS">
             <h2 class="group-title">窗口</h2>
             <div class="card-list">
-                <FluentSettingCard header="关闭窗口后保持后台运行"
-                    description="关闭窗口后应用将在后台继续运行，可通过 Dock 图标、菜单栏图标或全局快捷键再次打开"
+                <FluentSettingCard header="关闭窗口后保持后台运行" description="关闭窗口后应用将在后台继续运行，可通过 Dock 图标、菜单栏图标或全局快捷键再次打开"
                     setting-id="keepRunningOnClose">
                     <template #header-extra>
                         <ResetButton setting-key="keepRunningOnClose" />
@@ -72,8 +71,8 @@ const backgroundIconDescription = computed(() => backgroundIconDisabled.value
                     <template #header-extra>
                         <ResetButton setting-key="backgroundIcon" :disabled="backgroundIconDisabled" />
                     </template>
-                    <FluentSelect class="card-input" :options="backgroundIconOptions"
-                        v-model="state.backgroundIcon" :disabled="backgroundIconDisabled" />
+                    <FluentSelect :options="backgroundIconOptions" v-model="state.backgroundIcon"
+                        :disabled="backgroundIconDisabled" />
                 </FluentSettingCard>
             </div>
         </template>
@@ -99,9 +98,5 @@ const backgroundIconDescription = computed(() => backgroundIconDisabled.value
     display: flex;
     flex-direction: column;
     gap: 4px;
-}
-
-.card-input {
-    width: min(320px, 100%);
 }
 </style>

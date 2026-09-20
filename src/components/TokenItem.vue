@@ -55,11 +55,6 @@ const title = computed(() => {
     transition: background-color 0.2s, color 0.2s, font-weight 0.2s;
 }
 
-/* 单词词元可点击（按下标记或拖刷连标） */
-.token.is-word {
-    cursor: pointer;
-}
-
 .token.is-word.marked {
     background-color: var(--accent);
     color: var(--control-accent-text-color);

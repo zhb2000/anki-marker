@@ -7,7 +7,6 @@ import ollamaLogo from '../assets/provider-logos/ollama.svg?url';
 import openaiLogo from '../assets/provider-logos/openai.svg?url';
 import openrouterLogo from '../assets/provider-logos/openrouter.svg?url';
 import qwenLogo from '../assets/provider-logos/qwen.svg?url';
-import siliconflowLogo from '../assets/provider-logos/siliconflow.png';
 import zhipuLogo from '../assets/provider-logos/zhipu.png';
 
 /**
@@ -74,13 +73,6 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
         baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
         logo: qwenLogo,
         homepage: 'https://bailian.console.alibabacloud.com',
-    },
-    {
-        id: 'siliconflow',
-        name: '硅基流动 SiliconFlow',
-        baseUrl: 'https://api.siliconflow.cn/v1',
-        logo: siliconflowLogo,
-        homepage: 'https://cloud.siliconflow.cn',
     },
     {
         id: 'openrouter',

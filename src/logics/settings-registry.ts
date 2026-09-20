@@ -7,7 +7,6 @@
  * - 条目的 title/description 与各设置子页面的文案保持一致
  */
 
-import { TEXT_SETTING_FALLBACKS } from './config';
 import { LLM_DEFAULT_MAX_TOKENS } from './llm';
 
 /** 设置页 id（与 /settings/<id> 路由路径段一致） */
@@ -87,21 +86,21 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         id: 'ankiConnectURL',
         page: 'anki',
         title: 'AnkiConnect 服务',
-        description: `AnkiConnect 插件的服务地址，留空使用默认 ${TEXT_SETTING_FALLBACKS.ankiConnectURL}`,
+        description: 'AnkiConnect 插件的服务地址',
         keywords: ['ankiconnect', 'anki connect', '服务地址', '服务', '地址', 'url', '接口'],
     },
     {
         id: 'deckName',
         page: 'anki',
-        title: '将划词结果添加到哪个牌组',
-        description: `留空使用默认“${TEXT_SETTING_FALLBACKS.deckName}”`,
-        keywords: ['牌组', '卡组', '划词结果', '添加', 'deck'],
+        title: '牌组名称',
+        description: '将划词结果添加到哪个牌组',
+        keywords: ['牌组', '牌组名称', '卡组', '划词结果', '添加', 'deck'],
     },
     {
         id: 'modelName',
         page: 'anki',
-        title: '使用的笔记模板名称',
-        description: `留空使用默认“${TEXT_SETTING_FALLBACKS.modelName}”`,
+        title: '笔记模板名称',
+        description: '使用的笔记模板名称',
         keywords: ['笔记模板', '模板名称', '模板', '单词模板', 'model', 'note type'],
     },
     {
@@ -110,13 +109,6 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         title: '自动启动 Anki',
         description: '添加笔记时若 Anki 未运行，将自动启动 Anki 并等待其就绪',
         keywords: ['自动启动', '启动', '拉起', 'anki', 'launch', 'autostart'],
-    },
-    {
-        id: 'launchAnkiOnAppStart',
-        page: 'anki',
-        title: '应用启动时启动 Anki',
-        description: '应用启动时自动启动 Anki，无需等到添加笔记',
-        keywords: ['应用启动时启动', '启动时启动', '开机启动', '应用启动', 'anki', 'startup'],
     },
     {
         id: 'ankiExecutablePath',
@@ -145,7 +137,6 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         id: 'llmApiKey',
         page: 'ai',
         title: 'API Key',
-        description: '仅保存在本地配置文件',
         keywords: ['api key', 'key', '密钥', '令牌', 'token', 'apikey'],
     },
     {

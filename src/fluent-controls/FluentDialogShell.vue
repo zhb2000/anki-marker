@@ -131,7 +131,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
     color: var(--control-text-color);
     font-family: var(--font-family);
     font-size: 14px;
-    cursor: pointer;
 }
 
 .command-button:hover {

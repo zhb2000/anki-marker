@@ -34,8 +34,8 @@ export default tseslint.config(
             parserOptions: {
                 // 为 <script> 块指定 typescript-eslint 解析器
                 parser: tseslint.parser,
-                // 为类型检查规则提供 TypeScript 项目信息
-                project: true,
+                // 使用项目服务（与编辑器 tsserver 同一套项目匹配逻辑，对 .vue 支持更稳）
+                projectService: true,
                 tsconfigRootDir: import.meta.dirname,
                 // 告诉 ts-parser .vue 文件也需要被解析
                 extraFileExtensions: ['.vue'],
@@ -51,8 +51,8 @@ export default tseslint.config(
         languageOptions: {
             parser: tseslint.parser,
             parserOptions: {
-                // 为类型检查规则提供 TypeScript 项目信息
-                project: true,
+                // 使用项目服务（与编辑器 tsserver 同一套项目匹配逻辑）
+                projectService: true,
                 tsconfigRootDir: import.meta.dirname,
             }
         },

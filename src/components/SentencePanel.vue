@@ -26,6 +26,8 @@ const emit = defineEmits<{
 
 /** 拖刷手势进行中 */
 const painting = ref(false);
+/** 拖刷已真正开始（鼠标离开锚点词元）：光标在此时才切换为 text，单击路径保持 default */
+const dragStarted = ref(false);
 /** 刷子值：锚点词元在按下时切换后的状态，区间内单词词元一律置为该值 */
 let paintValue = false;
 /** 拖刷锚点词元索引：标记区间恒为锚点与当前词元之间的连续区间（类比文本选择） */
@@ -90,6 +92,7 @@ function endPainting(): void {
         return;
     }
     painting.value = false;
+    dragStarted.value = false;
     removeWindowListeners();
     emit('paint-end');
 }
@@ -139,9 +142,19 @@ function onPress(index: number, event: MouseEvent): void {
     emit('paint-start');
 }
 
-/** 拖刷经过词元：把标记区间重算为锚点与当前词元间的连续区间（跨行路径无关，标点与空白跳过） */
+/**
+ * 拖刷经过词元：把标记区间重算为锚点与当前词元间的连续区间（跨行路径无关，标点与空白跳过）。
+ * 首次进入非锚点词元即视为拖刷真正开始（无显式位移阈值，与"拖动阈值天然满足"同一信号源），
+ * 光标此时才切换为 text——单击（未离开首词元）路径无光标变化。
+ */
 function onEnter(index: number): void {
-    if (painting.value && isWordIndex(index)) {
+    if (!painting.value) {
+        return;
+    }
+    if (index !== anchorIndex) {
+        dragStarted.value = true;
+    }
+    if (isWordIndex(index)) {
         applyPaintRange(anchorIndex, index);
     }
 }
@@ -155,7 +168,7 @@ onBeforeUnmount(removeWindowListeners);
 </script>
 
 <template>
-    <div class="sentence-panel">
+    <div class="sentence-panel" :class="{ 'painting-drag': painting && dragStarted }">
         <TokenItem v-for="(token, index) in tokens" :key="index" :token="token.token" :marked="token.marked"
             @update:marked="emit('mark', index, $event)" @press="onPress(index, $event)" @enter="onEnter(index)" />
     </div>
@@ -176,5 +189,13 @@ onBeforeUnmount(removeWindowListeners);
     border-radius: var(--border-radius);
     overflow-y: auto;
     overflow-wrap: break-word;
+}
+
+/* 拖刷进行中光标切 text（区间选择语义）。cursor 是继承属性，但 token 自身的
+   cursor: default 声明会压过继承值，须连同词元一起显式覆盖；挂在面板级保证
+   扫过标点/空白词元时不闪烁。 */
+.sentence-panel.painting-drag,
+.sentence-panel.painting-drag :deep(.token) {
+    cursor: text;
 }
 </style>

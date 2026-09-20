@@ -9,7 +9,7 @@ import { LLM_PROVIDER_PRESETS, type LlmProviderPreset } from '../logics/llm-pres
  *
  * 语义是“帮用户填充”：点击服务商条目后由父组件把其 baseUrl 填进 API 地址输入框
  * （输入框仍是唯一事实来源），本弹窗不持有任何选择状态。
- * 每行展示品牌图标、名称、官方地址与“获取 Key”外链（本地服务为注意事项说明），
+ * 每行展示品牌图标、名称、官方地址与“前往官网”外链（本地服务为注意事项说明），
  * 底部为使用中转站/自建服务的手动填写提示。
  */
 
@@ -33,8 +33,8 @@ watch(() => props.open, open => {
     }
 });
 
-/** “获取 Key”外链：阻止冒泡以免触发行选中，新开系统浏览器 */
-function onGetKey(event: MouseEvent, preset: LlmProviderPreset): void {
+/** “前往官网”外链：阻止冒泡以免触发行选中，新开系统浏览器 */
+function onOpenOfficialPlatform(event: MouseEvent, preset: LlmProviderPreset): void {
     event.stopPropagation();
     void openInBrowser(preset.homepage);
 }
@@ -60,8 +60,8 @@ function onGetKey(event: MouseEvent, preset: LlmProviderPreset): void {
                         </span>
                     </button>
                     <FluentHyperlink v-if="preset.homepage" class="preset-link"
-                        :title="`前往 ${preset.name} 开放平台`" @click="onGetKey($event, preset)">
-                        获取 Key
+                        :title="`前往 ${preset.name} 开放平台`" @click="onOpenOfficialPlatform($event, preset)">
+                        前往官网
                     </FluentHyperlink>
                 </div>
             </li>
@@ -117,7 +117,6 @@ function onGetKey(event: MouseEvent, preset: LlmProviderPreset): void {
     color: inherit;
     font-family: var(--font-family);
     text-align: left;
-    cursor: pointer;
 }
 
 .preset-main:focus-visible {
@@ -171,7 +170,6 @@ html.dark .invert-in-dark {
     margin-right: 10px;
     padding: 2px 4px;
     font-size: 12px;
-    cursor: pointer;
 }
 
 .dialog-footer-hint {

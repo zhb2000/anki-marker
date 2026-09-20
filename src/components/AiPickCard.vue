@@ -280,7 +280,6 @@ function onBodyAnimationEnd(event: AnimationEvent) {
     border-radius: var(--border-radius);
     background-color: transparent;
     color: var(--control-text-color-active);
-    cursor: pointer;
     user-select: none;
 }
 

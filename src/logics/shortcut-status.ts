@@ -99,7 +99,10 @@ export async function checkAccessibilityTrust(): Promise<void> {
     }
 }
 
-/** 申请辅助功能权限：弹出系统授权弹窗；若弹窗曾被拒绝则直接打开系统设置的辅助功能面板 */
+/**
+ * 打开系统设置的辅助功能面板：
+ * 未授权时作为申请权限入口，已授权时也可随时前往面板撤销授权（移除本应用）。
+ */
 export async function requestAccessibilityTrust(): Promise<void> {
     try {
         await invoke('request_accessibility_trust');

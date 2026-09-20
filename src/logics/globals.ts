@@ -464,17 +464,6 @@ export async function initAtAppStart() {
             // 应用更新检查失败时仅在控制台报错，不弹窗提示，也不阻止后续操作
         }
     })();
-    // 配置开启时，在应用启动后自动启动 Anki（不等待结果，静默失败，不阻塞应用启动）
-    if (config.launchAnkiOnAppStart) {
-        void (async () => {
-            try {
-                await ensureAnkiConnect();
-            } catch (error) {
-                console.error(error);
-                // 启动时自动拉起 Anki 失败仅在控制台报错，不弹窗提示，也不阻止后续操作
-            }
-        })();
-    }
     // 初始化全局快捷键/辅助功能权限状态（挂常驻监听并主动查询一次，不阻塞启动）
     void initShortcutStatus();
     initializedAtAppStart = true;

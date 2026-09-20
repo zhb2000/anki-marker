@@ -153,7 +153,6 @@ function restAttrs() {
     font-size: 12px;
     line-height: 1;
     opacity: 0.5;
-    cursor: pointer;
 }
 
 .clear-button:hover {

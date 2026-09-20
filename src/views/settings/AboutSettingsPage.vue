@@ -140,7 +140,7 @@ onActivated(async () => {
                 <FluentButton class="small-button" @click="handleCheckUpdateClick" :disabled="checkingAppUpdate">
                     {{ checkingAppUpdate ? '检查中...' : '检查更新' }}
                 </FluentButton>
-                <FluentButton :accent="true" class="small-button" style="cursor: pointer;"
+                <FluentButton :accent="true" class="small-button"
                     v-if="globals.appUpdateAvailable.value" @click="cfg.openInBrowser(globals.latestAppHtmlURL.value)"
                     :title="globals.latestAppHtmlURL.value">
                     <span style="display: flex; align-items: center;">
@@ -179,7 +179,7 @@ onActivated(async () => {
             </FluentSettingCard>
             <FluentSettingCard header="作者" setting-id="author">
                 <FluentHyperlink @click="cfg.openInBrowser('https://github.com/zhb2000')"
-                    title="https://github.com/zhb2000" style="display: flex; align-items: center; cursor: pointer;">
+                    title="https://github.com/zhb2000" style="display: flex; align-items: center;">
                     <img src="../../assets/zhb-avatar.png" alt="ZHB"
                         style="width: 28px; height: 28px; margin-right: 8px; border-radius: 50%; border: 1px solid var(--border-bottom-color);">
                     <span>ZHB</span>
@@ -189,7 +189,7 @@ onActivated(async () => {
             <FluentSettingCard header="项目地址" setting-id="project-url">
                 <FluentHyperlink @click="cfg.openInBrowser('https://github.com/zhb2000/anki-marker')"
                     title="https://github.com/zhb2000/anki-marker"
-                    style="display: flex; align-items: center; cursor: pointer;">
+                    style="display: flex; align-items: center;">
                     <GitHubSvg style="width: 20px; height: 20px; margin-right: 8px;" />
                     <span>zhb2000/anki-marker</span>
                     <OpenFilledSvg style="width: 16px; height: 16px; margin-left: 4px;" />
@@ -203,7 +203,7 @@ onActivated(async () => {
             <div style="padding: 0px 16px 0px 16px;" class="markdown-body" v-html="renderedAppReleaseNote"></div>
             <template #footer>
                 <div style="display: flex; align-items: center; justify-content: center;">
-                    <FluentButton :accent="true" class="small-button" style="cursor: pointer;"
+                    <FluentButton :accent="true" class="small-button"
                         v-if="globals.appUpdateAvailable.value"
                         @click="cfg.openInBrowser(globals.latestAppHtmlURL.value)"
                         :title="globals.latestAppHtmlURL.value">

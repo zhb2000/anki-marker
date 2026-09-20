@@ -169,14 +169,14 @@ watch(() => state.llmBaseUrl, () => {
     showKeyChangeHint.value = currentPresetId !== keyPresetId;
 });
 
-/** API Key 卡片说明：默认文案与换源提醒二选一 */
+/** API Key 卡片说明 */
 const apiKeyDescription = computed(() => {
     if (llmConfigDisabled.value) {
         return llmConfigDisabledReason.value;
     }
     return showKeyChangeHint.value
         ? 'API 地址已更换，请同步更换 API Key，并重新获取模型列表'
-        : '仅保存在本地配置文件';
+        : undefined;
 });
 
 /** 提醒文案用警示色与普通描述区分；禁用态显示的是禁用原因，不作警示 */
@@ -374,7 +374,7 @@ function describeTestError(error: LlmError): string {
 
 .card-input {
     height: 32px;
-    width: min(400px, 100%);
+    width: 250px;
 }
 
 /* 卡片操作区：输入框 + 辅助按钮同行（空间不足时随卡片整体换行） */

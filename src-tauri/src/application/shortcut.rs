@@ -165,20 +165,20 @@ pub fn is_accessibility_trusted() -> bool {
     }
 }
 
-/// 申请辅助功能权限：弹出系统授权弹窗；若弹窗曾被拒绝而不再弹出，
-/// 则直接打开系统设置的辅助功能面板作为兜底（两种途径用户任选其一完成授权）。
+/// 申请辅助功能权限：直接打开系统设置的辅助功能面板。
+///
+/// 不使用 `application_is_trusted_with_prompt`（系统弹窗）：现代 macOS 上该弹窗
+/// 没有"允许"按钮、文案不可定制，点击后仍需跳转设置面板手动勾选，只是多一层
+/// 中间跳转；而本应用设置页已有自己的引导界面，故直接深链打开设置面板。
+/// 用户授权后切回本应用时，由前端窗口焦点监听自动刷新权限状态。
 #[tauri::command(rename_all = "snake_case")]
 pub fn request_accessibility_trust() {
     #[cfg(target_os = "macos")]
     {
-        let _ = macos_accessibility_client::accessibility::application_is_trusted_with_prompt();
-        // application_is_trusted_with_prompt 在用户尚未授权时（无论弹窗是否出现）均返回 false，
-        // 此时再打开系统设置面板；若面板已打开则只是重新激活，无副作用
-        if !macos_accessibility_client::accessibility::application_is_trusted() {
-            let _ = std::process::Command::new("open")
-                .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-                .spawn();
-        }
+        // 若面板已打开则只是重新激活，无副作用
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn();
     }
 }
 

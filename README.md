@@ -92,6 +92,14 @@ npm run tauri build
 
 打包好的应用位于 `src-tauri/target/release/bundle` 目录下。
 
+macOS 构建依赖本机钥匙串中名为 `Anki Marker Dev` 的代码签名证书（辅助功能等隐私权限与代码签名绑定，不签名会导致每次重新构建后都要重新授权）。首次构建前执行一次：
+
+```shell
+./setup-macos-signing.sh
+```
+
+脚本会在本机生成自签名代码签名证书，无需 Apple 开发者账号与完整版 Xcode，可重复执行。
+
 在 Windows 平台上可以使用 `build-for-windows.js` 这个脚本，同时将应用打包成安装程序（.exe/.msi）和便携式应用（.zip）：
 
 ```shell

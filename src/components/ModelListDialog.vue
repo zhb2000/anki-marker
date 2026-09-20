@@ -219,7 +219,6 @@ watch(() => props.open, open => {
     color: inherit;
     font-family: var(--font-family);
     text-align: left;
-    cursor: pointer;
 }
 
 .model-item:hover {

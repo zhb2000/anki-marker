@@ -8,7 +8,6 @@ export interface ConfigModel {
     deckName: string;
     modelName: string;
     autoLaunchAnki: boolean;
-    launchAnkiOnAppStart: boolean;
     ankiExecutablePath: string;
     globalShortcut: string;
     wordToSentence: boolean;
@@ -22,7 +21,7 @@ export interface ConfigModel {
     llmReasoningEffort: string;
 }
 
-export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'launchAnkiOnAppStart', 'ankiExecutablePath', 'globalShortcut', 'wordToSentence', 'keepRunningOnClose', 'backgroundIcon', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmMaxTokens', 'llmReasoningEffort'] as const;
+export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'ankiExecutablePath', 'globalShortcut', 'wordToSentence', 'keepRunningOnClose', 'backgroundIcon', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmMaxTokens', 'llmReasoningEffort'] as const;
 
 /**
  * 配置项的默认值（即“未设置”状态下的存储值）。
@@ -36,7 +35,6 @@ export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     deckName: '',
     modelName: '',
     autoLaunchAnki: true,
-    launchAnkiOnAppStart: false,
     ankiExecutablePath: '',
     globalShortcut: '',
     wordToSentence: true,
@@ -96,8 +94,6 @@ export class Config implements ConfigModel {
     public modelName!: string;
     /** 添加笔记时若 Anki 未运行，是否自动启动 Anki */
     public autoLaunchAnki!: boolean;
-    /** 应用启动时是否自动启动 Anki */
-    public launchAnkiOnAppStart!: boolean;
     /** Anki 可执行文件的路径，留空表示自动检测 */
     public ankiExecutablePath!: string;
     /** 划词录入句子的全局快捷键，空字符串表示未设置 */

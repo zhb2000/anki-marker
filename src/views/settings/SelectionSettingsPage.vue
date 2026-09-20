@@ -68,7 +68,7 @@ onActivated(() => {
                     <template #header-extra>
                         <ResetButton setting-key="globalShortcut" />
                     </template>
-                    <ShortcutRecorder class="card-input shortcut-input" v-model="state.globalShortcut"
+                    <ShortcutRecorder class="shortcut-input" v-model="state.globalShortcut"
                         @update:model-value="handleShortcutChange" />
                     <div v-if="showShortcutError" class="status-text status-warning shortcut-error">
                         ⚠️ 快捷键注册失败（可能被其他应用占用）：{{ shortcutError }}
@@ -83,10 +83,12 @@ onActivated(() => {
                     <FluentToggleSwitch v-model="state.wordToSentence" />
                 </FluentSettingCard>
                 <FluentSettingCard v-if="state.globalShortcut.length > 0" header="辅助功能权限"
-                    :description="accessibilityTrusted === false ? '辅助功能未授权，划词功能可能无法使用。请点击上方“申请权限”按钮，并按系统提示授权本应用。' : undefined">
+                    :description="accessibilityTrusted === false ? '辅助功能未授权，划词功能可能无法使用。请点击“申请权限”按钮，在系统设置的辅助功能面板中授权本应用。' : '点击“打开系统设置”可随时前往辅助功能面板（移除本应用即可撤销授权），撤销后划词功能将不可用。'">
                     <span :class="accessibilityStatusClass" class="status-text">{{ accessibilityStatusText }}</span>
                     <FluentButton v-if="accessibilityTrusted === false" accent
                         @click="requestAccessibilityTrust">申请权限</FluentButton>
+                    <FluentButton v-else-if="accessibilityTrusted === true"
+                        @click="requestAccessibilityTrust">打开系统设置</FluentButton>
                     <FluentButton @click="checkAccessibilityTrust">检查</FluentButton>
                 </FluentSettingCard>
             </div>
@@ -114,10 +116,6 @@ onActivated(() => {
     display: flex;
     flex-direction: column;
     gap: 4px;
-}
-
-.card-input {
-    width: min(320px, 100%);
 }
 
 /* ShortcutRecorder 自身不定高，由卡片操作区定高（沿用旧 .input-text 的 32px） */

@@ -90,7 +90,7 @@ onBeforeUnmount(() => {
 
 const display = computed(() => {
     if (recording.value) {
-        return '请按下含 ⌘/⌃/⌥ 的组合键（Esc 取消，退格键清除）';
+        return '请按下组合键（Esc 取消，退格键清除）';
     }
     if (props.modelValue.length === 0) {
         return '点击设置快捷键';
@@ -124,14 +124,15 @@ const display = computed(() => {
     border-bottom-color: var(--border-bottom-color);
     border-width: var(--border-width);
     border-radius: var(--border-radius);
-    cursor: pointer;
 }
 
 .shortcut-recorder:hover {
     background-color: var(--control-background-hover);
 }
 
-.shortcut-recorder:focus {
+/* 录制态复用输入框的聚焦观感（WKWebView 中点击 button 不获焦，:focus 覆盖不到录制态） */
+.shortcut-recorder:focus,
+.shortcut-recorder.recording {
     outline: none;
     background-color: var(--input-text-background-focus);
     border-bottom-width: var(--input-text-border-bottom-width-focus);

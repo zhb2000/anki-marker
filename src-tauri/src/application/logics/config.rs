@@ -55,7 +55,6 @@ pub struct Config {
     deck_name: String,
     model_name: String,
     auto_launch_anki: bool,
-    launch_anki_on_app_start: bool,
     anki_executable_path: String,
     global_shortcut: String,
     word_to_sentence: bool,
@@ -78,7 +77,6 @@ pub struct PartialConfig {
     deck_name: Option<String>,
     model_name: Option<String>,
     auto_launch_anki: Option<bool>,
-    launch_anki_on_app_start: Option<bool>,
     anki_executable_path: Option<String>,
     global_shortcut: Option<String>,
     word_to_sentence: Option<bool>,
@@ -124,7 +122,6 @@ impl Default for Config {
             deck_name: String::new(),
             model_name: String::new(),
             auto_launch_anki: true,
-            launch_anki_on_app_start: false,
             anki_executable_path: String::new(),
             global_shortcut: String::new(),
             word_to_sentence: true,
@@ -201,10 +198,6 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             .get("auto-launch-anki")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
-        let launch_anki_on_app_start = doc
-            .get("launch-anki-on-app-start")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
         let anki_executable_path = doc
             .get("anki-executable-path")
             .and_then(|v| v.as_str())
@@ -268,7 +261,6 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             deck_name,
             model_name,
             auto_launch_anki,
-            launch_anki_on_app_start,
             anki_executable_path,
             global_shortcut,
             word_to_sentence,
@@ -309,9 +301,6 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
         }
         if let Some(auto_launch_anki) = modified.auto_launch_anki {
             doc["auto-launch-anki"] = toml_edit::value(auto_launch_anki);
-        }
-        if let Some(launch_anki_on_app_start) = modified.launch_anki_on_app_start {
-            doc["launch-anki-on-app-start"] = toml_edit::value(launch_anki_on_app_start);
         }
         if let Some(anki_executable_path) = modified.anki_executable_path {
             doc["anki-executable-path"] = toml_edit::value(anki_executable_path);
