@@ -41,7 +41,8 @@ function onOpenOfficialPlatform(event: MouseEvent, preset: LlmProviderPreset): v
 </script>
 
 <template>
-    <FluentDialogShell :open="open" title="预设服务商" :commands="[{ key: 'close', label: '关闭' }]"
+    <!-- 唯一的“关闭”按钮即默认按钮（ContentDialog DefaultButton），用 Accent 强调 -->
+    <FluentDialogShell :open="open" title="预设服务商" :commands="[{ key: 'close', label: '关闭', accent: true }]"
         @close="emit('close')" @command="emit('close')">
         <div class="dialog-hint">
             选择服务商后会把其官方 API 地址填充到输入框（覆盖现有内容），填充后仍可手动修改。

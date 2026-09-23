@@ -59,7 +59,8 @@ const hiddenCount = computed(() =>
 );
 
 const commands = computed(() => [
-    { key: 'refresh', label: '重新获取', disabled: props.loading },
+    // “重新获取”是本弹窗的主操作（ContentDialog PrimaryButton，居左），用 Accent 强调
+    { key: 'refresh', label: '重新获取', accent: true, disabled: props.loading },
     { key: 'close', label: '关闭' },
 ]);
 

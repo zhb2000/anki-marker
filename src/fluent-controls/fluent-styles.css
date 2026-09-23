@@ -61,6 +61,16 @@
     --flyout-item-background-hover: #00000009;
     --flyout-item-background-active: #00000006;
     --flyout-item-background-selected: #00000006;
+    /* dialog: WinUI ContentDialog_themeresources.xaml + Common 颜色字典浅色值。
+       容器底 = SolidBackgroundFillColorBase(#F3F3F3)，内容区叠加 = LayerFillColorAlt(不透明白)，
+       描边 = SurfaceStrokeColorDefault(#75757566)，内容/命令区分隔线 = CardStrokeColorDefault，
+       遮罩 = SmokeFillColorDefault(#0000004D) */
+    --dialog-background: #f3f3f3;
+    --dialog-content-background: #ffffff;
+    --dialog-border-color: #75757566;
+    --dialog-separator-color: #0000000f;
+    --dialog-smoke-color: #0000004d;
+    --dialog-shadow: 0 32px 64px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.1);
     /* 侧边栏导航项: 基于 WinUI NavigationViewItem 的 Subtle 系列 token，
        在原生值（Secondary/Tertiary = 3.5%/2.4% 黑）基础上加深一档，
        保证与窗口底色可辨 */
@@ -154,6 +164,14 @@ html.dark {
     --flyout-item-background-hover: #ffffff0f;
     --flyout-item-background-active: #ffffff0a;
     --flyout-item-background-selected: #ffffff0a;
+    /* dialog: 深色字典。容器底 = SolidBackgroundFillColorBase(#202020)，
+       内容区叠加 = LayerFillColorAlt(5% 白，叠加后约 #2D2D2D) */
+    --dialog-background: #202020;
+    --dialog-content-background: #ffffff0d;
+    --dialog-border-color: #75757566;
+    --dialog-separator-color: #00000019;
+    --dialog-smoke-color: #0000004d;
+    --dialog-shadow: 0 32px 64px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
     /* 侧边栏导航项: 同浅色，在原生 Subtle 值（6%/4% 白）基础上加深一档 */
     --nav-item-background-hover: #ffffff12;
     --nav-item-background-pressed: #ffffff1a;
