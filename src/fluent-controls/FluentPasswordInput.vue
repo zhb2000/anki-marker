@@ -108,10 +108,17 @@ function handlePeekEnd() {
     background-color: var(--control-background-hover);
 }
 
+/* 聚焦下划线：边框宽度始终保持 --border-width（不挤压内部输入区，文字零位移），
+   仅把底边框设透明，accent 色带（background）透过它显示并向上多覆盖厚度差值，
+   形成上缘平直、下缘随圆角弯曲的强调下划线（总厚度 --input-text-border-bottom-width-focus） */
 .fluent-password-input:focus-within {
     background-color: var(--input-text-background-focus);
-    border-bottom-width: var(--input-text-border-bottom-width-focus);
-    border-bottom-color: var(--accent);
+    border-bottom-color: transparent;
+    background-image: linear-gradient(var(--accent), var(--accent));
+    background-origin: border-box;
+    background-size: 100% var(--input-text-border-bottom-width-focus);
+    background-position: 0 100%;
+    background-repeat: no-repeat;
 }
 
 /* 禁用态：放在 [fluent-hovered] 之后，同优先级时以后者覆盖 hover 底色（对齐 FluentSelect 的规则顺序） */
