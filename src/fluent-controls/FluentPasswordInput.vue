@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useAttrs, watch } from 'vue';
 import { HoverWrapper } from './HoverWrapper';
+import { handleInputWheel } from './inputWheelScroll';
 
 // 关闭 attr 自动继承：class/style 手动绑到容器（继承外部的尺寸设置），
 // 其余 attrs（placeholder、@blur 等）透传给内部 input
@@ -80,8 +81,8 @@ function handlePeekEnd() {
 <template>
     <HoverWrapper>
         <div class="fluent-password-input" :class="[$attrs.class, { disabled }]" :style="$attrs.style">
-            <input v-model="model" class="inner-input" spellcheck="false" autocomplete="off" v-bind="restAttrs()"
-                :type="inputType" :disabled="disabled" />
+            <input v-model="model" class="inner-input" spellcheck="false" autocomplete="off"
+                @wheel="handleInputWheel" v-bind="restAttrs()" :type="inputType" :disabled="disabled" />
             <!-- @mousedown.prevent 阻止按钮抢夺输入框焦点，避免触发外部绑定的 blur 保存逻辑 -->
             <button v-show="revealButtonVisible" type="button" class="reveal-button" :class="{ revealed }"
                 :title="revealed ? '隐藏' : '显示'" :aria-label="revealed ? '隐藏密码' : '显示密码'"

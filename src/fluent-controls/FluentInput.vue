@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useAttrs } from 'vue';
 import { HoverWrapper } from './HoverWrapper';
+import { handleInputWheel } from './inputWheelScroll';
 
 // 关闭 attr 自动继承：clearable 时根节点为容器 div，class/style 需手动绑到容器（继承外部的尺寸设置），
 // 其余 attrs（placeholder、type、事件监听等）透传给内部 input；
@@ -59,15 +60,16 @@ function restAttrs() {
 </script>
 
 <template>
-    <!-- 非 clearable：保持既有 DOM 结构不变（HoverWrapper 直接渲染 input，attrs 全部落在 input 上） -->
+    <!-- 非 clearable：保持既有 DOM 结构不变（HoverWrapper 直接渲染 input，attrs 全部落在 input 上）；
+         @wheel 在 v-bind 之前，外部显式传入的 @wheel 可覆盖内部的滚轮横滚兼容层 -->
     <HoverWrapper v-if="!clearable">
-        <input v-model="model" class="fluent-input" :disabled="disabled" v-bind="$attrs" />
+        <input v-model="model" class="fluent-input" :disabled="disabled" @wheel="handleInputWheel" v-bind="$attrs" />
     </HoverWrapper>
     <!-- clearable：包一层相对定位容器，× 按钮绝对定位在输入框内部右侧；class/style 落在容器上 -->
     <div v-else class="fluent-input-clearable" :class="$attrs.class" :style="$attrs.style">
         <HoverWrapper>
             <input ref="inputEl" v-model="model" class="fluent-input" :disabled="disabled"
-                :class="{ 'with-clear-button': showClearButton }" v-bind="restAttrs()" />
+                :class="{ 'with-clear-button': showClearButton }" @wheel="handleInputWheel" v-bind="restAttrs()" />
         </HoverWrapper>
         <!-- mousedown.prevent 避免点击时夺走输入框焦点；tabindex="-1" 不进入 Tab 序列 -->
         <button v-if="showClearButton" type="button" tabindex="-1" class="clear-button" title="清空"
