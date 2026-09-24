@@ -346,7 +346,7 @@ function describeTestError(error: LlmError): string {
         <ModelListDialog :open="modelDialogOpen" :loading="modelListLoading" :error="modelListError"
             :models="modelList" :current-model="state.llmModel.trim()"
             @close="modelDialogOpen = false" @refresh="refreshModelList" @select="applyModel" />
-        <ProviderPresetDialog :open="presetDialogOpen"
+        <ProviderPresetDialog :open="presetDialogOpen" :current-base-url="state.llmBaseUrl.trim()"
             @close="presetDialogOpen = false" @select="applyPreset" />
     </div>
 </template>
