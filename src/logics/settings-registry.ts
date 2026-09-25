@@ -69,6 +69,13 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         description: '选择窗口关闭后（后台运行期间）应用图标的显示位置；窗口打开时图标始终显示在 Dock 栏',
         keywords: ['图标', '后台图标', '显示位置', 'dock', '菜单栏', 'menu bar', '托盘'],
     },
+    {
+        id: 'launchAtLogin',
+        page: 'general',
+        title: '登录时自动启动',
+        description: '登录后自动启动 Anki Marker；macOS 上将在后台常驻，可通过菜单栏图标、Dock 图标或全局快捷键打开',
+        keywords: ['开机自启动', '开机启动', '自启动', '自动启动', '登录启动', '登录时启动', '启动项', '后台常驻', 'login items', 'launch at login', 'autostart', 'startup'],
+    },
     // #endregion
 
     // #region 划词（仅 macOS）

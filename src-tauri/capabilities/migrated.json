@@ -41,6 +41,9 @@
     "core:app:allow-app-hide",
     "dialog:default",
     "os:default",
-    "clipboard-manager:default"
+    "clipboard-manager:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

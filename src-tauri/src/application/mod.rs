@@ -1,4 +1,5 @@
 pub mod anki;
+pub mod autostart;
 pub mod config;
 pub mod dict;
 pub mod logics;

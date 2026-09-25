@@ -2,6 +2,7 @@
 export * from '@tauri-apps/api';
 
 // 导出 @tauri-apps/plugin-xxx 中的所有模块
+export * as autostart from '@tauri-apps/plugin-autostart';
 export * as clipboard from '@tauri-apps/plugin-clipboard-manager';
 export * as dialog from '@tauri-apps/plugin-dialog';
 export * as http from '@tauri-apps/plugin-http';

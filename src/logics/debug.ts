@@ -7,6 +7,7 @@
  * ```ini
  * VITE_APP_UPDATE_SCENARIO=new-version
  * VITE_TEMPLATE_VERSION_SCENARIO=low-version
+ * VITE_LAUNCH_AT_LOGIN_EDITABLE=true
  * ```
  *
  * 可用场景见 `AppUpdateScenario` 与 `TemplateVersionScenario`。
@@ -56,6 +57,24 @@ export const appUpdateScenario: AppUpdateScenario = import.meta.env.PROD
 export const templateVersionScenario: TemplateVersionScenario = import.meta.env.PROD
     ? 'real'
     : readScenario(import.meta.env.VITE_TEMPLATE_VERSION_SCENARIO, TEMPLATE_VERSION_SCENARIOS, 'real');
+
+/**
+ * dev 构建下是否解锁“登录时自动启动”设置的修改。
+ *
+ * dev 构建默认锁定该设置：dev 与生产安装读写同一份系统自启动注册（Linux 的
+ * .desktop、Windows 的注册表 Run 值均按 productName 命名，macOS 登录项同名），
+ * dev 下修改会把 target/debug 二进制注册为自启动、覆盖生产注册。需要查看开启
+ * 状态的界面效果时，在 `.env.development.local` 中配置后重启 dev server：
+ *
+ * ```ini
+ * VITE_LAUNCH_AT_LOGIN_EDITABLE=true
+ * ```
+ *
+ * release 构建始终可修改（本变量不生效）。
+ */
+export const launchAtLoginEditableInDev: boolean = import.meta.env.PROD
+    ? true
+    : import.meta.env.VITE_LAUNCH_AT_LOGIN_EDITABLE === 'true';
 
 /**
  * 应用启动时是否自动检查更新。

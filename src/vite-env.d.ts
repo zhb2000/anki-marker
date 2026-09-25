@@ -5,6 +5,8 @@ interface ImportMetaEnv {
     readonly VITE_APP_UPDATE_SCENARIO?: string;
     /** 笔记模板版本获取的调试场景（可用值见 src/logics/debug.ts） */
     readonly VITE_TEMPLATE_VERSION_SCENARIO?: string;
+    /** dev 模式下解锁“登录时自动启动”设置的修改（详见 src/logics/debug.ts） */
+    readonly VITE_LAUNCH_AT_LOGIN_EDITABLE?: string;
 }
 
 declare module "*.vue" {

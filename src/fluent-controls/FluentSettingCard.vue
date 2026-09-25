@@ -2,7 +2,8 @@
 withDefaults(defineProps<{
     /** 标题 */
     header: string;
-    /** 副标题/说明（标题下方，小字弱化）；disabled 时的原因说明也写在这里 */
+    /** 副标题/说明（标题下方，小字弱化）；disabled 时的原因说明也写在这里。
+     *  需要富内容（如内嵌超链接）时改用 #description 插槽，插槽存在时覆盖本 prop */
     description?: string;
     /**
      * 说明文案的语义类型：normal 为常规弱化描述；warning 为警示色（如“API 地址已更换，
@@ -33,8 +34,10 @@ withDefaults(defineProps<{
                 <!-- 标题右侧小操作区：放 ResetButton 等轻量操作 -->
                 <slot name="header-extra"></slot>
             </div>
-            <div v-if="description" class="card-description"
-                :class="{ 'description-warning': descriptionType === 'warning' }">{{ description }}</div>
+            <div v-if="description || $slots.description" class="card-description"
+                :class="{ 'description-warning': descriptionType === 'warning' }">
+                <slot name="description">{{ description }}</slot>
+            </div>
         </div>
         <!-- 右侧操作区：卡片的主控件；空间不足时整体换行到下方 -->
         <div v-if="$slots.default" class="card-actions">
@@ -92,8 +95,9 @@ withDefaults(defineProps<{
 .card-description {
     margin-top: 2px;
     font-size: 12px;
-    /* 弱化说明文字：两主题下统一用透明度衰减，不引入新颜色 token */
-    opacity: 0.6;
+    /* 弱化说明文字：两主题下统一将文字色按 60% 与透明混合（视觉等效 opacity: 0.6，
+       但不用 opacity——子元素设置自身颜色时可保持原色，如描述内嵌的超链接需完整强调色） */
+    color: color-mix(in srgb, currentColor 60%, transparent);
 }
 
 /* 警示说明：语义色 + 不弱化（须排在 .card-description 之后以覆盖其 opacity）。

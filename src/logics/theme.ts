@@ -12,6 +12,7 @@
  */
 
 import { ref, type Ref } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { setElementTheme } from './element-theme';
 import * as utils from './utils';
@@ -149,8 +150,18 @@ export async function initTheme(): Promise<void> {
  * 避免启动过程中原生窗口或 webview 默认底色造成闪屏；
  * 前端应用主题、完成挂载后调用本函数显示窗口。
  * Rust 侧另有 3 秒超时兜底，前端异常时窗口也会被强制显示。
+ * 静默启动（登录自启动 + 保持后台运行）时窗口保持隐藏，
+ * 由 Rust 侧 was_launched_hidden 判定（Rust 侧同时也跳过了兜底显示）。
  */
 export async function revealMainWindow(): Promise<void> {
+    try {
+        // 命令不可用时（Rust 侧尚未更新等）按正常启动处理
+        if (await invoke<boolean>('was_launched_hidden')) {
+            return;
+        }
+    } catch {
+        // 忽略，走正常显示流程
+    }
     try {
         await getCurrentWindow().show();
     } catch {
