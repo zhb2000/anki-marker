@@ -1,6 +1,12 @@
 export { useHover } from './useHover';
 export { generateUniqueId } from './generateUniqueId';
 export { HoverWrapper } from './HoverWrapper';
+export { dialog, showMessage, showConfirm, setDialogOpenListener } from './ContentDialog';
+export type {
+    ContentDialogKind,
+    ContentDialogMessageOptions,
+    ContentDialogConfirmOptions,
+} from './ContentDialog';
 export { default as FluentButton } from './FluentButton.vue';
 export { default as FluentDialogShell } from './FluentDialogShell.vue';
 export type { FluentDialogCommand } from './FluentDialogShell.vue';

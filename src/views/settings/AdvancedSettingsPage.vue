@@ -4,7 +4,7 @@ import { onBeforeMount, computed, ref } from 'vue';
 import * as api from '../../tauri-api';
 import * as cfg from '../../logics/config';
 import * as globals from '../../logics/globals';
-import { FluentButton, FluentSettingCard } from '../../fluent-controls';
+import { FluentButton, FluentSettingCard, dialog } from '../../fluent-controls';
 import { setThemeMode } from '../../logics/theme';
 import { useSettingsStore } from '../../logics/settings-store';
 import { useHighlight } from './useHighlight';
@@ -33,13 +33,13 @@ async function handleOpenFileClick() {
         await cfg.openFile(config.value.path);
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '打开文件失败', kind: 'error' });
+        await dialog.message(String(error), { title: '打开文件失败', kind: 'error' });
     }
 }
 
 /** 点击恢复默认设置按钮：确认后把全部设置写回默认值（写 state 即触发自动保存） */
 async function handleResetAllClick() {
-    const confirmed = await api.dialog.confirm(
+    const confirmed = await dialog.confirm(
         `将把 ${modifiedCount.value} 项已修改的设置恢复为默认值，此操作不可撤销。`,
         {
             title: '恢复默认设置',
@@ -65,7 +65,7 @@ async function handleShowInExplorerClick() {
         await cfg.showInExplorer(config.value.path);
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '打开目录失败', kind: 'error' });
+        await dialog.message(String(error), { title: '打开目录失败', kind: 'error' });
     }
 }
 </script>

@@ -38,9 +38,13 @@ export const HoverWrapper = defineComponent({
             }
         };
 
-        watch(() => route.name, () => {
-            hovered.value = false; // reset hover state when changing pages
-        });
+        // 页面切换时重置 hover 状态。控件库可能在未安装 vue-router 的独立 Vue 实例中
+        // 使用（如命令式 ContentDialog 的宿主实例），此时无 route 注入，跳过该逻辑
+        if (route != null) {
+            watch(() => route.name, () => {
+                hovered.value = false; // reset hover state when changing pages
+            });
+        }
 
         // setup 函数返回一个渲染函数
         return () => {

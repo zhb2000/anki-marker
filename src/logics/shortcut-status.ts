@@ -8,6 +8,7 @@ import { ref, type Ref } from 'vue';
 import { ElMessage } from 'element-plus';
 
 import * as api from '../tauri-api';
+import { dialog } from '../fluent-controls';
 import { invoke } from './utils';
 
 /** 快捷键注册结果（Rust 侧在注册/注销后 emit，亦可由 get_shortcut_registration 主动查询） */
@@ -108,7 +109,7 @@ export async function requestAccessibilityTrust(): Promise<void> {
         await invoke('request_accessibility_trust');
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '申请辅助功能权限失败', kind: 'error' });
+        await dialog.message(String(error), { title: '申请辅助功能权限失败', kind: 'error' });
         return;
     }
     // 授权完成后切回本应用时，由窗口焦点监听自动刷新状态

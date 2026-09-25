@@ -9,7 +9,7 @@
  */
 
 import { reactive, ref, watch, type Ref } from 'vue';
-import * as api from '../tauri-api';
+import { dialog } from '../fluent-controls';
 
 import { CONFIG_DEFAULTS, CONFIG_KEYS, type Config, type ConfigModel } from './config';
 import * as globals from './globals';
@@ -61,7 +61,7 @@ function createSettingsStore(): SettingsStore {
             await config.commit();
         } catch (error) {
             console.error(error);
-            await api.dialog.message(String(error), { title: '配置文件保存失败', kind: 'error' });
+            await dialog.message(String(error), { title: '配置文件保存失败', kind: 'error' });
         }
     }
 

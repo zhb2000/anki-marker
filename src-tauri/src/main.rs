@@ -192,6 +192,7 @@ fn main() {
             application::shortcut::request_accessibility_trust,
             application::shortcut::get_shortcut_registration,
             application::window::set_window_background,
+            application::window::set_dialog_mask,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

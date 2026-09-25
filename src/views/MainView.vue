@@ -14,7 +14,7 @@ import * as aiPickLogic from '../logics/aiPick';
 import { isLlmReady, parseMaxTokens, type LlmRequestConfig } from '../logics/llm';
 import { useSettingsStore } from '../logics/settings-store';
 import AiPickCard from '../components/AiPickCard.vue';
-import { FluentButton, FluentSelect, FluentInput, FluentRadio } from '../fluent-controls';
+import { FluentButton, FluentSelect, FluentInput, FluentRadio, dialog } from '../fluent-controls';
 import {
     CardStatus,
     SentencePanel,
@@ -207,7 +207,7 @@ async function searchAndUpdate(
             searchingOrSearchedWords[dictionary] = '';
             console.error(error);
             if (options?.suppressErrorDialog !== true) {
-                await api.dialog.message(String(error), { title: '查询失败', kind: 'error' });
+                await dialog.message(String(error), { title: '查询失败', kind: 'error' });
             }
         }
         return false;
@@ -534,7 +534,7 @@ async function initSentenceCapture() {
     }
     try {
         await api.event.listen('sentence-capture-failed', () => {
-            void api.dialog.message(
+            void dialog.message(
                 '获取选中文本失败。\n\n请在“系统设置 → 隐私与安全性 → 辅助功能”中允许本应用，然后重试。',
                 { title: '划词录入失败', kind: 'error' }
             );
@@ -587,7 +587,7 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
     try {
         newModelCreated = (await Promise.all([prepareDeck(deckName), prepareModel(modelName)]))[1];
     } catch (error) {
-        await api.dialog.message(String(error), { title: errorTitle!, kind: 'error' });
+        await dialog.message(String(error), { title: errorTitle!, kind: 'error' });
         throw error;
     }
     if (newModelCreated) {
@@ -624,7 +624,7 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
         } catch (error) {
             item.status = 'not-added';
             console.error(error);
-            await api.dialog.message(String(error), { title: '无法连接 Anki', kind: 'error' });
+            await dialog.message(String(error), { title: '无法连接 Anki', kind: 'error' });
             return;
         } finally {
             closeProgressMessage();
@@ -671,7 +671,7 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
         } catch (error) {
             item.status = 'not-added';
             console.error(error);
-            await api.dialog.message(String(error), { title: '添加失败', kind: 'error' });
+            await dialog.message(String(error), { title: '添加失败', kind: 'error' });
         }
     } else if (item.status === 'is-added') { // remove from Anki
         item.status = 'processing-remove';
@@ -682,7 +682,7 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
         } catch (error) {
             item.status = 'is-added';
             console.error(error);
-            await api.dialog.message(String(error), { title: '删除失败', kind: 'error' });
+            await dialog.message(String(error), { title: '删除失败', kind: 'error' });
         }
     }
 }
@@ -725,7 +725,7 @@ async function openEditDialogOf(dictionary: 'collins' | 'oxford' | 'youdao', ind
             });
         } catch (fallbackError) {
             console.error(fallbackError);
-            await api.dialog.message(String(error), { title: '打开编辑对话框失败', kind: 'error' });
+            await dialog.message(String(error), { title: '打开编辑对话框失败', kind: 'error' });
         }
     }
 }

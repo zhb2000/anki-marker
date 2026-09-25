@@ -2,6 +2,7 @@ import { reactive, ref, watch, computed } from 'vue';
 import * as api from '../tauri-api';
 import { fetch } from '@tauri-apps/plugin-http';
 import * as semver from 'semver';
+import { dialog, setDialogOpenListener } from '../fluent-controls';
 
 import { Config, effectiveTextSetting } from './config';
 import * as anki from './anki';
@@ -12,7 +13,7 @@ import * as preference from './preference';
 import * as debug from './debug';
 import { initShortcutStatus } from './shortcut-status';
 import { setElementTheme } from './element-theme';
-import { setThemeMode } from './theme';
+import { setThemeMode, isDark } from './theme';
 
 // #region Config
 let config: Config;
@@ -415,6 +416,11 @@ export async function initAtAppStart() {
     }
     // 设置 element-plus 主题色
     setElementTheme();
+    // 对话框开/关时同步 macOS 标题栏遮罩（见 window.rs set_dialog_mask；
+    // 非 macOS / 非 Tauri 环境命令为 no-op 或调用失败，静默忽略）
+    setDialogOpenListener(open => {
+        void utils.invoke('set_dialog_mask', { active: open, dark: isDark.value }).catch(() => { /* 忽略 */ });
+    });
     // 获取应用版本
     await initAppVersion();
     // 加载配置文件
@@ -422,7 +428,7 @@ export async function initAtAppStart() {
         await initConfig();
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '配置文件读取失败', kind: 'error' });
+        await dialog.message(String(error), { title: '配置文件读取失败', kind: 'error' });
         throw error; // 配置文件读取失败时不继续后续操作
     }
     // 用配置文件中的主题模式校正 localStorage 缓存（首帧与 initTheme 用的是缓存值，可能与此处漂移）
@@ -434,7 +440,7 @@ export async function initAtAppStart() {
         await config.startWatcher();
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '配置文件监听失败', kind: 'error' });
+        await dialog.message(String(error), { title: '配置文件监听失败', kind: 'error' });
         // 配置文件监听失败时仅弹窗报错，不阻止后续操作
     }
     // 获取笔记模板版本，不等待结果。

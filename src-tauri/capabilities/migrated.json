@@ -8,8 +8,6 @@
   "permissions": [
     "core:default",
     "core:window:allow-show",
-    "dialog:allow-message",
-    "dialog:allow-confirm",
     {
       "identifier": "http:default",
       "allow": [

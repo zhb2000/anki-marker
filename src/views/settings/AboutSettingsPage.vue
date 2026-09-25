@@ -5,11 +5,10 @@ import MarkdownIt from 'markdown-it';
 import 'github-markdown-css';
 import '../../assets/markdown-dark.css';
 
-import * as api from '../../tauri-api';
 import * as globals from '../../logics/globals';
 import * as cfg from '../../logics/config';
 import * as anki from '../../logics/anki';
-import { FluentButton, FluentHyperlink, FluentSettingCard } from '../../fluent-controls';
+import { FluentButton, FluentHyperlink, FluentSettingCard, dialog } from '../../fluent-controls';
 import OpenFilledSvg from '../../assets/OpenFilled.svg';
 import GitHubSvg from '../../assets/github.svg';
 import { useHighlight } from './useHighlight';
@@ -45,7 +44,7 @@ async function handleCheckUpdateClick() {
         await globals.fetchAndSetLatestAppInfo(true);
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '检查更新失败', kind: 'error' });
+        await dialog.message(String(error), { title: '检查更新失败', kind: 'error' });
         return;
     } finally {
         checkingAppUpdate.value = false;
@@ -105,7 +104,7 @@ async function handleUpdateTemplateClick() {
         await ankiService.updateMarkerModel(effectiveModelName.value);
     } catch (error) {
         console.error(error);
-        await api.dialog.message(String(error), { title: '笔记模板更新失败', kind: 'error' });
+        await dialog.message(String(error), { title: '笔记模板更新失败', kind: 'error' });
         return;
     }
     ElMessage.success('笔记模板更新成功');

@@ -99,7 +99,7 @@ onMounted(async () => {
     try {
         launchAtLogin.value = await api.autostart.isEnabled();
     } catch (error) {
-        console.warn(`[settings] failed to query launch-at-login state: ${error}`);
+        console.warn('[settings] failed to query launch-at-login state:', error);
     } finally {
         launchAtLoginLoaded.value = true;
     }
@@ -108,7 +108,7 @@ onMounted(async () => {
     } catch (error) {
         // 查询失败不锁定（保持 null），与未引入锁定前的行为一致：锁定只是 dev 便利保护，
         // 无需为瞬时故障牺牲正式环境下的可用性
-        console.warn(`[settings] failed to query rust build type: ${error}`);
+        console.warn('[settings] failed to query rust build type:', error);
     }
 });
 
@@ -124,7 +124,7 @@ async function onLaunchAtLoginChange(enabled: boolean | undefined) {
             await api.autostart.disable();
         }
     } catch (error) {
-        console.warn(`[settings] failed to ${enabled ? 'enable' : 'disable'} launch at login: ${error}`);
+        console.warn(`[settings] failed to ${enabled ? 'enable' : 'disable'} launch at login:`, error);
     } finally {
         try {
             launchAtLogin.value = await api.autostart.isEnabled();
