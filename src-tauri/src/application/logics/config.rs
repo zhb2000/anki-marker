@@ -4,9 +4,9 @@ use std::path::Path;
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BackgroundIcon {
-    /// Dock 栏图标
+    /// Dock 栏图标（仅 macOS；其他平台按菜单栏/托盘图标处理）
     Dock,
-    /// 屏幕顶部菜单栏图标
+    /// 屏幕顶部菜单栏图标（macOS）/ 系统托盘图标（Windows/Linux）
     MenuBar,
     /// 不显示图标
     None,
@@ -101,12 +101,12 @@ impl Config {
         return self.word_to_sentence;
     }
 
-    /// 关闭窗口时应用是否保持后台运行（仅 macOS 生效）
+    /// 关闭窗口时应用是否保持后台运行（三端生效）
     pub fn keep_running_on_close(&self) -> bool {
         return self.keep_running_on_close;
     }
 
-    /// 后台运行期间应用图标的显示位置（仅 macOS 生效）
+    /// 后台运行期间应用图标的显示位置（三端生效，dock 值仅 macOS 有 Dock 语义）
     pub fn background_icon(&self) -> BackgroundIcon {
         return self.background_icon;
     }

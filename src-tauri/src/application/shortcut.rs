@@ -237,14 +237,16 @@ pub fn on_shortcut_pressed(app: AppHandle) {
 
 /// 显示并聚焦主窗口；若主窗口已不存在，则按 tauri.conf.json 中的窗口配置重建。
 ///
-/// 调用时机：划词快捷键触发、点击 Dock 图标。macOS 上点关闭按钮仅隐藏窗口
-/// （应用保留在 Dock 栏），正常情况下窗口始终存在，重建仅作兜底。
-#[cfg(target_os = "macos")]
+/// 调用时机：划词快捷键触发（macOS）、点击 Dock 图标（macOS）、点击托盘图标/托盘
+/// 菜单“打开”（Windows/Linux）。后台运行期间点关闭按钮仅隐藏窗口，正常情况下
+/// 窗口始终存在，重建仅作兜底。
 pub fn show_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         window.show().map_err(|e| e.to_string())?;
+        // 从最小化状态恢复（show() 对已最小化的窗口不自动还原）
+        window.unminimize().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
-        // 切回前台模式——Dock 显示、托盘隐藏
+        // 切回前台模式——macOS 显示 Dock、托盘隐藏；其他平台托盘隐藏
         super::menubar::on_main_window_shown(app);
         return Ok(());
     }
@@ -264,7 +266,7 @@ pub fn show_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
     // 前端就绪后的 show() 是幂等的
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
-    // 切回前台模式——Dock 显示、托盘隐藏
+    // 切回前台模式——macOS 显示 Dock、托盘隐藏；其他平台托盘隐藏
     super::menubar::on_main_window_shown(app);
     return Ok(());
 }

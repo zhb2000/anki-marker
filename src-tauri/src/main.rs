@@ -13,9 +13,11 @@ mod application;
 /// 用于阻止启动兜底线程在用户关闭后强制弹出窗口。
 static USER_CLOSED_MAIN_WINDOW: AtomicBool = AtomicBool::new(false);
 
-/// 本次启动为“静默启动”：登录自启动（AppleScript 登录项 hidden 标志拉起，应用级
-/// 隐藏状态，见 application::autostart）且配置为关闭窗口后保持后台运行，主窗口不
-/// 自动显示、应用按 background-icon 配置进入后台模式。
+/// 本次启动为“静默启动”：登录自启动且配置为关闭窗口后保持后台运行，主窗口不
+/// 自动显示、应用按 background-icon 配置进入后台模式（macOS 为 Dock/菜单栏图标、
+/// Windows/Linux 为托盘图标）。自启动载体三端均支持“静默”语义：macOS 为登录项
+/// hidden 标志（应用级隐藏，见 application::autostart）；Windows/Linux 为注册表
+/// Run 值 / .desktop Exec 保留的 --hidden 启动参数。
 /// 供启动兜底逻辑跳过强制显示，及前端 revealMainWindow 决定是否显示窗口。
 static START_HIDDEN: AtomicBool = AtomicBool::new(false);
 
@@ -48,12 +50,13 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         // 开机自启动（系统设置入口：设置页“登录时自动启动”）。
-        // macOS 采用 AppleScript 登录项模式：条目进入系统设置 → 通用 → 登录项的
-        // “登录时打开”列表，按应用名+图标显示（经 LaunchServices 解析，不依赖代码签名）；
-        // LaunchAgent 模式（写 plist 指向裸二进制）在 ad-hoc 签名下会被 BTM 显示为
-        // 无名可执行文件，故弃用（实测 AssociatedBundleIdentifiers 也无法补救）。
-        // --hidden 不进入 argv，而是映射为登录项的 hidden 标志：登录拉起时应用处于
-        // NSApplication 级隐藏状态，静默启动判定见 setup 阶段（application::autostart）。
+        // --hidden 参数按平台映射为自启动条目的静默标志：macOS（AppleScript 登录项
+        // 模式）映射为登录项自身的 hidden 标志，条目进入系统设置 → 通用 → 登录项的
+        // “登录时打开”列表，按应用名+图标显示（经 LaunchServices 解析，不依赖代码
+        // 签名），LaunchAgent 模式（写 plist 指向裸二进制）在 ad-hoc 签名下会被 BTM
+        // 显示为无名可执行文件，故弃用（实测 AssociatedBundleIdentifiers 也无法补救）；
+        // Windows/Linux 的载体天然支持传参（注册表 Run 值 / .desktop 的 Exec 均保留
+        // argv），静默启动判定见 setup 阶段（std::env::args 检查 --hidden）。
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::AppleScript,
             Some(vec!["--hidden"]),
@@ -76,10 +79,9 @@ fn main() {
     #[cfg(feature = "webdriver")]
     let builder = builder.plugin(tauri_plugin_webdriver::init());
 
-    // macOS：点关闭按钮的行为可配置（keep-running-on-close）——
-    // 默认仅隐藏窗口、应用保持后台运行，由点击 Dock/菜单栏图标或划词快捷键再次唤起；
-    // 配置为不保持运行时则直接退出应用；其他平台维持默认行为（关闭窗口即退出应用）。
-    #[cfg(target_os = "macos")]
+    // 主窗口点关闭按钮的行为可配置（keep-running-on-close），三端一致——
+    // 默认仅隐藏窗口、应用保持后台运行，由托盘图标（macOS 为 Dock/菜单栏图标）
+    // 或划词快捷键（仅 macOS）再次唤起；配置为不保持运行时则直接退出应用。
     let builder = builder.on_window_event(|window, event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
             if application::menubar::keep_running_on_close(window.app_handle()) {
@@ -87,7 +89,7 @@ fn main() {
                 USER_CLOSED_MAIN_WINDOW.store(true, Ordering::Relaxed);
                 let _ = window.hide();
                 api.prevent_close();
-                // 进入后台模式，按配置显示 Dock/菜单栏图标
+                // 进入后台模式，按配置显示应用图标
                 application::menubar::on_main_window_hidden(window.app_handle());
             } else {
                 // 不保持运行：直接退出应用
@@ -114,20 +116,25 @@ fn main() {
             #[cfg(target_os = "macos")]
             application::shortcut::update_from_config(app.handle());
 
-            // 托盘/Dock 图标菜单：注册共用的菜单事件处理，并安装 Dock 图标菜单（仅 macOS）
+            // 托盘/Dock 图标菜单：注册共用的菜单事件处理（托盘菜单三端通用，
+            // Dock 图标菜单仅 macOS）
+            application::menubar::register_menu_event_handler(app.handle());
             #[cfg(target_os = "macos")]
-            {
-                application::menubar::register_menu_event_handler(app.handle());
-                application::menubar::install_dock_menu(app.handle());
-            }
+            application::menubar::install_dock_menu(app.handle());
+            // Windows 托盘图标左键点击打开主窗口（macOS/Linux 无此交互，见 menubar.rs）
+            #[cfg(target_os = "windows")]
+            application::menubar::register_tray_icon_event_handler(app.handle());
 
-            // 静默启动判定（仅 macOS）：AppleScript 登录项带 hidden 标志拉起时，
-            // 进程自启动起即处于 NSApplication 级隐藏状态（argv 无任何标记，无法从
-            // 启动参数识别，见 application::autostart 模块文档）。检测到即解除应用级
-            // 隐藏（不激活、不置前，保证后续托盘/Dock/快捷键唤起路径正常）；
-            // 配置为关闭窗口后保持后台运行时，主窗口保持隐藏并按 background-icon 配置
-            // 进入后台模式（保证菜单栏/Dock 图标可见，否则用户将无法唤起应用），
-            // 否则照常显示主窗口。其他平台不支持后台常驻，一律正常显示主窗口。
+            // 静默启动判定：
+            // - macOS：AppleScript 登录项带 hidden 标志拉起时，进程自启动起即处于
+            //   NSApplication 级隐藏状态（argv 无任何标记，无法从启动参数识别，见
+            //   application::autostart）。检测到即解除应用级隐藏（不激活、不置前，
+            //   保证后续托盘/Dock/快捷键唤起路径正常）。
+            // - Windows/Linux：自启动条目（注册表 Run 值 / .desktop Exec）原样保留
+            //   启动参数，argv 带 --hidden 即登录自启动拉起，直接从启动参数判定。
+            // 检测到静默启动且配置为关闭窗口后保持后台运行时，主窗口保持隐藏并按
+            // background-icon 配置进入后台模式（保证托盘/菜单栏图标可见，否则用户将
+            // 无法唤起应用）；否则照常显示主窗口。
             #[cfg(target_os = "macos")]
             let start_hidden = {
                 let launched_hidden = application::autostart::is_app_hidden();
@@ -136,16 +143,9 @@ fn main() {
                 }
                 launched_hidden && application::menubar::keep_running_on_close(app.handle())
             };
-            // TODO(跨平台托盘)：Windows/Linux 实现托盘图标 + close-to-tray 后，
-            // 静默启动可平移过去：载体天然支持传参（注册表 Run 值 / .desktop 的 Exec
-            // 均保留 argv），判定改回 std::env::args() 检查 --hidden 即可（比 macOS 的
-            // NSApp 隐藏态检测更简单）；其余复用现有 START_HIDDEN 流程（前端
-            // revealMainWindow 判定本就跨平台）。前置条件：menubar.rs 托盘跨平台化
-            // （Win/Linux 仅“打开/退出”两项）、keepRunningOnClose 开放三端、
-            // backgroundIcon 设置 UI 裁剪“Dock 栏图标”选项；Linux 打包需声明
-            // libappindicator 系统依赖。文案同步升级为 macOS 同款“后台常驻”句式。
             #[cfg(not(target_os = "macos"))]
-            let start_hidden = false;
+            let start_hidden = std::env::args().any(|arg| arg == "--hidden")
+                && application::menubar::keep_running_on_close(app.handle());
             START_HIDDEN.store(start_hidden, Ordering::Relaxed);
             if start_hidden {
                 application::menubar::on_main_window_hidden(app.handle());

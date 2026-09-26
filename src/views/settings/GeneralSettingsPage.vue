@@ -24,18 +24,23 @@ const themeOptions: FluentSelectOption[] = [
     { value: 'dark', label: '深色' },
 ];
 
-/** 后台运行图标下拉的选项：Dock 栏图标 / 菜单栏图标 / 不显示图标 */
-const backgroundIconOptions: FluentSelectOption[] = [
-    { value: 'dock', label: 'Dock 栏图标' },
-    { value: 'menu-bar', label: '菜单栏图标' },
-    { value: 'none', label: '不显示图标' },
-];
+/** 是否为 macOS（后台图标选项与部分文案有平台差异） */
+const isMacOS = computed(() => api.os.type() === 'macos');
+
+/** 后台运行图标下拉的选项：macOS 为 Dock 栏图标/菜单栏图标/不显示图标；其他平台仅有托盘/不显示图标 */
+const backgroundIconOptions = computed<FluentSelectOption[]>(() => isMacOS.value
+    ? [
+        { value: 'menu-bar', label: '菜单栏图标' },
+          { value: 'dock', label: 'Dock 栏图标' },
+          { value: 'none', label: '不显示图标' },
+      ]
+    : [
+          { value: 'menu-bar', label: '托盘图标' },
+          { value: 'none', label: '不显示图标' },
+      ]);
 
 // 主题切换即时生效：全窗口共享同一 DOM，setThemeMode 直接切换 dark class，无需等待保存
 watch(() => state.theme, theme => setThemeMode(theme));
-
-/** 是否为 macOS（窗口行为组仅 macOS 展示，与现设置页一致） */
-const isMacOS = computed(() => api.os.type() === 'macos');
 
 /** 后台图标设置未启用时禁用：卡片常显（搜索跳转锚点始终有效、布局稳定），仅禁用交互 */
 const backgroundIconDisabled = computed(() => !state.keepRunningOnClose);
@@ -43,10 +48,18 @@ const backgroundIconDisabled = computed(() => !state.keepRunningOnClose);
 /** 后台图标卡的说明文案：功能关闭时替换为禁用原因 */
 const backgroundIconDescription = computed(() => backgroundIconDisabled.value
     ? '需先开启“关闭窗口后保持后台运行”'
-    : '选择窗口关闭后（后台运行期间）应用图标的显示位置；窗口打开时图标始终显示在 Dock 栏'
+    : isMacOS.value
+        ? '选择窗口关闭后（后台运行期间）应用图标的显示位置'
+        : '选择窗口关闭后（后台运行期间）是否显示托盘图标'
 );
 
-// 登录时自动启动：状态存于系统（macOS 为 LaunchAgent，Windows 为注册表 Run 键，Linux 为
+/** “关闭窗口后保持后台运行”卡的说明文案：唤起入口按平台区分 */
+const keepRunningOnCloseDescription = computed(() => isMacOS.value
+    ? '关闭窗口后应用将在后台继续运行，可通过 Dock 图标、菜单栏图标或全局快捷键再次打开'
+    : '关闭窗口后应用将在后台继续运行，可通过托盘图标再次打开'
+);
+
+// 登录时自动启动：状态存于系统（macOS 为登录项，Windows 为注册表 Run 键，Linux 为
 // XDG Autostart），不属于 config，不进设置仓库（也因此无 ResetButton），以系统实查为准。
 const launchAtLogin = ref(false);
 /** 初始系统状态是否已查询完成：完成前忽略用户切换，避免用未知旧状态覆盖真实状态 */
@@ -70,10 +83,10 @@ const launchAtLoginLocked = computed(() =>
     rustInRelease.value === false && !debug.launchAtLoginEditableInDev
 );
 
-/** 登录自启动卡的说明文案：macOS 静默常驻后台，其他平台直接启动 */
+/** 登录自启动卡的说明文案：三端均静默常驻后台，唤起入口按平台区分 */
 const launchAtLoginDescription = computed(() => isMacOS.value
-    ? '登录后自动启动 Anki Marker 并在后台常驻（不弹出主窗口），可通过菜单栏图标、Dock 图标或全局快捷键打开'
-    : '登录系统后自动启动 Anki Marker'
+    ? '登录系统后自动启动 Anki Marker 并在后台常驻，可通过菜单栏图标、Dock 图标或全局快捷键打开'
+    : '登录系统后自动启动 Anki Marker 并在后台常驻，可通过托盘图标打开'
 );
 
 /**
@@ -165,26 +178,24 @@ async function onLaunchAtLoginChange(enabled: boolean | undefined) {
             </FluentSettingCard>
         </div>
 
-        <template v-if="isMacOS">
-            <h2 class="group-title">窗口</h2>
-            <div class="card-list">
-                <FluentSettingCard header="关闭窗口后保持后台运行" description="关闭窗口后应用将在后台继续运行，可通过 Dock 图标、菜单栏图标或全局快捷键再次打开"
-                    setting-id="keepRunningOnClose">
-                    <template #header-extra>
-                        <ResetButton setting-key="keepRunningOnClose" />
-                    </template>
-                    <FluentToggleSwitch v-model="state.keepRunningOnClose" />
-                </FluentSettingCard>
-                <FluentSettingCard header="后台运行时显示图标" :description="backgroundIconDescription"
-                    setting-id="backgroundIcon" :disabled="backgroundIconDisabled">
-                    <template #header-extra>
-                        <ResetButton setting-key="backgroundIcon" :disabled="backgroundIconDisabled" />
-                    </template>
-                    <FluentSelect :options="backgroundIconOptions" v-model="state.backgroundIcon"
-                        :disabled="backgroundIconDisabled" />
-                </FluentSettingCard>
-            </div>
-        </template>
+        <h2 class="group-title">窗口</h2>
+        <div class="card-list">
+            <FluentSettingCard header="关闭窗口后保持后台运行" :description="keepRunningOnCloseDescription"
+                setting-id="keepRunningOnClose">
+                <template #header-extra>
+                    <ResetButton setting-key="keepRunningOnClose" />
+                </template>
+                <FluentToggleSwitch v-model="state.keepRunningOnClose" />
+            </FluentSettingCard>
+            <FluentSettingCard header="后台运行时显示图标" :description="backgroundIconDescription"
+                setting-id="backgroundIcon" :disabled="backgroundIconDisabled">
+                <template #header-extra>
+                    <ResetButton setting-key="backgroundIcon" :disabled="backgroundIconDisabled" />
+                </template>
+                <FluentSelect :options="backgroundIconOptions" v-model="state.backgroundIcon"
+                    :disabled="backgroundIconDisabled" />
+            </FluentSettingCard>
+        </div>
     </div>
 </template>
 

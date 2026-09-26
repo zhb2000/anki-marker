@@ -27,11 +27,12 @@ global-shortcut = ""
 # 关闭后需选中完整句子再按快捷键录入
 word-to-sentence = true
 
-# 关闭窗口时应用是否在后台继续运行（仅 macOS）
-# 保持运行时窗口仅被隐藏，可由 Dock 图标、菜单栏图标或划词快捷键再次唤起
+# 关闭窗口时应用是否在后台继续运行（三端）
+# 保持运行时窗口仅被隐藏：macOS 可由 Dock 图标、菜单栏图标或划词快捷键唤起，
+# Windows/Linux 可由托盘图标唤起；也可通过托盘/菜单栏图标的“打开”菜单项打开
 keep-running-on-close = true
 
-# 后台运行（关闭窗口保持运行）期间，应用图标显示的位置（仅 macOS）
-# 可选值：menu-bar = 屏幕顶部菜单栏（默认）、dock = Dock 栏、none = 不显示图标
-# 窗口打开时图标始终显示在 Dock 栏、不显示在菜单栏
+# 后台运行（关闭窗口保持运行）期间，应用图标显示的位置
+# 可选值：menu-bar = 菜单栏/托盘图标（默认）、dock = Dock 栏（仅 macOS）、none = 不显示图标
+# 窗口打开时托盘图标不显示（macOS 的 Dock 图标除外），仅在后台运行期间按此选项显示
 background-icon = "menu-bar"
