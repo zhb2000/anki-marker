@@ -26,6 +26,12 @@ export default defineConfig(async () => ({
     server: {
         port: 1420,
         strictPort: true,
+        // Windows 下 cargo 编译会锁定 target/ 下的 exe，Vite 的 fs.watch
+        // 访问被锁文件会抛 EBUSY 导致 dev server 崩溃（EBUSY: resource busy or locked），
+        // 因此忽略 Rust 构建产物目录（Tauri 自身会监视 src-tauri 的源码变更）
+        watch: {
+            ignored: ["**/src-tauri/target/**"],
+        },
     },
     // 3. to make use of `TAURI_DEBUG` and other env variables
     // https://tauri.studio/v1/api/config#buildconfig.beforedevcommand
