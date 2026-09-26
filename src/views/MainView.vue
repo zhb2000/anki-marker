@@ -463,6 +463,11 @@ async function applyCapturedSentence(payload: CapturedSentencePayload) {
     if (trimmed.length === 0) {
         return;
     }
+    // 捕获来源日志（console 会转发到应用日志文件）：定位“错句覆盖”类问题时
+    // 区分事件/暂存回放，并与 Rust 侧的 capture 日志对照
+    console.log(
+        `[capture] applying: word=${JSON.stringify(payload.word)}, text=${JSON.stringify(trimmed.slice(0, 80))}`
+    );
     // 按快捷键取词时应用可能停留在设置页：切回主界面，避免句子已被替换但用户看到的仍是设置页；
     // 离开前立即落盘设置页可能还未防抖保存的修改（与设置页返回按钮行为一致）
     if (router.currentRoute.value.path !== '/') {

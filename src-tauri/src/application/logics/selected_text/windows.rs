@@ -51,7 +51,10 @@ pub fn get_selected_context(
         return get_selected_text().map(|text| SelectedContext { text, word: None });
     }
     match uia_selected_context() {
-        Ok(context) if !context.text.trim().is_empty() => return Ok(context),
+        Ok(context) if !context.text.trim().is_empty() => {
+            log::info!("capture via UIA: {}", describe_context(&context));
+            return Ok(context);
+        }
         Ok(_) => {
             // UIA “成功”但为空：无法区分“真没选”与“应用不暴露选区”，回退 Ctrl+C
             // 再判一次；不触发后台重试，以免给“未选中就按快捷键”的常见操作增加延迟
@@ -75,7 +78,28 @@ pub fn get_selected_context(
             log::warn!("UIA path failed, falling back to simulated Ctrl+C: {error}");
         }
     }
-    return get_selected_text_by_ctrl_c().map(|text| SelectedContext { text, word: None });
+    return get_selected_text_by_ctrl_c().map(|text| {
+        let context = SelectedContext { text, word: None };
+        log::info!("capture via simulated Ctrl+C: {}", describe_context(&context));
+        return context;
+    });
+}
+
+/// 结果日志的描述串：词与录入文本（各截断到 80 字符），用于实机定位"读错控件"
+/// 类问题（日志只写本机日志文件，不上传）。
+fn describe_context(context: &SelectedContext) -> String {
+    fn preview(text: &str) -> String {
+        const MAX_CHARS: usize = 80;
+        let mut chars = text.chars();
+        let preview: String = chars.by_ref().take(MAX_CHARS).collect();
+        return if chars.next().is_some() { format!("{preview}…") } else { preview };
+    }
+    return format!(
+        "word {:?}, text {:?} ({} utf16 units)",
+        context.word.as_deref().map(preview),
+        preview(&context.text),
+        context.text.encode_utf16().count()
+    );
 }
 
 /// COM 生命周期守卫：Drop 时 CoUninitialize。守卫先于所有 COM 接口构造、
@@ -371,7 +395,10 @@ where
             })();
             match result {
                 Ok(context) if !context.text.trim().is_empty() => {
-                    log::info!("UIA selection retry succeeded on attempt {attempt}");
+                    log::info!(
+                        "UIA selection retry succeeded on attempt {attempt}: {}",
+                        describe_context(&context)
+                    );
                     RETRYING.store(false, Ordering::SeqCst);
                     on_captured(context);
                     return;

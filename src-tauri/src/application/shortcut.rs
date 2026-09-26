@@ -210,13 +210,39 @@ pub fn on_shortcut_pressed(app: AppHandle) {
         let word_to_sentence = logics::config::read_config(app.state::<ConfigPath>().0.as_str())
             .map(|config| config.word_to_sentence())
             .unwrap_or(true);
-        // 后台重试命中（无障碍树异步物化的应用，如 Word）时的补发：
+        // 后台重试命中（无障碍树异步物化的应用，如 Word / Chromium 冷页面）时的补发：
         // 更新暂存并 emit，前端用完整的取句结果覆盖先到的仅词结果
+        //
+        // 重试守卫：重试路径在目标窗口内搜索“持有选区的元素”（Windows）或按 pid
+        // 重建应用元素（macOS），可能撞错控件（残留选区、浏览器 UI 等）——
+        // 与主路径结果（模拟复制读到的才是用户真实选区）不一致时丢弃，避免用
+        // 错误内容覆盖用户已经看到的正确结果
+        let primary_text = std::sync::Arc::new(Mutex::new(None::<String>));
+        let retry_primary_text = primary_text.clone();
         let retry_app = app.clone();
         let context = match logics::selected_text::get_selected_context(
             word_to_sentence,
             move |context| {
                 if let Some(captured) = CapturedSentence::from_selected_context(context) {
+                    if let Ok(Some(primary)) =
+                        retry_primary_text.lock().map(|guard| guard.clone())
+                    {
+                        let retry_matches = captured
+                            .word
+                            .as_deref()
+                            .map(|word| word.trim() == primary)
+                            .unwrap_or_else(|| captured.text.trim() == primary);
+                        if !retry_matches {
+                            log::warn!(
+                                "dropping the retry capture: it does not match the primary \
+                                 result (retry word {:?}, retry text {:.80?}, primary {:?})",
+                                captured.word,
+                                captured.text,
+                                primary
+                            );
+                            return;
+                        }
+                    }
                     if let Ok(mut pending) = retry_app.state::<PendingSentence>().0.lock() {
                         *pending = Some(captured.clone());
                     }
@@ -251,6 +277,11 @@ pub fn on_shortcut_pressed(app: AppHandle) {
             Some(captured) => captured,
             None => return, // 未选中任何文本，静默忽略
         };
+        // 记录主路径的选区文本（重试守卫的比对基准）：取句命中时是词，
+        // 降级/回退时是所选原文。须在弹窗前记录——弹窗期间重试可能已命中
+        if let Ok(mut guard) = primary_text.lock() {
+            *guard = Some(captured.word.clone().unwrap_or(captured.text.clone()));
+        }
         if let Err(error) = show_and_focus_main_window(&app) {
             log::warn!("failed to show main window: {error}");
         }
