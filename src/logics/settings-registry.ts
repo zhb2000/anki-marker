@@ -85,7 +85,7 @@ export const SETTING_ENTRIES: SettingEntry[] = [
     },
     // #endregion
 
-    // #region 划词（仅 macOS）
+    // #region 划词
     {
         id: 'globalShortcut',
         page: 'selection',

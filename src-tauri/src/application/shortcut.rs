@@ -1,8 +1,10 @@
 //! 全局快捷键（划词录入句子）：注册、热更新与句子捕获。
 //!
-//! 目前仅实现 macOS：读取选中文本优先走辅助功能 API（A11y），
-//! 目标应用不兼容时自动回退为模拟 Cmd+C 并读取剪贴板，
-//! 二者均要求在“系统设置 → 隐私与安全性 → 辅助功能”中授权本应用。
+//! 三端实现（见 application::logics::selected_text 的各平台模块）：
+//! - macOS：辅助功能 API 优先，回退模拟 Cmd+C；需授予辅助功能权限；
+//! - Windows：UI Automation（TextPattern）优先，回退模拟 Ctrl+C，无需权限；
+//! - Linux：AT-SPI 优先，回退读 PRIMARY 选区，无需权限（仅 X11 会话可用全局快捷键）。
+//!
 //! 选词取句（word-to-sentence）开启时，划词只需选中一个单词即可自动录入
 //! 其所在的整个句子；捕获结果（录入文本 + 取句命中的单词）以
 //! sentence-captured 事件发给前端。
@@ -108,7 +110,7 @@ fn update_from_config_inner(app: &AppHandle, notify: bool) {
 }
 
 /// 将全局快捷键注册状态更新为 `shortcut`：空字符串表示注销全部快捷键。
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn apply_shortcut(app: &AppHandle, shortcut: &str, notify: bool) {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
@@ -149,7 +151,7 @@ fn apply_shortcut(app: &AppHandle, shortcut: &str, notify: bool) {
 }
 
 /// 其他平台暂不支持全局快捷键，注册为空操作
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn apply_shortcut(_app: &AppHandle, _shortcut: &str, _notify: bool) {}
 
 /// 查询本应用是否已被授予辅助功能权限（其他平台无此权限概念，视为已授权）。
@@ -185,8 +187,9 @@ pub fn request_accessibility_trust() {
 /// 全局快捷键被按下时调用：读取当前选中的句子并录入主窗口。
 ///
 /// 时序要求：必须先读取选中文本、再聚焦本应用窗口——若先聚焦，读取（或模拟的
-/// Cmd+C）将作用于本应用自身。读取过程可能阻塞数十毫秒（等待剪贴板），故放独立线程执行。
-#[cfg(target_os = "macos")]
+/// Cmd+C / Ctrl+C）将作用于本应用自身。读取过程可能阻塞（等待剪贴板或跨进程
+/// 无障碍调用），故放独立线程执行。
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub fn on_shortcut_pressed(app: AppHandle) {
     std::thread::spawn(move || {
         // 选词取句开关：每次触发时读配置，读取失败默认开启（与配置缺省值一致）
@@ -211,7 +214,8 @@ pub fn on_shortcut_pressed(app: AppHandle) {
         ) {
             Ok(context) => context,
             Err(_) => {
-                // 常见原因：未在系统设置中授予本应用辅助功能权限
+                // 常见原因：macOS 未授予辅助功能权限；Windows 前台窗口以管理员身份
+                // 运行（UIPI 拦截）；Linux 目标应用未通过 AT-SPI 暴露选区
                 if let Err(error) = app.emit("sentence-capture-failed", ()) {
                     log::warn!("failed to emit sentence-capture-failed event: {error}");
                 }

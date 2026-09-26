@@ -29,12 +29,13 @@ tauri-plugin-autostart = "2.5"
 log = "0.4"
 sanitise-file-name = "1.0"
 unicode-segmentation = "1"
+# 划词录入句子的全局快捷键
+tauri-plugin-global-shortcut = "2.3"
 # WebDriver automation server, for debugging/testing only. Enabled via the `webdriver` feature.
 tauri-plugin-webdriver = { version = "0.2", optional = true }
 
-# 划词录入句子的全局快捷键，目前仅支持 macOS
+# 划词取词的辅助功能 API 等 macOS 专属依赖
 [target.'cfg(target_os = "macos")'.dependencies]
-tauri-plugin-global-shortcut = "2.3"
 core-foundation = "0.9"
 macos-accessibility-client = "0.0.2"
 # Dock 图标菜单：Tauri 未提供 Dock 菜单 API，需运行时向 NSApplication 代理
@@ -44,10 +45,20 @@ objc2 = "0.6"
 muda = { version = "0.19", default-features = false }
 # 透明标题栏下的窗口底色：NSWindow.setBackgroundColor（与前端 --window-background 同步）；
 # NSApplication.isHidden/unhideWithoutActivation：登录自启动 hidden 拉起的应用级隐藏检测与解除
-objc2-app-kit = { version = "0.3", features = ["std", "NSColor", "NSWindow", "NSApplication", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", features = [
+    "std",
+    "NSColor",
+    "NSWindow",
+    "NSApplication",
+    "objc2-core-foundation",
+] }
 # WKWebView 页面背后底色（underPageBackgroundColor，macOS 12+ 公开 API），
 # 避免 zoom 动画期间 WKWebView 自身底层露出白色
-objc2-web-kit = { version = "0.3", features = ["std", "WKWebView", "objc2-app-kit"] }
+objc2-web-kit = { version = "0.3", features = [
+    "std",
+    "WKWebView",
+    "objc2-app-kit",
+] }
 objc2-foundation = { version = "0.3", features = ["std", "NSProcessInfo"] }
 
 # 托盘图标跟随系统主题（Windows）：读 HKCU\...\Themes\Personalize\SystemUsesLightTheme
@@ -55,11 +66,32 @@ objc2-foundation = { version = "0.3", features = ["std", "NSProcessInfo"] }
 # 注意 Tauri/tao 的 App::theme() 读的是 AppsUseLightTheme（应用模式），与任务栏不同，不可复用。
 # 版本与依赖树中 tauri 所用保持一致，确保 HWND 等类型可互通
 [target.'cfg(target_os = "windows")'.dependencies]
+# 划词取词（UI Automation + 模拟 Ctrl+C 回退）：
+# Win32_UI_Accessibility（IUIAutomation/TextPattern）、Win32_System_Com（COM 初始化）、
+# Win32_System_Ole（CF_UNICODETEXT）、Win32_System_DataExchange + Win32_System_Memory
+# （剪贴板备份/读取/恢复）、Win32_UI_Input_KeyboardAndMouse（SendInput）
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_System_Registry",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Accessibility",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
+
+# 划词取词（Linux）：AT-SPI（D-Bus）读选区与上下文（优先），回退读 PRIMARY 选区
+#（Linux 上选中文本天然进入 PRIMARY 剪贴板，无需模拟按键）。两者均为纯 Rust 实现
+#（zbus / x11rb / wl-clipboard-rs），编译期无需额外系统依赖。
+# arboard 关掉默认的 image-data（不需要图片剪贴板），启用 wayland-data-control
+#（wlroots 系 Wayland 合成器下读 PRIMARY；GNOME Wayland 不支持该协议）
+[target.'cfg(target_os = "linux")'.dependencies]
+atspi = "0.30"
+arboard = { version = "3", default-features = false, features = [
+    "wayland-data-control",
 ] }
 
 [features]

@@ -62,8 +62,9 @@ fn main() {
             Some(vec!["--hidden"]),
         ));
 
-    // 全局快捷键（划词录入句子），目前仅支持 macOS
-    #[cfg(target_os = "macos")]
+    // 全局快捷键（划词录入句子）。注意：Linux 侧仅 X11 会话可用
+    //（global-hotkey 依赖 X11，Wayland 会话下注册会失败并在设置页显示错误）
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     let builder = builder.plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, _shortcut, event| {
@@ -81,7 +82,7 @@ fn main() {
 
     // 主窗口点关闭按钮的行为可配置（keep-running-on-close），三端一致——
     // 默认仅隐藏窗口、应用保持后台运行，由托盘图标（macOS 为 Dock/菜单栏图标）
-    // 或划词快捷键（仅 macOS）再次唤起；配置为不保持运行时则直接退出应用。
+    // 或划词快捷键再次唤起；配置为不保持运行时则直接退出应用。
     let builder = builder.on_window_event(|window, event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
             if application::menubar::keep_running_on_close(window.app_handle()) {
@@ -112,8 +113,8 @@ fn main() {
             app.manage(Mutex::new(None::<Connection>));
             app.manage(application::shortcut::PendingSentence::new());
 
-            // 注册配置中设置的划词全局快捷键（仅 macOS）
-            #[cfg(target_os = "macos")]
+            // 注册配置中设置的划词全局快捷键
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             application::shortcut::update_from_config(app.handle());
 
             // 托盘/Dock 图标菜单：注册共用的菜单事件处理（托盘菜单三端通用，

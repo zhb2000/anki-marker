@@ -1,4 +1,4 @@
-//! 获取系统当前选中的文本（目前仅 macOS）。
+//! macOS 取词实现：优先辅助功能 API（AXUIElement），失败回退 AppleScript 模拟 Cmd+C。
 //!
 //! 实现参考了 yetone/get-selected-text（MIT / Apache-2.0）的 macOS 部分：
 //! 优先通过辅助功能 API（AXUIElement）直接读取选中文字；
@@ -15,7 +15,9 @@
 //! 原样录入所选文本——只扩展、不丢弃；取句链路任一环节失败时降级为仅录入
 //! 词原文，与既有的 AX 成功路径语义一致。
 
-#[cfg(target_os = "macos")]
+use super::capture::{capture_in_context, SentenceCapture};
+use super::SelectedContext;
+
 pub fn get_selected_text() -> Result<String, String> {
     if let Ok(text) = get_selected_text_by_ax() {
         if !text.trim().is_empty() {
@@ -27,25 +29,12 @@ pub fn get_selected_text() -> Result<String, String> {
     return get_selected_text_by_applescript();
 }
 
-#[cfg(not(target_os = "macos"))]
-pub fn get_selected_text() -> Result<String, String> {
-    return Err("获取选中文本暂不支持此平台".to_string());
-}
-
-/// 划词捕获结果：text 为录入文本（取句成功时是整句），word 为取句模式命中的单词。
-#[derive(Debug)]
-pub struct SelectedContext {
-    pub text: String,
-    pub word: Option<String>,
-}
-
 /// word_to_sentence 为 true 时尝试“选词取句”：AX 全链路成功返回 {句子, 词}；
 /// AX 拿到词但取句失败返回 {词原文, None}；AX 报错或词为空时回退 AppleScript（同现有逻辑）。
 /// word_to_sentence 为 false 时完全等同现有 get_selected_text 的行为。
 ///
 /// `on_retry_captured`：AX 失败回退后，若目标应用的无障碍树在后台异步物化
 /// （如 Word），后台重试取到完整句子时经此回调补发结果（见 spawn_selection_retry）。
-#[cfg(target_os = "macos")]
 pub fn get_selected_context(
     word_to_sentence: bool,
     on_retry_captured: impl FnOnce(SelectedContext) + Send + 'static,
@@ -76,14 +65,6 @@ pub fn get_selected_context(
     return get_selected_text_by_applescript().map(|text| SelectedContext { text, word: None });
 }
 
-#[cfg(not(target_os = "macos"))]
-pub fn get_selected_context(
-    _word_to_sentence: bool,
-    _on_retry_captured: impl FnOnce(SelectedContext) + Send + 'static,
-) -> Result<SelectedContext, String> {
-    return Err("获取选中文本暂不支持此平台".to_string());
-}
-
 /// macOS 辅助功能 C API（ApplicationServices 框架）的最小 FFI 绑定。
 ///
 /// 仅绑定读取选中文本与选词取句所需的符号，避免引入 `accessibility-ng`/`cocoa`
@@ -91,7 +72,6 @@ pub fn get_selected_context(
 ///
 /// AX 属性名不通过链接 C 全局符号获取（`kAX*Attribute` 等数据符号在
 /// framework 的 tbd 导出中无法解析，会导致链接失败），而是直接使用其字符串值。
-#[cfg(target_os = "macos")]
 mod ax_ffi {
     use core_foundation::base::CFTypeRef;
     use core_foundation::string::CFStringRef;
@@ -183,7 +163,6 @@ mod ax_ffi {
 /// 获取系统当前焦点 UI 元素。
 ///
 /// 注意：未授予辅助功能权限时此处会失败，由调用方回退或提示。
-#[cfg(target_os = "macos")]
 fn get_focused_ui_element_by_ax() -> Result<core_foundation::base::CFType, String> {
     use core_foundation::base::{CFType, CFTypeRef, TCFType};
     use core_foundation::string::CFString;
@@ -210,7 +189,6 @@ fn get_focused_ui_element_by_ax() -> Result<core_foundation::base::CFType, Strin
 }
 
 /// 读取辅助功能元素的字符串属性值；AX 报错、空指针或值非字符串时返回 Err。
-#[cfg(target_os = "macos")]
 fn copy_string_attribute_by_ax(
     element: &core_foundation::base::CFType,
     attribute: &'static str,
@@ -221,7 +199,6 @@ fn copy_string_attribute_by_ax(
 }
 
 /// copy_string_attribute_by_ax 的 CFTypeRef 版本（供树搜索直接操作借用的元素引用）。
-#[cfg(target_os = "macos")]
 fn copy_string_attribute_by_ax_ref(
     element: core_foundation::base::CFTypeRef,
     attribute: &'static str,
@@ -249,7 +226,6 @@ fn copy_string_attribute_by_ax_ref(
 }
 
 /// 读取辅助功能元素的引用型属性（如 AXWindow、AXFocusedWindow），返回未解析的 CFType。
-#[cfg(target_os = "macos")]
 fn copy_element_attribute_by_ax(
     element: &core_foundation::base::CFType,
     attribute: &'static str,
@@ -274,7 +250,6 @@ fn copy_element_attribute_by_ax(
 }
 
 /// 读取辅助功能元素的子元素数组（AXChildren，Create 规则返回，随 Drop 释放）。
-#[cfg(target_os = "macos")]
 fn copy_children_array_by_ax(
     element: core_foundation::base::CFTypeRef,
 ) -> Result<core_foundation::base::CFType, String> {
@@ -308,7 +283,6 @@ fn copy_children_array_by_ax(
 
 /// 读取辅助功能元素的整型属性值（如 AXNumberOfCharacters）；
 /// AX 报错、空指针、值非数字或数字超出 i64 时返回 Err。
-#[cfg(target_os = "macos")]
 fn copy_i64_attribute_by_ax(
     element: &core_foundation::base::CFType,
     attribute: &'static str,
@@ -341,23 +315,12 @@ fn copy_i64_attribute_by_ax(
 /// 通过辅助功能 API 读取当前焦点元素中的选中文本。
 ///
 /// 注意：未授予辅助功能权限时此处会失败，由调用方回退或提示。
-#[cfg(target_os = "macos")]
 fn get_selected_text_by_ax() -> Result<String, String> {
     let focused = get_focused_ui_element_by_ax()?;
     return copy_string_attribute_by_ax(&focused, ax_ffi::SELECTED_TEXT_ATTRIBUTE);
 }
 
-/// 取句结果：单句时为用户所选词扩展出的整句；用户手动跨句选择时为其所选原文。
-#[cfg(target_os = "macos")]
-enum SentenceCapture {
-    /// 选区落在单个句子内，已扩展为整句（前端可预选命中的单词）
-    Expanded(String),
-    /// 选区横跨多个句子：只扩展、不丢弃——原样录入用户所选文本（不做单词预选）
-    SelectionAsIs(String),
-}
-
 /// AX 取句链路的失败：携带诊断信息与（可能存在的）后台重试句柄（目标应用 pid）。
-#[cfg(target_os = "macos")]
 #[derive(Debug)]
 struct AxAttemptError {
     message: String,
@@ -370,7 +333,6 @@ struct AxAttemptError {
 /// 拿到词但取句链路任一环节失败时降级返回 {词原文, None}（语义等同现有的
 /// AX 成功路径，不再回退 AppleScript）；连词都取不到时才返回 Err（携带
 /// 后台重试句柄——部分应用的无障碍树在被查询后异步物化，如 Word）。
-#[cfg(target_os = "macos")]
 fn get_selected_context_by_ax() -> Result<SelectedContext, AxAttemptError> {
     let focused = get_focused_ui_element_by_ax().map_err(|error| AxAttemptError {
         message: error,
@@ -411,7 +373,6 @@ fn get_selected_context_by_ax() -> Result<SelectedContext, AxAttemptError> {
 }
 
 /// 读取元素所属应用的进程 id（AXUIElementGetPid），失败返回 None。
-#[cfg(target_os = "macos")]
 fn get_element_pid(element: &core_foundation::base::CFType) -> Option<i32> {
     use core_foundation::base::TCFType;
 
@@ -421,7 +382,6 @@ fn get_element_pid(element: &core_foundation::base::CFType) -> Option<i32> {
 }
 
 /// 拿到所选文本后的收尾：对持有选区的元素跑取句链路，失败降级为仅录词原文。
-#[cfg(target_os = "macos")]
 fn context_from_word_and_element(
     element: &core_foundation::base::CFType,
     word: &str,
@@ -441,7 +401,6 @@ fn context_from_word_and_element(
 }
 
 /// 读取当前焦点应用的焦点窗口（AX 树搜索的备选根）。
-#[cfg(target_os = "macos")]
 fn get_focused_window_by_ax() -> Result<core_foundation::base::CFType, String> {
     use core_foundation::base::{CFType, TCFType};
 
@@ -457,7 +416,6 @@ fn get_focused_window_by_ax() -> Result<core_foundation::base::CFType, String> {
 /// AXManualAccessibility 属性被设置来激活无障碍树；AXEnhancedUserInterface
 /// 是另一类应用使用的开关。二者都设、失败忽略——实测 Word/Zotero 均不响应
 ///（-25205 / -25208），保留此机制给其他可能响应的应用一个机会。
-#[cfg(target_os = "macos")]
 fn wake_app_accessibility(app: &core_foundation::base::CFType) {
     use core_foundation::base::TCFType;
     use core_foundation::boolean::CFBoolean;
@@ -482,7 +440,6 @@ fn wake_app_accessibility(app: &core_foundation::base::CFType) {
 }
 
 /// 在焦点元素所在窗口的 AX 子树中搜索持有非空选区的元素（入口：推导搜索根）。
-#[cfg(target_os = "macos")]
 fn find_element_with_selection_by_ax(
     focused: &core_foundation::base::CFType,
 ) -> Result<Option<(core_foundation::base::CFType, String)>, String> {
@@ -496,7 +453,6 @@ fn find_element_with_selection_by_ax(
 /// 一次跨进程调用），找第一个 AXSelectedText 非空的元素；无果时记 info 级树
 /// 形态统计日志——用于诊断提供方是否暴露了真实内容树（桩树访问节点很少，
 /// 内容树节点多但可能大量元素的 AXSelectedText 为空或报错）。
-#[cfg(target_os = "macos")]
 fn find_element_with_selection_in_window(
     window: &core_foundation::base::CFType,
 ) -> Option<(core_foundation::base::CFType, String)> {
@@ -572,7 +528,6 @@ fn find_element_with_selection_in_window(
 }
 
 /// 后台重试的互斥标记：0 表示无重试在途，否则为正在重试的应用 pid。
-#[cfg(target_os = "macos")]
 static RETRYING_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
 /// 后台重试：部分应用（实测 Word）的无障碍树在首次被查询后才异步物化——
@@ -580,8 +535,7 @@ static RETRYING_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32
 /// 才成功）。此函数在后台按固定间隔轮询目标应用（pid 不随前台切换失效）：
 /// 唤醒属性 → 树搜索 → 取句链路，树就绪后取到句子并通过 `on_captured` 补发。
 /// 总轮询窗口约 RETRY_ATTEMPTS * RETRY_INTERVAL_MS，超时放弃。
-#[cfg(target_os = "macos")]
-pub fn spawn_selection_retry<F>(pid: i32, on_captured: F)
+fn spawn_selection_retry<F>(pid: i32, on_captured: F)
 where
     F: FnOnce(SelectedContext) + Send + 'static,
 {
@@ -628,7 +582,6 @@ where
 
 /// 取句主链路：读选区 CFRange → 窗口化读上下文 → 跨句判断 → 分句 → 触边重试 → 校验。
 /// 任一环节失败返回 Err，由调用方降级为“仅录入词原文”。
-#[cfg(target_os = "macos")]
 fn find_sentence_for_word_by_ax(
     focused: &core_foundation::base::CFType,
     word: &str,
@@ -683,10 +636,16 @@ fn find_sentence_for_word_by_ax(
         return Err(last_error);
     };
 
+    // AX 选区偏移与窗口文本的坐标系可能不一致（Obsidian 阅读模式），按优先级
+    // 给共享锚点探测提供候选：窗口偏移 → 文档级偏移 → 0
+    let anchor_candidates = |window_loc: isize| -> [isize; 3] {
+        [range.location - window_loc, range.location, 0]
+    };
+
     const WINDOW_MARGIN: isize = 1024;
     let loc = std::cmp::max(0, range.location - WINDOW_MARGIN);
     let (context, achieved_right) = fetch_context(WINDOW_MARGIN, -1)?;
-    let (capture, touched_edge) = match capture_in_context(&context, word, range, loc) {
+    let (capture, touched_edge) = match capture_in_context(&context, word, &anchor_candidates(loc), loc) {
         Some(result) => result,
         None => {
             // 诊断：锚点定位失败时记录坐标系关键参数，便于分析各提供方的偏移语义
@@ -717,9 +676,12 @@ fn find_sentence_for_word_by_ax(
         let mut final_touched = true;
         if let Ok((retry_context, retry_right)) = fetch_context(RETRY_WINDOW_MARGIN, achieved_right)
         {
-            if let Some((retry_capture, retry_touched)) =
-                capture_in_context(&retry_context, word, range, retry_loc)
-            {
+            if let Some((retry_capture, retry_touched)) = capture_in_context(
+                &retry_context,
+                word,
+                &anchor_candidates(retry_loc),
+                retry_loc,
+            ) {
                 final_capture = retry_capture;
                 final_right = retry_right;
                 final_context_len = retry_context.encode_utf16().count();
@@ -741,77 +703,7 @@ fn find_sentence_for_word_by_ax(
     return Ok(capture);
 }
 
-/// 在上下文中定位选区并切句：锚点探测（校验门控）→ 跨句保留 → 单句扩展。
-///
-/// 返回切句结果，以及句子是否触及上下文边缘（触边意味着窗口可能截断了句子，
-/// 调用方值得扩大窗口重试；跨句保留路径无此概念，恒为 false）。
-#[cfg(target_os = "macos")]
-fn capture_in_context(
-    context: &str,
-    word: &str,
-    range: core_foundation::base::CFRange,
-    window_loc: isize,
-) -> Option<(SentenceCapture, bool)> {
-    let sel_start_utf16 = find_anchor(context, word, range, window_loc)?;
-    let sel_end_utf16 = sel_start_utf16 + word.encode_utf16().count();
-
-    // 只扩展、不丢弃：选区横跨多个句子时原样录入用户所选文本，不做分句截断。
-    // 典型场景：Chrome PDF 中手动选中跨行的完整句子——PDF 视觉行间的 \n 使
-    // UAX #29（SB4：CR/LF 后强制分句）把整句切为多行碎片，若仍取"与选区起点
-    // 相交的句子"就只会录入第一行，丢弃了用户明确选择的内容
-    if super::sentence::count_intersecting_sentences(context, sel_start_utf16, sel_end_utf16) > 1 {
-        return Some((SentenceCapture::SelectionAsIs(word.trim().to_string()), false));
-    }
-    let (sentence, sent_start, sent_end) =
-        super::sentence::find_sentence_with_range(context, sel_start_utf16, sel_end_utf16)?;
-    let touched_edge = (sent_start == 0 && window_loc > 0) || sent_end == context.len();
-    return Some((SentenceCapture::Expanded(sentence), touched_edge));
-}
-
-/// 在上下文中定位所选文本的 UTF-16 起点（锚点探测，校验门控）。
-///
-/// 浏览器 AXWebArea 等提供方的偏移坐标系存在已知怪癖：AXSelectedTextRange 给出的
-/// 偏移与 AXStringForRange 返回文本的坐标系可能不一致（例如偏移是文档级的、返回
-/// 文本却是块级的）。因此不盲信偏移，按优先级尝试候选锚点：窗口偏移（提供方忠实
-/// 响应请求窗口）→ 文档级偏移（提供方忽略窗口起点、从文档开头返回文本）→ 0
-/// （提供方从选区开始返回）→ 所选文本的唯一出现位置（零次出现无法定位、多次出现
-/// 有歧义，均不采用）。前三种以“该位置的 UTF-16 子串等于所选文本”校验后才采用。
-/// 全部失败返回 None——宁可降级为仅录词，也不切出错误的句子。
-#[cfg(target_os = "macos")]
-fn find_anchor(
-    context: &str,
-    word: &str,
-    range: core_foundation::base::CFRange,
-    window_loc: isize,
-) -> Option<usize> {
-    let context_utf16: Vec<u16> = context.encode_utf16().collect();
-    let word_utf16: Vec<u16> = word.encode_utf16().collect();
-    if word_utf16.is_empty() {
-        return None;
-    }
-    // 校验：candidate 起点的 UTF-16 子串与所选文本逐码元相等
-    let matches_at = |candidate: isize| -> bool {
-        if candidate < 0 {
-            return false;
-        }
-        let start = candidate as usize;
-        return start + word_utf16.len() <= context_utf16.len()
-            && context_utf16[start..start + word_utf16.len()] == word_utf16[..];
-    };
-    for candidate in [range.location - window_loc, range.location, 0] {
-        if matches_at(candidate) {
-            return Some(candidate as usize);
-        }
-    }
-    let mut occurrences = context.match_indices(word);
-    return match (occurrences.next(), occurrences.next()) {
-        (Some((byte_index, _)), None) => Some(context[..byte_index].encode_utf16().count()),
-        _ => None,
-    };
-}
-
 /// 读取焦点元素当前选区的 CFRange（AXSelectedTextRange 属性，UTF-16 码元计）。
-#[cfg(target_os = "macos")]
 fn get_selected_text_range_by_ax(
     focused: &core_foundation::base::CFType,
 ) -> Result<core_foundation::base::CFRange, String> {
@@ -851,7 +743,6 @@ fn get_selected_text_range_by_ax(
 }
 
 /// 用 AXStringForRange 参数化属性读取焦点元素在 range（UTF-16 码元计）内的文本。
-#[cfg(target_os = "macos")]
 fn copy_string_for_range_by_ax(
     focused: &core_foundation::base::CFType,
     range: core_foundation::base::CFRange,
@@ -890,18 +781,79 @@ fn copy_string_for_range_by_ax(
     }
 }
 
-#[cfg(all(test, target_os = "macos"))]
+/// 模拟 Cmd+C 读取剪贴板的 AppleScript：
+/// 备份剪贴板 → 临时静音系统提示音 → 模拟 Cmd+C → 读取剪贴板 → 恢复剪贴板与音量。
+///
+/// 剪贴板备份/恢复是尽力而为的：剪贴板当前内容不是文本（如图片、文件）时
+/// `the clipboard` 读取失败，此时跳过备份与恢复、只做复制读取——牺牲“剪贴板
+/// 无痕”换取回退成功率（代价是此类场景下原剪贴板内容会被复制的文本覆盖）。
+const APPLE_SCRIPT: &str = r#"
+use AppleScript version "2.4"
+use scripting additions
+use framework "Foundation"
+use framework "AppKit"
+
+set savedAlertVolume to alert volume of (get volume settings)
+
+-- Back up clipboard contents (best-effort; fails for non-text clipboard, e.g. images):
+set clipboardSaved to false
+try
+    set savedClipboard to the clipboard
+    set clipboardSaved to true
+end try
+
+set thePasteboard to current application's NSPasteboard's generalPasteboard()
+set theCount to thePasteboard's changeCount()
+
+tell application "System Events"
+    set volume alert volume 0
+end tell
+
+-- Copy selected text to clipboard:
+tell application "System Events" to keystroke "c" using {command down}
+delay 0.1 -- Without this, the clipboard may have stale data.
+
+tell application "System Events"
+    set volume alert volume savedAlertVolume
+end tell
+
+if thePasteboard's changeCount() is theCount then
+    return ""
+end if
+
+set theSelectedText to the clipboard
+
+if clipboardSaved then
+    try
+        set the clipboard to savedClipboard
+    end try
+end if
+
+theSelectedText
+"#;
+
+/// 通过 AppleScript 模拟 Cmd+C 并读取剪贴板，获取当前选中的文本。
+fn get_selected_text_by_applescript() -> Result<String, String> {
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(APPLE_SCRIPT)
+        .output()
+        .map_err(|e| format!("failed to run osascript: {e}"))?;
+    if output.status.success() {
+        let content = String::from_utf8(output.stdout)
+            .map_err(|e| format!("osascript output is not valid utf-8: {e}"))?;
+        return Ok(content.trim().to_string());
+    }
+    let error = String::from_utf8_lossy(&output.stderr).into_owned();
+    return Err(format!("osascript failed: {error}"));
+}
+
+#[cfg(test)]
 mod tests {
     use super::{
-        capture_in_context, find_anchor, find_element_with_selection_by_ax,
-        get_focused_ui_element_by_ax, get_selected_context_by_ax, get_selected_text_by_ax,
-        SentenceCapture, APPLE_SCRIPT,
+        find_element_with_selection_by_ax, get_focused_ui_element_by_ax,
+        get_selected_context_by_ax, get_selected_text_by_ax, APPLE_SCRIPT,
     };
-    use core_foundation::base::CFRange;
-
-    fn range_at(location: isize, length: isize) -> CFRange {
-        CFRange { location, length }
-    }
 
     /// 冒烟测试：FFI 调用路径不应 panic，结果取决于辅助功能权限与当前焦点元素。
     #[test]
@@ -951,154 +903,4 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-
-    /// 锚点候选 1：提供方忠实响应请求窗口（窗口偏移有效）
-    #[test]
-    fn anchor_window_offset() {
-        // 文档 "Hello world. This is a test."，窗口 loc=9，word "This" 在文档偏移 13
-        let context = "ld. This is a te";
-        // 候选 1：13 - 9 = 4，context[4..8] == "This"
-        assert_eq!(find_anchor(context, "This", range_at(13, 4), 9), Some(4));
-    }
-
-    /// 锚点候选 2：提供方忽略窗口起点、从文档开头返回文本（文档级偏移）
-    #[test]
-    fn anchor_document_offset() {
-        let context = "Hello world. This is";
-        // 候选 1（13-9=4）命中 "o wo" 不匹配；候选 2（13）命中 "This"
-        assert_eq!(find_anchor(context, "This", range_at(13, 4), 9), Some(13));
-    }
-
-    /// 锚点候选 3：提供方从选区开始返回文本
-    #[test]
-    fn anchor_selection_start() {
-        let context = "This is a test.";
-        // 候选 1（4）与候选 2（13，越界）均失败；候选 3（0）命中
-        assert_eq!(find_anchor(context, "This", range_at(13, 4), 9), Some(0));
-    }
-
-    /// 锚点候选 4：偏移完全失真时靠唯一出现位置定位；多处出现有歧义返回 None
-    #[test]
-    fn anchor_unique_occurrence() {
-        let context = "jumped over. The fox runs. End.";
-        assert_eq!(
-            find_anchor(context, "fox", range_at(9999, 3), 9000),
-            Some("jumped over. The ".encode_utf16().count())
-        );
-        // 两次出现 → 歧义，不采用（上下文开头放非匹配内容，避免候选 3 先命中）
-        assert_eq!(find_anchor("a fox and fox", "fox", range_at(9999, 3), 9000), None);
-    }
-
-    /// 所选文本不在上下文中：返回 None（降级为仅录词，不切错句）
-    #[test]
-    fn anchor_not_found() {
-        assert_eq!(find_anchor("Hello world.", "zebra", range_at(0, 5), 0), None);
-    }
-
-    /// 含 emoji（UTF-16 代理对）的所选文本：按 UTF-16 码元校验与定位
-    #[test]
-    fn anchor_with_emoji() {
-        // "say " 共 4 个 UTF-16 码元，😀 占 2 个
-        assert_eq!(find_anchor("say 😀 hi.", "😀", range_at(4, 2), 0), Some(4));
-    }
-
-    /// 块级上下文取句（Obsidian 阅读模式场景）：range 是文档级偏移、
-    /// AXStringForRange 只返回段落块，靠锚点探测取到块内完整句子
-    #[test]
-    fn capture_in_block_context() {
-        let context = "First sentence here. The target word is fox.";
-        let (capture, touched_edge) = capture_in_context(context, "fox", range_at(5000, 3), 4000)
-            .expect("should capture");
-        match capture {
-            SentenceCapture::Expanded(sentence) => {
-                assert_eq!(sentence, "The target word is fox.");
-            }
-            _ => panic!("expected Expanded"),
-        }
-        // 句子终点==上下文终点 → 触边（调用方会扩大窗口重试一次）
-        assert!(touched_edge);
-    }
-
-    /// 跨句选择保留原文（只扩展、不丢弃），且不触发触边重试
-    #[test]
-    fn capture_selection_as_is() {
-        let context = "One. Two three. Four.";
-        let word = "Two three. Four"; // 用户手动跨句选择
-        let (capture, touched_edge) = capture_in_context(context, word, range_at(5, 15), 0)
-            .expect("should capture");
-        match capture {
-            SentenceCapture::SelectionAsIs(text) => assert_eq!(text, word),
-            _ => panic!("expected SelectionAsIs"),
-        }
-        assert!(!touched_edge);
-    }
-}
-
-/// 模拟 Cmd+C 读取剪贴板的 AppleScript：
-/// 备份剪贴板 → 临时静音系统提示音 → 模拟 Cmd+C → 读取剪贴板 → 恢复剪贴板与音量。
-///
-/// 剪贴板备份/恢复是尽力而为的：剪贴板当前内容不是文本（如图片、文件）时
-/// `the clipboard` 读取失败，此时跳过备份与恢复、只做复制读取——牺牲“剪贴板
-/// 无痕”换取回退成功率（代价是此类场景下原剪贴板内容会被复制的文本覆盖）。
-#[cfg(target_os = "macos")]
-const APPLE_SCRIPT: &str = r#"
-use AppleScript version "2.4"
-use scripting additions
-use framework "Foundation"
-use framework "AppKit"
-
-set savedAlertVolume to alert volume of (get volume settings)
-
--- Back up clipboard contents (best-effort; fails for non-text clipboard, e.g. images):
-set clipboardSaved to false
-try
-    set savedClipboard to the clipboard
-    set clipboardSaved to true
-end try
-
-set thePasteboard to current application's NSPasteboard's generalPasteboard()
-set theCount to thePasteboard's changeCount()
-
-tell application "System Events"
-    set volume alert volume 0
-end tell
-
--- Copy selected text to clipboard:
-tell application "System Events" to keystroke "c" using {command down}
-delay 0.1 -- Without this, the clipboard may have stale data.
-
-tell application "System Events"
-    set volume alert volume savedAlertVolume
-end tell
-
-if thePasteboard's changeCount() is theCount then
-    return ""
-end if
-
-set theSelectedText to the clipboard
-
-if clipboardSaved then
-    try
-        set the clipboard to savedClipboard
-    end try
-end if
-
-theSelectedText
-"#;
-
-/// 通过 AppleScript 模拟 Cmd+C 并读取剪贴板，获取当前选中的文本。
-#[cfg(target_os = "macos")]
-fn get_selected_text_by_applescript() -> Result<String, String> {
-    let output = std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(APPLE_SCRIPT)
-        .output()
-        .map_err(|e| format!("failed to run osascript: {e}"))?;
-    if output.status.success() {
-        let content = String::from_utf8(output.stdout)
-            .map_err(|e| format!("osascript output is not valid utf-8: {e}"))?;
-        return Ok(content.trim().to_string());
-    }
-    let error = String::from_utf8_lossy(&output.stderr).into_owned();
-    return Err(format!("osascript failed: {error}"));
 }

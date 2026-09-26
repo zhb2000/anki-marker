@@ -126,7 +126,7 @@ impl Config {
         return &self.global_shortcut;
     }
 
-    /// 选词取句：开启后划词只需选中一个单词，自动录入该词所在的整个句子（仅 macOS）
+    /// 选词取句：开启后划词只需选中一个单词，自动录入该词所在的整个句子
     pub fn word_to_sentence(&self) -> bool {
         return self.word_to_sentence;
     }

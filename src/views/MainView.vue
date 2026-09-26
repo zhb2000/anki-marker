@@ -534,10 +534,15 @@ async function initSentenceCapture() {
     }
     try {
         await api.event.listen('sentence-capture-failed', () => {
-            void dialog.message(
-                '获取选中文本失败。\n\n请在“系统设置 → 隐私与安全性 → 辅助功能”中允许本应用，然后重试。',
-                { title: '划词录入失败', kind: 'error' }
-            );
+            // 失败引导按平台给出：macOS 是辅助功能授权问题；Windows 多为目标应用
+            // 不暴露文本（无 TextPattern）或前台窗口以管理员身份运行（UIPI 拦截）；
+            // Linux 多为目标应用未通过 AT-SPI 暴露选区
+            const hint = isMacOS.value
+                ? '请在“系统设置 → 隐私与安全性 → 辅助功能”中允许本应用，然后重试。'
+                : api.os.type() === 'windows'
+                    ? '目标应用可能不支持 UI Automation，或前台窗口正以管理员身份运行（请换用普通权限的窗口重试）。'
+                    : '目标应用可能未通过 AT-SPI 暴露选区（Linux 全局快捷键仅 X11 会话可用）。';
+            void dialog.message(`获取选中文本失败。\n\n${hint}`, { title: '划词录入失败', kind: 'error' });
         });
     } catch (error) {
         console.error(error);
