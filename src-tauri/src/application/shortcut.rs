@@ -227,9 +227,10 @@ pub fn on_shortcut_pressed(app: AppHandle) {
             },
         ) {
             Ok(context) => context,
-            Err(_) => {
+            Err(capture_error) => {
                 // 常见原因：macOS 未授予辅助功能权限；Windows 前台窗口以管理员身份
                 // 运行（UIPI 拦截）；Linux 目标应用未通过 AT-SPI 暴露选区
+                log::warn!("text capture failed: {capture_error}");
                 //
                 // 失败也要弹出主窗口：否则录入失败对用户完全无感知（分不清是没启动、
                 // 卡死还是失败）。先弹窗再 emit，窗口内的前端才能弹出失败提示；

@@ -104,7 +104,18 @@ fn uia_selection() -> Result<IUIAutomationTextRange, String> {
     let element = unsafe { automation.GetFocusedElement() }
         .map_err(|error| format!("failed to get the focused element: {error}"))?;
     let pattern: IUIAutomationTextPattern = unsafe { element.GetCurrentPatternAs(UIA_TextPatternId) }
-        .map_err(|error| format!("the focused element does not support TextPattern: {error}"))?;
+        .map_err(|error| {
+            // 控件不支持某 pattern 时 UIA 返回 S_OK + 空对象，windows-rs 将空对象转错误时
+            // 捡到线程上残留的错误码，报出“操作成功完成 (0x00000000)”这类误导性信息——
+            // 归一化为明确的语义（典型场景：Chromium 的无障碍树尚未被 UIA 客户端激活）
+            if error.code() == ::windows::core::HRESULT(0) {
+                "the focused element does not support TextPattern (returned null; the app's \
+                 accessibility tree may not be materialized yet)"
+                    .to_string()
+            } else {
+                format!("the focused element does not support TextPattern: {error}")
+            }
+        })?;
     let ranges = unsafe { pattern.GetSelection() }
         .map_err(|error| format!("failed to get the text selection: {error}"))?;
     let length = unsafe { ranges.Length() }
@@ -255,8 +266,8 @@ where
 {
     use std::sync::atomic::Ordering;
 
-    /// 轮询次数与间隔（总计约 3 秒）
-    const RETRY_ATTEMPTS: usize = 5;
+    /// 轮询次数与间隔（总计约 6 秒，覆盖 Chromium 首次物化无障碍树的耗时）
+    const RETRY_ATTEMPTS: usize = 10;
     const RETRY_INTERVAL_MS: u64 = 600;
 
     if RETRYING.swap(true, Ordering::SeqCst) {
@@ -265,15 +276,22 @@ where
     std::thread::spawn(move || {
         for attempt in 1..=RETRY_ATTEMPTS {
             std::thread::sleep(std::time::Duration::from_millis(RETRY_INTERVAL_MS));
-            if let Ok(context) = uia_selected_context() {
-                if !context.text.trim().is_empty() {
+            match uia_selected_context() {
+                Ok(context) if !context.text.trim().is_empty() => {
                     log::info!("UIA selection retry succeeded on attempt {attempt}");
                     RETRYING.store(false, Ordering::SeqCst);
                     on_captured(context);
                     return;
                 }
+                Ok(_) => {
+                    log::info!("UIA selection retry attempt {attempt}: empty selection");
+                }
+                Err(error) => {
+                    log::info!("UIA selection retry attempt {attempt}: {error}");
+                }
             }
         }
+        log::info!("UIA selection retry gave up after {RETRY_ATTEMPTS} attempts");
         RETRYING.store(false, Ordering::SeqCst);
     });
 }
@@ -290,6 +308,9 @@ fn bstr_to_string(text: &BSTR) -> Result<String, String> {
 /// 此类场景下原剪贴板内容会被复制的文本覆盖）。
 fn get_selected_text_by_ctrl_c() -> Result<String, String> {
     let backup = clipboard_read_text().ok();
+    if backup.is_none() {
+        log::info!("no text on the clipboard to back up (or the clipboard is busy)");
+    }
     let sequence_before = unsafe { ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };
     send_ctrl_c();
     // 轮询剪贴板序号而非固定 sleep：既快又能区分“复制成功”与“前台应用不理会
@@ -356,12 +377,33 @@ fn wait_clipboard_change(sequence_before: u32) -> Result<(), String> {
     );
 }
 
+/// 打开剪贴板（带有限重试）：剪贴板是全局独占资源，其他程序（剪贴板管理器、
+/// 虚拟机剪贴板共享代理等）可能短暂持有，瞬时打开失败重试几次即可恢复。
+fn open_clipboard() -> Result<(), String> {
+    use ::windows::Win32::System::DataExchange::OpenClipboard;
+
+    const ATTEMPTS: usize = 10;
+    const RETRY_INTERVAL_MS: u64 = 10;
+
+    let mut last_error = String::new();
+    for _ in 0..ATTEMPTS {
+        match unsafe { OpenClipboard(None) } {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                last_error = error.to_string();
+                std::thread::sleep(std::time::Duration::from_millis(RETRY_INTERVAL_MS));
+            }
+        }
+    }
+    return Err(format!("failed to open the clipboard: {last_error}"));
+}
+
 /// 读取剪贴板中的 Unicode 文本；剪贴板被占用或内容非文本时返回 Err。
 fn clipboard_read_text() -> Result<String, String> {
-    use ::windows::Win32::System::DataExchange::{CloseClipboard, OpenClipboard};
+    use ::windows::Win32::System::DataExchange::CloseClipboard;
 
     unsafe {
-        OpenClipboard(None).map_err(|error| format!("failed to open the clipboard: {error}"))?;
+        open_clipboard()?;
         let result = read_clipboard_text_inner();
         let _ = CloseClipboard();
         return result;
@@ -399,10 +441,10 @@ fn read_clipboard_text_inner() -> Result<String, String> {
 /// 把文本写入剪贴板（先清空；SetClipboardData 成功后内存所有权移交系统，
 /// 不得再 GlobalFree/GlobalUnlock）。
 fn clipboard_write_text(text: &str) -> Result<(), String> {
-    use ::windows::Win32::System::DataExchange::{CloseClipboard, OpenClipboard};
+    use ::windows::Win32::System::DataExchange::CloseClipboard;
 
     unsafe {
-        OpenClipboard(None).map_err(|error| format!("failed to open the clipboard: {error}"))?;
+        open_clipboard()?;
         let result = write_clipboard_text_inner(text);
         let _ = CloseClipboard();
         return result;
