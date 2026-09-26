@@ -62,9 +62,16 @@ pub fn get_selected_context(
         }
         Err(error) => {
             // UIA 失败：立即回退 Ctrl+C 保证录入不阻塞；同时启动后台重试——
-            // Chromium 系应用的无障碍树在被 UIA 客户端查询后按需物化，树就绪后补发句子
-            log::info!("spawning background UIA selection retry");
-            spawn_selection_retry(on_retry_captured);
+            // Chromium 系应用的无障碍树在被 UIA 客户端查询后按需物化，树就绪后补发句子。
+            // 重试锁定当前前台窗口的 HWND 而不是跟随焦点：随后的回退结果/失败提示
+            // 会弹出本应用窗口夺走焦点，跟随焦点会把查询打到我们自己的窗口上
+            let hwnd = unsafe { ::windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+            if hwnd.0.is_null() {
+                log::info!("no foreground window, skipping the background UIA selection retry");
+            } else {
+                log::info!("spawning background UIA selection retry");
+                spawn_selection_retry(hwnd, on_retry_captured);
+            }
             log::warn!("UIA path failed, falling back to simulated Ctrl+C: {error}");
         }
     }
@@ -97,10 +104,14 @@ impl Drop for ComGuard {
     }
 }
 
+/// 创建 UIA 客户端实例（CUIAutomation 进程内 COM 服务器）。
+fn uia_automation() -> Result<IUIAutomation, String> {
+    return unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }
+        .map_err(|error| format!("failed to create CUIAutomation: {error}"));
+}
+
 /// 读取当前持有选区的 TextRange：焦点元素 → TextPattern → 当前选区。
-fn uia_selection() -> Result<IUIAutomationTextRange, String> {
-    let automation: IUIAutomation = unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }
-        .map_err(|error| format!("failed to create CUIAutomation: {error}"))?;
+fn uia_selection(automation: &IUIAutomation) -> Result<IUIAutomationTextRange, String> {
     let element = unsafe { automation.GetFocusedElement() }
         .map_err(|error| format!("failed to get the focused element: {error}"))?;
     let pattern: IUIAutomationTextPattern = unsafe { element.GetCurrentPatternAs(UIA_TextPatternId) }
@@ -116,21 +127,88 @@ fn uia_selection() -> Result<IUIAutomationTextRange, String> {
                 format!("the focused element does not support TextPattern: {error}")
             }
         })?;
+    return text_pattern_selection(&pattern);
+}
+
+/// 从 TextPattern 取当前选区（第一个非空选区范围）。
+fn text_pattern_selection(
+    pattern: &IUIAutomationTextPattern,
+) -> Result<IUIAutomationTextRange, String> {
     let ranges = unsafe { pattern.GetSelection() }
         .map_err(|error| format!("failed to get the text selection: {error}"))?;
     let length = unsafe { ranges.Length() }
         .map_err(|error| format!("failed to get the selection range count: {error}"))?;
     if length <= 0 {
-        return Err("the focused element has no text selection".to_string());
+        return Err("the element has no text selection".to_string());
     }
     return unsafe { ranges.GetElement(0) }
         .map_err(|error| format!("failed to get the first selection range: {error}"));
 }
 
+/// 在指定窗口内找持有非空选区的 TextRange（后台重试用，不跟随系统焦点——
+/// 失败/成功弹窗会夺走焦点，跟随焦点会把查询打到我们自己的窗口上）：
+/// 窗口元素 → 后代中所有支持 TextPattern 的元素 → 第一个持有非空选区的。
+fn uia_selection_in_window(
+    automation: &IUIAutomation,
+    hwnd: ::windows::Win32::Foundation::HWND,
+) -> Result<IUIAutomationTextRange, String> {
+    use ::windows::Win32::UI::Accessibility::{
+        TreeScope_Descendants, UIA_IsTextPatternAvailablePropertyId,
+    };
+
+    let element = unsafe { automation.ElementFromHandle(hwnd) }
+        .map_err(|error| format!("failed to get the element for the window: {error}"))?;
+    let condition = unsafe {
+        automation.CreatePropertyCondition(UIA_IsTextPatternAvailablePropertyId, &variant_true())
+    }
+    .map_err(|error| format!("failed to create the TextPattern property condition: {error}"))?;
+    let candidates = unsafe { element.FindAll(TreeScope_Descendants, &condition) }
+        .map_err(|error| format!("failed to search the window for TextPattern elements: {error}"))?;
+    // 遍历上限：防御病态提供方返回巨量元素（正常窗口只有少数文本控件）
+    let count = unsafe { candidates.Length() }.unwrap_or(0).min(64);
+    for index in 0..count {
+        let Ok(candidate) = (unsafe { candidates.GetElement(index) }) else { continue };
+        let Ok(pattern) = (unsafe {
+            candidate.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
+        }) else {
+            continue;
+        };
+        let Ok(range) = text_pattern_selection(&pattern) else { continue };
+        let non_empty = unsafe { range.GetText(-1) }
+            .ok()
+            .and_then(|text| bstr_to_string(&text).ok())
+            .is_some_and(|text| !text.trim().is_empty());
+        if non_empty {
+            return Ok(range);
+        }
+    }
+    return Err("no element with a text selection found in the window".to_string());
+}
+
+/// 构造 VT_BOOL = true 的 VARIANT（windows crate 未提供 From<bool> 转换）。
+fn variant_true() -> ::windows::Win32::System::Variant::VARIANT {
+    use ::windows::Win32::Foundation::VARIANT_BOOL;
+    use ::windows::Win32::System::Variant::{
+        VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_BOOL,
+    };
+
+    return VARIANT {
+        Anonymous: VARIANT_0 {
+            Anonymous: std::mem::ManuallyDrop::new(VARIANT_0_0 {
+                vt: VT_BOOL,
+                wReserved1: 0,
+                wReserved2: 0,
+                wReserved3: 0,
+                Anonymous: VARIANT_0_0_0 { boolVal: VARIANT_BOOL(-1) },
+            }),
+        },
+    };
+}
+
 /// 通过 UIA 读取当前焦点控件中的选中文本。
 fn uia_selected_text() -> Result<String, String> {
     let _com = ComGuard::init()?;
-    let range = uia_selection()?;
+    let range = uia_selection(&uia_automation()?)?;
     let text = unsafe { range.GetText(-1) }
         .map_err(|error| format!("failed to get the selected text: {error}"))?;
     return bstr_to_string(&text);
@@ -141,7 +219,12 @@ fn uia_selected_text() -> Result<String, String> {
 /// 拿到词但取句链路失败时降级返回 {词原文, None}；连词都取不到时才返回 Err。
 fn uia_selected_context() -> Result<SelectedContext, String> {
     let _com = ComGuard::init()?;
-    let range = uia_selection()?;
+    let range = uia_selection(&uia_automation()?)?;
+    return context_from_range(&range);
+}
+
+/// 拿到持有选区的 TextRange 后的收尾：读词 → 取句链路 → 失败降级为仅录词原文。
+fn context_from_range(range: &IUIAutomationTextRange) -> Result<SelectedContext, String> {
     let word = bstr_to_string(
         &unsafe { range.GetText(-1) }
             .map_err(|error| format!("failed to get the selected text: {error}"))?,
@@ -150,7 +233,7 @@ fn uia_selected_context() -> Result<SelectedContext, String> {
         // 与 get_selected_text 的空串语义一致：由调用方回退 Ctrl+C
         return Ok(SelectedContext { text: word, word: None });
     }
-    return Ok(match find_sentence_for_word(&range, &word) {
+    return Ok(match find_sentence_for_word(range, &word) {
         Ok(SentenceCapture::Expanded(sentence)) => SelectedContext {
             text: sentence,
             word: Some(word.trim().to_string()),
@@ -258,9 +341,10 @@ fn find_sentence_for_word(
 static RETRYING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// 后台重试：Chromium 系应用在 UIA 客户端查询时才按需物化无障碍树，首次查询
-/// 可能失败。按固定间隔轮询重跑 UIA 链路（焦点元素重新查询，无需句柄），
-/// 取到非空选区后经 `on_captured` 补发完整结果；超时放弃。
-fn spawn_selection_retry<F>(on_captured: F)
+/// 可能失败。按固定间隔轮询目标窗口（锁定 HWND 重跑取句链路，不跟随系统焦点——
+/// 失败/成功弹窗会夺走焦点），取到非空选区后经 `on_captured` 补发完整结果；
+/// 超时放弃。
+fn spawn_selection_retry<F>(hwnd: ::windows::Win32::Foundation::HWND, on_captured: F)
 where
     F: FnOnce(SelectedContext) + Send + 'static,
 {
@@ -273,10 +357,19 @@ where
     if RETRYING.swap(true, Ordering::SeqCst) {
         return;
     }
+    // HWND 是窗口句柄（实为数值，不含可析构资源），可安全跨线程传递
+    let hwnd_raw = hwnd.0 as usize;
     std::thread::spawn(move || {
+        let hwnd = ::windows::Win32::Foundation::HWND(hwnd_raw as *mut std::ffi::c_void);
         for attempt in 1..=RETRY_ATTEMPTS {
             std::thread::sleep(std::time::Duration::from_millis(RETRY_INTERVAL_MS));
-            match uia_selected_context() {
+            let result = (|| {
+                let _com = ComGuard::init()?;
+                let automation = uia_automation()?;
+                let range = uia_selection_in_window(&automation, hwnd)?;
+                return context_from_range(&range);
+            })();
+            match result {
                 Ok(context) if !context.text.trim().is_empty() => {
                     log::info!("UIA selection retry succeeded on attempt {attempt}");
                     RETRYING.store(false, Ordering::SeqCst);
@@ -325,11 +418,16 @@ fn get_selected_text_by_ctrl_c() -> Result<String, String> {
     return Ok(text);
 }
 
-/// 通过 SendInput 注入一次 Ctrl+C（按下 Ctrl → 按下 C → 抬起 C → 抬起 Ctrl）。
+/// 通过 SendInput 注入一次 Ctrl+C。
+///
+/// 全局快捷键触发时用户往往还物理按着修饰键（如 Ctrl+Shift+S 的 Ctrl 和 Shift）；
+/// 先注入各修饰键的抬起事件把组合“清空”，否则注入的 Ctrl+C 会与物理按住的
+/// Shift 叠加成 Ctrl+Shift+C（浏览器里是打开开发者工具而非复制）。用户随后
+/// 松开物理按键产生的多余抬起事件无害。
 fn send_ctrl_c() {
     use ::windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-        VK_C, VK_CONTROL, VIRTUAL_KEY,
+        VK_C, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VIRTUAL_KEY,
     };
 
     let key_input = |vk: VIRTUAL_KEY, key_up: bool| INPUT {
@@ -345,6 +443,11 @@ fn send_ctrl_c() {
         },
     };
     let inputs = [
+        key_input(VK_SHIFT, true),
+        key_input(VK_MENU, true),
+        key_input(VK_LWIN, true),
+        key_input(VK_RWIN, true),
+        key_input(VK_CONTROL, true),
         key_input(VK_CONTROL, false),
         key_input(VK_C, false),
         key_input(VK_C, true),
