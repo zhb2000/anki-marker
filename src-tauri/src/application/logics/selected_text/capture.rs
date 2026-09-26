@@ -47,6 +47,28 @@ pub fn capture_in_context(
     }
     let (sentence, sent_start, sent_end) =
         find_sentence_with_range(context, sel_start_utf16, sel_end_utf16)?;
+    // 不变量守门：切出的句子必须包含所选文本——锚点经逐码元校验、句子围绕选区
+    // 切出，数学上必然成立；若不成立，说明读取间隙提供方的文本模型发生了偏移
+    // （动态页面）或实现存在缺陷。宁可降级为仅录词（返回 None），也不录入一句
+    // 不含所选词的错句；附完整证据便于定位
+    let word_trimmed = word.trim();
+    if !sentence.contains(word_trimmed) {
+        let excerpt_start = sel_start_utf16.saturating_sub(60);
+        let excerpt: String = {
+            // 按 UTF-16 偏移截取锚点周边片段（手动换算，越界夹取）
+            let context_utf16: Vec<u16> = context.encode_utf16().collect();
+            let start = excerpt_start.min(context_utf16.len());
+            let end = (sel_end_utf16 + 60).min(context_utf16.len());
+            String::from_utf16_lossy(&context_utf16[start..end])
+        };
+        log::warn!(
+            "captured sentence does not contain the selected word, degrading to word-only \
+             (word {word_trimmed:?}, sentence {sentence:?}, selection [{sel_start_utf16}, \
+             {sel_end_utf16}), context {} utf16 units, excerpt around the anchor: {excerpt:?})",
+            context.encode_utf16().count()
+        );
+        return None;
+    }
     let touched_edge = (sent_start == 0 && window_loc > 0) || sent_end == context.len();
     return Some((SentenceCapture::Expanded(sentence), touched_edge));
 }
