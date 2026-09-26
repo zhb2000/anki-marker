@@ -20,7 +20,7 @@ toml_edit = "0.25"
 notify = "8.0"
 notify-debouncer-full = "0.5"
 tauri = { version = "2.11", features = ["tray-icon"] }
-tauri-plugin-http = { version = "2.5", features = ["unsafe-headers"] }
+tauri-plugin-http = { version = "2.6", features = ["unsafe-headers"] }
 tauri-plugin-dialog = "2.7"
 tauri-plugin-os = "2.3"
 tauri-plugin-clipboard-manager = "2.3"

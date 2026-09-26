@@ -27,7 +27,6 @@
   "mainBinaryName": "Anki 划词助手",
   "version": "../package.json",
   "identifier": "com.zhb2000.anki-marker",
-  "plugins": {},
   "app": {
     "withGlobalTauri": false,
     "windows": [
