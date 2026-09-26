@@ -71,6 +71,7 @@ export default tseslint.config(
             'src-tauri',
             'vite.config.ts',
             'build-for-windows.js',
+            'build-tray-icons.mjs',
         ],
     },
 );

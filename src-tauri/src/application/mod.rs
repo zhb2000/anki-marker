@@ -6,3 +6,6 @@ pub mod logics;
 pub mod menubar;
 pub mod shortcut;
 pub mod window;
+/// Windows 侧托盘图标平台探测：任务栏深浅、图标尺寸、深浅变更监听
+#[cfg(target_os = "windows")]
+pub mod windows_tray;

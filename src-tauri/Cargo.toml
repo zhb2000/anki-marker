@@ -50,6 +50,18 @@ objc2-app-kit = { version = "0.3", features = ["std", "NSColor", "NSWindow", "NS
 objc2-web-kit = { version = "0.3", features = ["std", "WKWebView", "objc2-app-kit"] }
 objc2-foundation = { version = "0.3", features = ["std", "NSProcessInfo"] }
 
+# 托盘图标跟随系统主题（Windows）：读 HKCU\...\Themes\Personalize\SystemUsesLightTheme
+# 判断任务栏深浅，并用 SetWindowSubclass 监听 WM_SETTINGCHANGE 实时换图。
+# 注意 Tauri/tao 的 App::theme() 读的是 AppsUseLightTheme（应用模式），与任务栏不同，不可复用。
+# 版本与依赖树中 tauri 所用保持一致，确保 HWND 等类型可互通
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
 # DO NOT REMOVE!!

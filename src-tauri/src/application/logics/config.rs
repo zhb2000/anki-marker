@@ -23,6 +23,36 @@ impl BackgroundIcon {
     }
 }
 
+/// 托盘图标样式（Windows/Linux 生效）
+///
+/// macOS 不参与：其菜单栏图标为 template 图标，由系统按菜单栏明暗与高亮自动着色，
+/// 配置值在 macOS 上被忽略（设置页也不展示该项）。
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TrayIconStyle {
+    /// 跟随系统：Windows 读任务栏深浅（SystemUsesLightTheme）自动选白/黑单色图标；
+    /// Linux 无可靠的托盘底色检测手段，视作 Color（其默认值即 Color）
+    Auto,
+    /// 彩色应用图标（浅色/深色托盘底均可辨识）
+    Color,
+    /// 白色单色图标
+    White,
+    /// 黑色单色图标
+    Black,
+}
+
+impl TrayIconStyle {
+    /// 对应 config.toml 中的字符串值
+    pub fn as_toml_str(self) -> &'static str {
+        return match self {
+            TrayIconStyle::Auto => "auto",
+            TrayIconStyle::Color => "color",
+            TrayIconStyle::White => "white",
+            TrayIconStyle::Black => "black",
+        };
+    }
+}
+
 /// 主题模式：跟随系统 / 浅色 / 深色（暗色样式由前端根据此模式驱动）
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -33,9 +63,7 @@ pub enum ThemeMode {
     Light,
     /// 深色
     Dark,
-}
-
-impl ThemeMode {
+}impl ThemeMode {
     /// 对应 config.toml 中的字符串值
     pub fn as_toml_str(self) -> &'static str {
         return match self {
@@ -60,6 +88,7 @@ pub struct Config {
     word_to_sentence: bool,
     keep_running_on_close: bool,
     background_icon: BackgroundIcon,
+    tray_icon_style: TrayIconStyle,
     llm_enabled: bool,
     llm_base_url: String,
     llm_api_key: String,
@@ -82,6 +111,7 @@ pub struct PartialConfig {
     word_to_sentence: Option<bool>,
     keep_running_on_close: Option<bool>,
     background_icon: Option<BackgroundIcon>,
+    tray_icon_style: Option<TrayIconStyle>,
     llm_enabled: Option<bool>,
     llm_base_url: Option<String>,
     llm_api_key: Option<String>,
@@ -110,6 +140,13 @@ impl Config {
     pub fn background_icon(&self) -> BackgroundIcon {
         return self.background_icon;
     }
+
+    /// 托盘图标样式（仅 Windows/Linux 生效；macOS 的菜单栏图标由系统 template 机制自动
+    /// 适配明暗，该设置项在 macOS 上无意义，故访问器也只在非 macOS 编译）
+    #[cfg(not(target_os = "macos"))]
+    pub fn tray_icon_style(&self) -> TrayIconStyle {
+        return self.tray_icon_style;
+    }
 }
 
 impl Default for Config {
@@ -127,6 +164,7 @@ impl Default for Config {
             word_to_sentence: true,
             keep_running_on_close: true,
             background_icon: BackgroundIcon::MenuBar,
+            tray_icon_style: TrayIconStyle::Auto,
             llm_enabled: false,
             llm_base_url: String::new(),
             llm_api_key: String::new(),
@@ -224,6 +262,14 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             Some("none") => BackgroundIcon::None,
             _ => BackgroundIcon::MenuBar,
         };
+        // 托盘图标样式为后加的键，老配置文件中没有；缺省或非法值回退跟随系统
+        // （该值带平台差异：auto 在 Linux 上等同 color，macOS 一律忽略）
+        let tray_icon_style = match doc.get("tray-icon-style").and_then(|v| v.as_str()) {
+            Some("color") => TrayIconStyle::Color,
+            Some("white") => TrayIconStyle::White,
+            Some("black") => TrayIconStyle::Black,
+            _ => TrayIconStyle::Auto,
+        };
         // AI 优选释义相关为后加的键，老配置文件中没有这些键，必须带缺省回退
         let llm_enabled = doc
             .get("llm-enabled")
@@ -266,6 +312,7 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             word_to_sentence,
             keep_running_on_close,
             background_icon,
+            tray_icon_style,
             llm_enabled,
             llm_base_url,
             llm_api_key,
@@ -317,6 +364,9 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
         if let Some(background_icon) = modified.background_icon {
             doc["background-icon"] = toml_edit::value(background_icon.as_toml_str());
         }
+        if let Some(tray_icon_style) = modified.tray_icon_style {
+            doc["tray-icon-style"] = toml_edit::value(tray_icon_style.as_toml_str());
+        }
         if let Some(llm_enabled) = modified.llm_enabled {
             doc["llm-enabled"] = toml_edit::value(llm_enabled);
         }
@@ -345,3 +395,41 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
     }
     return inner(config_path.as_ref(), modified);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 配置模板必须能被 read_config 正确解析。
+    ///
+    /// 新增键的键名在三处出现（模板、read_config、commit_config），写错任一处都会**静默**
+    /// 回退到缺省值而不报错；此处以真实模板为输入做回归，锁住模板与解析逻辑的一致性。
+    #[test]
+    fn reads_shipped_config_template() {
+        let path = std::env::temp_dir().join("anki-marker-test-config-template.toml");
+        std::fs::write(&path, include_str!("../../../resources/config-template.toml"))
+            .expect("failed to write the temporary config file");
+        let config = read_config(&path).expect("failed to parse the shipped config template");
+        assert_eq!(config.tray_icon_style, TrayIconStyle::Auto);
+        assert_eq!(config.background_icon, BackgroundIcon::MenuBar);
+        assert_eq!(config.theme, ThemeMode::System);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// 前端以 camelCase 键名提交的托盘图标样式必须能落盘并被重新读出。
+    /// （前端 JSON 键名 → PartialConfig 字段 → toml 键名 → read_config，任一环节写错都会
+    /// 表现为“用户选了白色/黑色但托盘图标不变”）
+    #[test]
+    fn commits_and_reads_tray_icon_style() {
+        let path = std::env::temp_dir().join("anki-marker-test-config-commit.toml");
+        std::fs::write(&path, include_str!("../../../resources/config-template.toml"))
+            .expect("failed to write the temporary config file");
+        let modified: PartialConfig =
+            serde_json::from_str(r#"{"trayIconStyle":"white"}"#).expect("failed to parse the payload");
+        commit_config(&path, modified).expect("failed to commit the config");
+        let config = read_config(&path).expect("failed to read back the config");
+        assert_eq!(config.tray_icon_style, TrayIconStyle::White);
+        let _ = std::fs::remove_file(&path);
+    }
+}
+

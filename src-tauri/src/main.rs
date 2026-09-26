@@ -124,6 +124,10 @@ fn main() {
             // Windows 托盘图标左键点击打开主窗口（macOS/Linux 无此交互，见 menubar.rs）
             #[cfg(target_os = "windows")]
             application::menubar::register_tray_icon_event_handler(app.handle());
+            // Windows：监听任务栏（系统「Windows 模式」）深浅变化，托盘图标跟随系统时实时换图。
+            // 需在窗口创建之后挂载（config 中的窗口在 setup 之前已创建）
+            #[cfg(target_os = "windows")]
+            application::menubar::install_tray_theme_listener(app.handle());
 
             // 静默启动判定：
             // - macOS：AppleScript 登录项带 hidden 标志拉起时，进程自启动起即处于

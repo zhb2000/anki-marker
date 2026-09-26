@@ -8,6 +8,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "build:tray-icons": "node build-tray-icons.mjs",
     "lint": "eslint ."
   },
   "dependencies": {
@@ -28,6 +29,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@resvg/resvg-js": "^2.6.2",
     "@tauri-apps/cli": "~2.11.4",
     "@types/semver": "^7.8.0",
     "@vitejs/plugin-vue": "^6.0.8",

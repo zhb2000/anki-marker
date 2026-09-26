@@ -20,6 +20,11 @@
 //! （点击事件经 AppHandle::on_tray_icon_event 处理）；macOS 左键即弹菜单；Linux
 //! 依赖的 appindicator 托盘不支持点击事件，任何点击均由系统弹出菜单。
 //!
+//! 托盘图标的样式由配置项 `tray-icon-style` 决定：Windows 为「单色跟随系统/彩色/白/黑」，
+//! Linux 为「彩色/白/黑」，macOS 不参与（其菜单栏图标为 template 图标，由系统按菜单栏
+//! 明暗与高亮自动着色）。Windows 的「跟随系统」要判断的是**任务栏**深浅，见
+//! super::windows_tray——它与 Tauri 的 App::theme()（读应用深浅）并非同一个值。
+//!
 //! Dock 图标菜单：Tauri/tao 未提供 Dock 菜单 API，通过 ObjC runtime 在运行时向
 //! tao 的 NSApplication 代理类注入 `applicationDockMenu:` 方法实现（见
 //! install_dock_menu）；注入失败仅记录日志并优雅降级（无 Dock 菜单，其余功能不受影响）。
@@ -31,6 +36,10 @@ use tauri::{AppHandle, Manager};
 use super::config::ConfigPath;
 use super::logics;
 use super::logics::config::{BackgroundIcon, Config};
+#[cfg(not(target_os = "macos"))]
+use super::logics::config::TrayIconStyle;
+#[cfg(not(target_os = "macos"))]
+use std::sync::Mutex;
 
 /// 读取配置文件；读取失败时回退到与配置模板一致的默认值。
 fn read_config_or_default(app: &AppHandle) -> Config {
@@ -108,17 +117,139 @@ fn apply_dock_and_tray(app: &AppHandle, dock_visible: bool, tray_visible: bool) 
     update_tray(app, tray_visible);
 }
 
-/// 托盘图标的渲染图：macOS 使用单色模板图标（纯黑+alpha，源文件
-/// icons/tray/tray-icon.svg），设为模板后由系统自动适配菜单栏明暗模式与高亮反色，
-/// 无需为深色模式单独出图；Windows/Linux 使用彩色应用图标（浅色/深色任务栏均可辨识）。
+/// 托盘图标的渲染图（仅 macOS）：单色模板图标（纯黑+alpha，与 Windows/Linux 同源，
+/// 由 build-tray-icons.mjs 从 icons/tray/tray-icon-mono.svg 按 36px 导出），
+/// 设为模板后由系统自动适配菜单栏明暗模式与高亮反色，无需为深色模式单独出图。
 #[cfg(target_os = "macos")]
 fn tray_icon_image() -> tauri::image::Image<'static> {
     tauri::include_image!("icons/tray/tray-icon.png")
 }
 
+/// 托盘图标的实际形态：配置的 TrayIconStyle 按平台能力落地后的结果
 #[cfg(not(target_os = "macos"))]
-fn tray_icon_image() -> tauri::image::Image<'static> {
-    tauri::include_image!("icons/32x32.png")
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrayIconShape {
+    /// 彩色应用图标（浅色/深色底均可辨识）
+    Color,
+    /// 白色单色图标（深色底）
+    MonoWhite,
+    /// 黑色单色图标（浅色底）
+    MonoBlack,
+}
+
+/// 解析应当使用的托盘图标形态（Windows）。
+/// auto：按任务栏深浅决定——浅色任务栏配黑图、深色任务栏配白图。
+#[cfg(target_os = "windows")]
+fn resolve_tray_icon_shape(app: &AppHandle) -> TrayIconShape {
+    return match read_config_or_default(app).tray_icon_style() {
+        TrayIconStyle::Auto => match super::windows_tray::taskbar_is_dark() {
+            true => TrayIconShape::MonoWhite,
+            false => TrayIconShape::MonoBlack,
+        },
+        TrayIconStyle::Color => TrayIconShape::Color,
+        TrayIconStyle::White => TrayIconShape::MonoWhite,
+        TrayIconStyle::Black => TrayIconShape::MonoBlack,
+    };
+}
+
+/// 解析应当使用的托盘图标形态（Linux）。
+/// auto：Linux 无可靠的托盘底色检测手段（面板配色随主题/发行版而异，单色图在相反底色
+/// 上会直接不可见），故等同 Color；深色面板需用户显式选择白色。
+#[cfg(target_os = "linux")]
+fn resolve_tray_icon_shape(app: &AppHandle) -> TrayIconShape {
+    return match read_config_or_default(app).tray_icon_style() {
+        TrayIconStyle::Auto | TrayIconStyle::Color => TrayIconShape::Color,
+        TrayIconStyle::White => TrayIconShape::MonoWhite,
+        TrayIconStyle::Black => TrayIconShape::MonoBlack,
+    };
+}
+
+/// 托盘图标位图尺寸：Windows 按系统小图标尺寸（随 DPI）选档；Linux 的图标由宿主面板
+/// 自行缩放到面板尺寸，固定用 32 档。
+#[cfg(target_os = "windows")]
+fn tray_icon_pixel_size() -> u32 {
+    return super::windows_tray::tray_icon_pixel_size();
+}
+
+#[cfg(target_os = "linux")]
+fn tray_icon_pixel_size() -> u32 {
+    return 32;
+}
+
+/// 按形态与位图尺寸取托盘图标（Windows/Linux）：单色稿按 DPI 出 16/20/24/32 四档，
+/// 彩色仅有 32 一档（由系统缩放）。Linux 恒以 32 档调用（尺寸由宿主面板缩放）。
+#[cfg(not(target_os = "macos"))]
+fn tray_icon_image(shape: TrayIconShape, size: u32) -> tauri::image::Image<'static> {
+    return match (shape, size) {
+        (TrayIconShape::Color, _) => tauri::include_image!("icons/32x32.png"),
+        (TrayIconShape::MonoWhite, 16) => tauri::include_image!("icons/tray/mono-white-16.png"),
+        (TrayIconShape::MonoWhite, 20) => tauri::include_image!("icons/tray/mono-white-20.png"),
+        (TrayIconShape::MonoWhite, 24) => tauri::include_image!("icons/tray/mono-white-24.png"),
+        (TrayIconShape::MonoWhite, _) => tauri::include_image!("icons/tray/mono-white-32.png"),
+        (TrayIconShape::MonoBlack, 16) => tauri::include_image!("icons/tray/mono-black-16.png"),
+        (TrayIconShape::MonoBlack, 20) => tauri::include_image!("icons/tray/mono-black-20.png"),
+        (TrayIconShape::MonoBlack, 24) => tauri::include_image!("icons/tray/mono-black-24.png"),
+        (TrayIconShape::MonoBlack, _) => tauri::include_image!("icons/tray/mono-black-32.png"),
+    };
+}
+
+/// 已应用的托盘图标（形态 + 位图尺寸）。
+///
+/// 未变化时不重复调用 set_icon：一次主题切换会广播多条 WM_SETTINGCHANGE，靠比对
+/// 天然去抖；也避免系统深浅实际未变时做无谓的 Shell_NotifyIcon 调用。
+#[cfg(not(target_os = "macos"))]
+static APPLIED_TRAY_ICON: Mutex<Option<(TrayIconShape, u32)>> = Mutex::new(None);
+
+/// 重新应用托盘图标：配置变更或系统设置（深浅/缩放）变化后调用。
+/// 形态与尺寸均未变化（或托盘尚未创建）时不动作。
+#[cfg(not(target_os = "macos"))]
+pub fn refresh_tray_icon(app: &AppHandle) {
+    let Some(tray) = app.tray_by_id("main") else {
+        // 托盘尚未创建：创建时会按当时状态选图，无需处理
+        return;
+    };
+    let shape = resolve_tray_icon_shape(app);
+    let size = tray_icon_pixel_size();
+    if last_applied_tray_icon() == Some((shape, size)) {
+        return;
+    }
+    // 先记账再换图：万一 set_icon 期间窗口过程被重入，可避免重复换图陷入递归
+    set_last_applied_tray_icon((shape, size));
+    if let Err(error) = tray.set_icon(Some(tray_icon_image(shape, size))) {
+        // 失败则清除记录，让后续刷新仍会重试
+        clear_last_applied_tray_icon();
+        log::warn!("failed to update the tray icon: {error}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn last_applied_tray_icon() -> Option<(TrayIconShape, u32)> {
+    return match APPLIED_TRAY_ICON.lock() {
+        Ok(guard) => *guard,
+        Err(_) => None,
+    };
+}
+
+/// 记录已应用的图标形态（托盘创建时由 update_tray 调用）
+#[cfg(not(target_os = "macos"))]
+fn set_last_applied_tray_icon(key: (TrayIconShape, u32)) {
+    if let Ok(mut guard) = APPLIED_TRAY_ICON.lock() {
+        *guard = Some(key);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clear_last_applied_tray_icon() {
+    if let Ok(mut guard) = APPLIED_TRAY_ICON.lock() {
+        *guard = None;
+    }
+}
+
+/// 安装系统设置变更监听（仅 Windows）：任务栏深浅或显示缩放变化时刷新托盘图标。
+/// 需在窗口创建之后调用（见 main.rs setup）。
+#[cfg(target_os = "windows")]
+pub fn install_tray_theme_listener(app: &AppHandle) {
+    super::windows_tray::install_taskbar_theme_listener(app, refresh_tray_icon);
 }
 
 /// 左键单击托盘图标是否弹出菜单：
@@ -152,6 +283,9 @@ fn update_tray(app: &AppHandle, tray_visible: bool) {
                 }
             }
         }
+        // 图标样式也可能已变化（配置热更新会走到这里）
+        #[cfg(not(target_os = "macos"))]
+        refresh_tray_icon(app);
         return;
     }
     // 托盘不存在且无需显示：无事可做
@@ -166,18 +300,27 @@ fn update_tray(app: &AppHandle, tray_visible: bool) {
             return;
         }
     };
+    // 图标形态与位图尺寸：Windows 的「跟随系统」需读任务栏深浅，并按 DPI 选尺寸档
+    #[cfg(not(target_os = "macos"))]
+    let (icon_shape, icon_size) = (resolve_tray_icon_shape(app), tray_icon_pixel_size());
     // 菜单事件由 register_menu_event_handler 在应用级统一处理（托盘与 Dock 菜单共用）
     let builder = tauri::tray::TrayIconBuilder::with_id("main")
         .tooltip("Anki 划词助手")
         .menu(&menu)
-        .icon(tray_icon_image())
         .show_menu_on_left_click(show_menu_on_left_click());
-    // macOS 托盘使用单色模板图标（纯黑+alpha），设为模板后由系统自动适配
-    // 菜单栏明暗模式与高亮反色，无需为深色模式单独出图
+    // macOS：单色模板图标（纯黑+alpha），设为模板后由系统自动适配菜单栏明暗与高亮反色
     #[cfg(target_os = "macos")]
-    let builder = builder.icon_as_template(true);
-    if let Err(error) = builder.build(app) {
-        log::warn!("failed to build tray icon: {error}");
+    let builder = builder.icon(tray_icon_image()).icon_as_template(true);
+    // Windows/Linux：按配置样式选图（彩色/白单色/黑单色）
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.icon(tray_icon_image(icon_shape, icon_size));
+    match builder.build(app) {
+        // 记录已应用的图标，供后续主题/配置变化时比对是否需要换图
+        #[cfg(not(target_os = "macos"))]
+        Ok(_) => set_last_applied_tray_icon((icon_shape, icon_size)),
+        #[cfg(target_os = "macos")]
+        Ok(_) => {}
+        Err(error) => log::warn!("failed to build tray icon: {error}"),
     }
 }
 

@@ -13,6 +13,7 @@ export interface ConfigModel {
     wordToSentence: boolean;
     keepRunningOnClose: boolean;
     backgroundIcon: 'dock' | 'menu-bar' | 'none';
+    trayIconStyle: 'auto' | 'color' | 'white' | 'black';
     llmEnabled: boolean;
     llmBaseUrl: string;
     llmApiKey: string;
@@ -21,7 +22,7 @@ export interface ConfigModel {
     llmReasoningEffort: string;
 }
 
-export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'ankiExecutablePath', 'globalShortcut', 'wordToSentence', 'keepRunningOnClose', 'backgroundIcon', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmMaxTokens', 'llmReasoningEffort'] as const;
+export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'ankiExecutablePath', 'globalShortcut', 'wordToSentence', 'keepRunningOnClose', 'backgroundIcon', 'trayIconStyle', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmMaxTokens', 'llmReasoningEffort'] as const;
 
 /**
  * 配置项的默认值（即“未设置”状态下的存储值）。
@@ -40,6 +41,7 @@ export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     wordToSentence: true,
     keepRunningOnClose: true,
     backgroundIcon: 'menu-bar',
+    trayIconStyle: 'auto',
     llmEnabled: false,
     llmBaseUrl: '',
     llmApiKey: '',
@@ -104,6 +106,12 @@ export class Config implements ConfigModel {
     public keepRunningOnClose!: boolean;
     /** 后台运行期间应用图标的显示位置（仅 macOS）：dock=Dock 栏、menu-bar=菜单栏、none=不显示图标 */
     public backgroundIcon!: 'dock' | 'menu-bar' | 'none';
+    /**
+     * 托盘图标样式（仅 Windows/Linux 生效；macOS 由系统 template 机制自动适配，该键被忽略）：
+     * auto=单色跟随系统（Windows 读任务栏深浅，Linux 等同于 color）、color=彩色、
+     * white=白色单色、black=黑色单色
+     */
+    public trayIconStyle!: 'auto' | 'color' | 'white' | 'black';
     /** 是否启用 AI 优选释义（LLM） */
     public llmEnabled!: boolean;
     /** LLM 服务的 Base URL，留空表示未配置 */

@@ -70,6 +70,13 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         keywords: ['图标', '后台图标', '显示位置', 'dock', '菜单栏', 'menu bar', '托盘'],
     },
     {
+        id: 'trayIconStyle',
+        page: 'general',
+        title: '托盘图标样式',
+        description: '托盘图标使用单色跟随系统、彩色、白色或黑色',
+        keywords: ['托盘图标', '图标样式', '单色', '彩色', '白色', '黑色', '跟随系统', '任务栏', '深色', '浅色', '主题', 'tray', 'icon', 'monochrome', 'theme'],
+    },
+    {
         id: 'launchAtLogin',
         page: 'general',
         title: '登录时自动启动',

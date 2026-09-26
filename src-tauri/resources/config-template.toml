@@ -36,3 +36,11 @@ keep-running-on-close = true
 # 可选值：menu-bar = 菜单栏/托盘图标（默认）、dock = Dock 栏（仅 macOS）、none = 不显示图标
 # 窗口打开时托盘图标不显示（macOS 的 Dock 图标除外），仅在后台运行期间按此选项显示
 background-icon = "menu-bar"
+
+# 托盘图标样式（仅 Windows/Linux 生效；macOS 的菜单栏图标由系统按明暗自动着色，忽略此键）
+# 可选值：auto = 单色跟随系统（默认）、color = 彩色图标、white = 白色单色、black = 黑色单色
+# auto 在 Windows 上读系统“Windows 模式”的深浅（即任务栏的深浅，可与应用模式不同）自动选白/黑；
+# Linux 无可靠的托盘底色检测手段，auto 等同 color，深色面板请显式选 white。
+# 若任务栏/面板被设为浅色主题色等特殊情况，auto 可能判错，可用 white/black 固定。
+tray-icon-style = "auto"
+

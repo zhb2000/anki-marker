@@ -59,6 +59,59 @@ const keepRunningOnCloseDescription = computed(() => isMacOS.value
     : '关闭窗口后应用将在后台继续运行，可通过托盘图标再次打开'
 );
 
+/** 是否为 Windows（托盘图标样式的可选项与文案有平台差异） */
+const isWindows = computed(() => api.os.type() === 'windows');
+
+/**
+ * 托盘图标样式下拉的选项。
+ * Windows 提供「单色（跟随系统）」——按系统「Windows 模式」（即任务栏）深浅自动选白/黑；
+ * Linux 无可靠的托盘底色检测手段（面板配色随主题/发行版而异），故不提供该项。
+ */
+const trayIconStyleOptions = computed<FluentSelectOption[]>(() => isWindows.value
+    ? [
+        { value: 'auto', label: '单色（跟随系统）' },
+        { value: 'color', label: '彩色' },
+        { value: 'white', label: '白色' },
+        { value: 'black', label: '黑色' },
+    ]
+    : [
+        { value: 'color', label: '彩色' },
+        { value: 'white', label: '白色' },
+        { value: 'black', label: '黑色' },
+    ]);
+
+/** 托盘图标样式卡的说明文案：功能不可用时替换为禁用原因 */
+const trayIconStyleDescription = computed(() => {
+    if (backgroundIconDisabled.value) {
+        return '需先开启“关闭窗口后保持后台运行”';
+    }
+    if (state.backgroundIcon === 'none') {
+        return '需先将“后台运行时显示图标”设为托盘图标';
+    }
+    return isWindows.value
+        ? '单色可跟随系统“Windows 模式”（任务栏）的深浅自动切换；若任务栏使用了浅色主题色等特殊情况，可固定为白色或黑色'
+        : '深色面板请选白色、浅色面板请选黑色（Linux 无法自动判断面板底色）';
+});
+
+/** 托盘图标设置未启用时禁用：托盘不显示时该设置无意义（沿用后台图标卡的禁用模式） */
+const trayIconStyleDisabled = computed(() => backgroundIconDisabled.value || state.backgroundIcon === 'none');
+
+/**
+ * 托盘图标样式卡的受控值。
+ * Linux 无「跟随系统」，而配置模板的缺省值是 auto，此处在界面上按等价的「彩色」呈现；
+ * 用户不改动该控件时不回写配置（避免把模板缺省值悄悄改写）。
+ */
+const trayIconStyleModel = computed<string>({
+    get() {
+        return !isWindows.value && state.trayIconStyle === 'auto' ? 'color' : state.trayIconStyle;
+    },
+    set(value) {
+        if (value === 'auto' || value === 'color' || value === 'white' || value === 'black') {
+            state.trayIconStyle = value;
+        }
+    },
+});
+
 // 登录时自动启动：状态存于系统（macOS 为登录项，Windows 为注册表 Run 键，Linux 为
 // XDG Autostart），不属于 config，不进设置仓库（也因此无 ResetButton），以系统实查为准。
 const launchAtLogin = ref(false);
@@ -194,6 +247,14 @@ async function onLaunchAtLoginChange(enabled: boolean | undefined) {
                 </template>
                 <FluentSelect :options="backgroundIconOptions" v-model="state.backgroundIcon"
                     :disabled="backgroundIconDisabled" />
+            </FluentSettingCard>
+            <FluentSettingCard v-if="!isMacOS" header="托盘图标样式" :description="trayIconStyleDescription"
+                setting-id="trayIconStyle" :disabled="trayIconStyleDisabled">
+                <template #header-extra>
+                    <ResetButton setting-key="trayIconStyle" :disabled="trayIconStyleDisabled" />
+                </template>
+                <FluentSelect :options="trayIconStyleOptions" v-model="trayIconStyleModel"
+                    :disabled="trayIconStyleDisabled" />
             </FluentSettingCard>
         </div>
     </div>
