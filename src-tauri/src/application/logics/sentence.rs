@@ -1,14 +1,19 @@
 //! 句子切分：在上下文文本中定位选区所在的句子（选词取句的核心逻辑）。
 //!
-//! 选区偏移来自 macOS 辅助功能 API 的 CFRange，按 UTF-16 码元计（Cocoa 惯例），
-//! 而 Rust 字符串按 UTF-8 存储，切分前需先把选区偏移换算为 UTF-8 字节偏移。
+//! 选区偏移来自各平台无障碍 API（macOS AX 的 CFRange、Windows UIA、Linux AT-SPI
+//! 经换算），按 UTF-16 码元计（Cocoa/Win32 惯例），而 Rust 字符串按 UTF-8 存储，
+//! 切分前需先把选区偏移换算为 UTF-8 字节偏移。
 //! 分句规则使用 unicode-segmentation 实现的 Unicode 文本分段算法（UAX #29），
 //! 英文句读（. ! ?）与 CJK 句读（。！？）均可正确切分。
+//!
+//! 注意：unicode_sentences() 会过滤掉不含字母数字的句段（纯标点/纯换行段），
+//! 因此迭代产物的切片在原串中并不连续，句子的字节偏移不能用 len() 累计，
+//! 必须从切片指针直接换算（见下方 sent_start 的计算）。
 
 use unicode_segmentation::UnicodeSegmentation;
 
 /// 在上下文文本 `context` 中找到与选区 `[sel_start_utf16, sel_end_utf16)`
-/// （UTF-16 码元偏移，来自 macOS AX 的 CFRange）相交的句子，返回 trim 后的句子，
+/// （UTF-16 码元偏移）相交的句子，返回 trim 后的句子，
 /// 以及命中句子（trim 前）在 `context` 中的字节区间 `[start, end)`，供调用方
 /// 判断句子是否触及上下文窗口边缘（触边意味着窗口可能截断了句子，需扩大窗口重试）。
 /// 选区非法（start>=end 或越界）或无相交句子时返回 None。
@@ -22,16 +27,16 @@ pub fn find_sentence_with_range(
     }
     let sel_start = utf16_offset_to_byte(context, sel_start_utf16)?;
     let sel_end = utf16_offset_to_byte(context, sel_end_utf16)?;
-    // unicode-segmentation 仅提供不带索引的 unicode_sentences()，自行累计字节偏移
-    let mut sent_start = 0usize;
+    // unicode_sentences() 过滤无字母数字的句段，切片不连续，偏移用指针换算
+    let base = context.as_ptr() as usize;
     for sentence in context.unicode_sentences() {
+        let sent_start = sentence.as_ptr() as usize - base;
         let sent_end = sent_start + sentence.len();
         // 字节区间 [sent_start, sent_end) 与选区 [sel_start, sel_end) 相交即命中；
         // 分句结果按序遍历，首个命中即与选区起点相交的句子
         if sent_start < sel_end && sel_start < sent_end {
             return Some((sentence.trim().to_string(), sent_start, sent_end));
         }
-        sent_start = sent_end;
     }
     return None;
 }
@@ -55,14 +60,14 @@ pub fn count_intersecting_sentences(
         None => return 0,
     };
     let mut count = 0usize;
-    let mut sent_start = 0usize;
+    let base = context.as_ptr() as usize;
     for sentence in context.unicode_sentences() {
+        let sent_start = sentence.as_ptr() as usize - base;
         let sent_end = sent_start + sentence.len();
         if sent_start < sel_end && sel_start < sent_end {
             count += 1;
         }
-        sent_start = sent_end;
-        if sent_start >= sel_end {
+        if sent_end >= sel_end {
             break; // 之后的句子不可能再与选区相交
         }
     }
@@ -212,5 +217,22 @@ mod tests {
         assert_eq!(count_intersecting_sentences(context, 21, 26), 1);
         // 手动选中跨行整句 "The quick brown fox\njumps over the lazy\ndog."：3
         assert_eq!(count_intersecting_sentences(context, 0, 43), 3);
+    }
+
+    /// 回归：unicode_sentences() 会过滤无字母数字的句段（纯标点/纯换行），
+    /// 切片在原串中不连续——句子字节偏移若用 len() 累计会逐渐失真（偏早），
+    /// 选区靠近句子末尾时会错配到后面的句子（Windows GitHub 信息流实测：
+    /// 选中 "MSYS2" 却切出后面的仓库链接）。此例中两个 "。\n\n" 段被过滤，
+    /// 选词 "this"（UTF-16 偏移 43）必须返回其真实所在的句子
+    #[test]
+    fn filtered_segment_offset_drift() {
+        let context = "。\n\n。\n\nMSYS2 is here at the very end of this. Next.";
+        assert_eq!(
+            find_sentence(context, 43, 47).as_deref(),
+            Some("MSYS2 is here at the very end of this.")
+        );
+        // 相交计数同样使用精确偏移：选词 1，跨句选择 "this. Next" 为 2
+        assert_eq!(count_intersecting_sentences(context, 43, 47), 1);
+        assert_eq!(count_intersecting_sentences(context, 43, 54), 2);
     }
 }
