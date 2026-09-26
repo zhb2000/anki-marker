@@ -20,14 +20,12 @@ export interface SettingsPageMeta {
     title: string;
     /** SVG 图标名，由 SettingsNavIcon 组件统一渲染 */
     icon: SettingsNavIconName;
-    /** 仅 macOS 显示的导航项 */
-    macOnly?: boolean;
 }
 
 /** 左侧导航的页面列表，顺序即导航顺序 */
 export const SETTINGS_PAGES: SettingsPageMeta[] = [
     { id: 'general', title: '通用', icon: 'general' },
-    { id: 'selection', title: '划词', icon: 'selection', macOnly: true },
+    { id: 'selection', title: '划词', icon: 'selection' },
     { id: 'anki', title: 'Anki', icon: 'anki' },
     { id: 'ai', title: 'AI 优选', icon: 'ai' },
     { id: 'advanced', title: '高级', icon: 'advanced' },

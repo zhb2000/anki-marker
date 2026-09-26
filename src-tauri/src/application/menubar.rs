@@ -324,21 +324,28 @@ fn update_tray(app: &AppHandle, tray_visible: bool) {
     }
 }
 
-/// 构建托盘菜单：“打开”与“退出”三端通用；macOS 额外提供“划词录入”
-/// （与全局快捷键等效，已设置快捷键时在菜单项中显示提示）；任一菜单项创建失败时
+/// 构建托盘菜单：“打开”与“退出”三端通用；另有“划词录入”（与全局快捷键等效，
+/// macOS 已设置快捷键时在菜单项中显示加速键提示）；任一菜单项创建失败时
 /// 返回 None（放弃本次创建/刷新，托盘保持原状）。
 fn build_tray_menu(app: &AppHandle) -> Option<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem};
 
     let mut items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = Vec::new();
 
-    // “划词录入”仅 macOS 提供（全局快捷键为 macOS 专属功能）。
-    // 快捷键字符串作为菜单项加速键提示显示（macOS 渲染为 ⌘⇧S 样式），
-    // 无法解析时由 Tauri 静默忽略（仅不显示提示，不影响菜单项）。
-    #[cfg(target_os = "macos")]
+    // “划词录入”三端通用（与全局快捷键等效，点击托盘菜单不会激活本应用，
+    // 选中文本仍来自用户当前所在的应用）。
+    // macOS 附带加速键提示（渲染为 ⌘⇧S 样式，无法解析时由 Tauri 静默忽略）；
+    // Windows/Linux 不设加速键——菜单加速键只在本应用聚焦时触发，对全局划词
+    // 快捷键没有提示以外的意义，且 muda 的 Cmd 记法在非 macOS 上语义不同
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
+        #[cfg(target_os = "macos")]
         let shortcut = read_config_or_default(app).global_shortcut().to_string();
-        let accelerator = if shortcut.is_empty() { None } else { Some(shortcut.as_str()) };
+        #[cfg(target_os = "macos")]
+        let accelerator: Option<&str> =
+            if shortcut.is_empty() { None } else { Some(shortcut.as_str()) };
+        #[cfg(not(target_os = "macos"))]
+        let accelerator: Option<&str> = None;
         match MenuItem::with_id(app, "capture", "划词录入", true, accelerator) {
             Ok(item) => items.push(Box::new(item)),
             Err(error) => {
@@ -399,7 +406,7 @@ pub fn register_tray_icon_event_handler(app: &AppHandle) {
     });
 }
 
-/// 注册托盘菜单与 Dock 图标菜单共用的菜单事件处理（入口：打开/退出，macOS 另有划词录入）。
+/// 注册托盘菜单与 Dock 图标菜单共用的菜单事件处理（入口：打开/退出/划词录入）。
 ///
 /// 在应用 setup 阶段注册一次。AppHandle::on_menu_event 接收所有 muda 菜单事件
 /// （Tauri 把 muda 事件汇入事件循环后广播给应用级监听器），按菜单项 id 分发；
@@ -408,7 +415,7 @@ pub fn register_menu_event_handler(app: &AppHandle) {
     app.on_menu_event(|app, event| match event.id.as_ref() {
         // 划词录入：与全局快捷键相同的捕获流程（读取选中文本后录入主窗口）。
         // 点击托盘/Dock 菜单不会激活本应用，选中文本仍来自用户当前所在的应用
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         "capture" => super::shortcut::on_shortcut_pressed(app.clone()),
         // 打开主窗口：复用划词快捷键/Dock 点击/托盘点击的显示并聚焦逻辑
         "open" => {

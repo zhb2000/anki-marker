@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onActivated, onBeforeMount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import * as api from '../tauri-api';
 
 import { useSettingsStore } from '../logics/settings-store';
 import {
@@ -21,11 +20,8 @@ const store = useSettingsStore();
 /** init 完成前不渲染内容区（等价原 pageInitialized，避免闪烁默认值） */
 const ready = store.ready;
 
-/** 是否为 macOS（划词设置页仅支持 macOS，非 macOS 隐藏对应导航项） */
-const isMacOS = api.os.type() === 'macos';
-
-/** 当前平台需要显示的导航页（macOnly 项在非 macOS 不渲染） */
-const visiblePages = computed(() => SETTINGS_PAGES.filter(page => !page.macOnly || isMacOS));
+/** 左侧导航的页面列表（三端通用；划词页内的辅助功能权限卡片仍为 macOS 专属） */
+const visiblePages = computed(() => SETTINGS_PAGES);
 
 /** 页面 id → 页面标题，用于搜索结果条目展示所属页名 */
 const pageTitles = Object.fromEntries(
