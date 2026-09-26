@@ -185,13 +185,38 @@ fn find_sentence_for_word(
         prefix.MoveEndpointByRange(TextPatternRangeEndpoint_End, selection, TextPatternRangeEndpoint_Start)
     }
     .map_err(|error| format!("failed to shrink the prefix range to the selection start: {error}"))?;
+    // 硬校验：前缀终点必须恰好落在选区起点（MoveEndpointByRange 静默失灵的防线）。
+    // 不过则整个取句链路作废、降级录词——宁可不取句，也不切错句子
+    match unsafe {
+        prefix.CompareEndpoints(TextPatternRangeEndpoint_End, selection, TextPatternRangeEndpoint_Start)
+    } {
+        Ok(0) => {}
+        Ok(offset) => {
+            return Err(format!(
+                "the prefix endpoint does not align with the selection start (off by {offset})"
+            ));
+        }
+        Err(error) => return Err(format!("failed to compare range endpoints: {error}")),
+    }
     let sel_start_utf16 = unsafe { prefix.GetText(-1) }
         .map_err(|error| format!("failed to read the prefix text: {error}"))?
         .len() as isize; // BSTR 按长度前缀解引用为 [u16]，len() 即 UTF-16 码元数
 
     // window_loc：窗口实际左移量（0 表示已对齐文本开头），供触边判定
     let window_loc = (-moved_left) as isize;
-    match capture_in_context(&context, word, &[sel_start_utf16], window_loc) {
+    // 诊断日志：定位取句错误（切错句子/降级）的实机证据
+    log::info!(
+        "UIA sentence capture: word {} utf16 units, selection starts at {}, \
+         window_loc {}, context {} utf16 units, {} occurrence(s) of the word in context",
+        word.encode_utf16().count(),
+        sel_start_utf16,
+        window_loc,
+        context.encode_utf16().count(),
+        context.match_indices(word).count()
+    );
+    // Windows 不用“唯一出现位置”兜底：推导偏移校验失败意味着前缀推导系统性失灵，
+    // 兜底会把“定位失败”变成“切出错误句子”，此时降级录词（见 capture.rs find_anchor）
+    match capture_in_context(&context, word, &[sel_start_utf16], window_loc, false) {
         Some((capture, touched_edge)) => {
             if touched_edge {
                 // ±2048 字符的窗口对正常句子足够大，触边基本意味着超长文本块；

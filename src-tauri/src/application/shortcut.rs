@@ -80,6 +80,20 @@ pub struct ShortcutRegistration {
 /// 静默注册（配置文件监视器兜底）路径同样更新缓存，保证缓存始终为真实状态。
 static LAST_REGISTRATION: Mutex<Option<ShortcutRegistration>> = Mutex::new(None);
 
+/// “划词失败”暂存标记：失败时需弹出主窗口并提示，若前端尚未就绪
+/// （窗口刚重建、页面未加载完），emit 的事件会丢失，前端启动时经
+/// `take_pending_capture_failure` 取走标记补弹提示。
+static PENDING_CAPTURE_FAILURE: Mutex<bool> = Mutex::new(false);
+
+/// 取走“划词失败”暂存标记；无暂存返回 false。由前端在页面就绪时调用。
+#[tauri::command(rename_all = "snake_case")]
+pub fn take_pending_capture_failure() -> bool {
+    return PENDING_CAPTURE_FAILURE
+        .lock()
+        .map(|mut guard| std::mem::take(&mut *guard))
+        .unwrap_or(false);
+}
+
 /// 查询最近一次全局快捷键注册结果（含启动时前端尚未就绪而错过 emit 的情况）；无记录返回 null
 #[tauri::command(rename_all = "snake_case")]
 pub fn get_shortcut_registration() -> Option<ShortcutRegistration> {
@@ -216,6 +230,16 @@ pub fn on_shortcut_pressed(app: AppHandle) {
             Err(_) => {
                 // 常见原因：macOS 未授予辅助功能权限；Windows 前台窗口以管理员身份
                 // 运行（UIPI 拦截）；Linux 目标应用未通过 AT-SPI 暴露选区
+                //
+                // 失败也要弹出主窗口：否则录入失败对用户完全无感知（分不清是没启动、
+                // 卡死还是失败）。先弹窗再 emit，窗口内的前端才能弹出失败提示；
+                // 窗口刚重建、前端尚未就绪时经暂存标记兜底补弹
+                if let Err(error) = show_and_focus_main_window(&app) {
+                    log::warn!("failed to show main window after a capture failure: {error}");
+                }
+                if let Ok(mut pending) = PENDING_CAPTURE_FAILURE.lock() {
+                    *pending = true;
+                }
                 if let Err(error) = app.emit("sentence-capture-failed", ()) {
                     log::warn!("failed to emit sentence-capture-failed event: {error}");
                 }

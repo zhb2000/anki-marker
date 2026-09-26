@@ -193,6 +193,7 @@ fn main() {
             application::dict::get_word_base,
             application::dict::sanitize_filename,
             application::shortcut::take_pending_sentence,
+            application::shortcut::take_pending_capture_failure,
             application::shortcut::is_accessibility_trusted,
             application::shortcut::request_accessibility_trust,
             application::shortcut::get_shortcut_registration,

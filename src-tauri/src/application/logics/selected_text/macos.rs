@@ -645,7 +645,7 @@ fn find_sentence_for_word_by_ax(
     const WINDOW_MARGIN: isize = 1024;
     let loc = std::cmp::max(0, range.location - WINDOW_MARGIN);
     let (context, achieved_right) = fetch_context(WINDOW_MARGIN, -1)?;
-    let (capture, touched_edge) = match capture_in_context(&context, word, &anchor_candidates(loc), loc) {
+    let (capture, touched_edge) = match capture_in_context(&context, word, &anchor_candidates(loc), loc, true) {
         Some(result) => result,
         None => {
             // 诊断：锚点定位失败时记录坐标系关键参数，便于分析各提供方的偏移语义
@@ -681,6 +681,7 @@ fn find_sentence_for_word_by_ax(
                 word,
                 &anchor_candidates(retry_loc),
                 retry_loc,
+                true,
             ) {
                 final_capture = retry_capture;
                 final_right = retry_right;

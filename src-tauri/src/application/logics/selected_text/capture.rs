@@ -32,8 +32,10 @@ pub fn capture_in_context(
     word: &str,
     anchor_candidates: &[isize],
     window_loc: isize,
+    allow_unique_occurrence_fallback: bool,
 ) -> Option<(SentenceCapture, bool)> {
-    let sel_start_utf16 = find_anchor(context, word, anchor_candidates)?;
+    let sel_start_utf16 =
+        find_anchor(context, word, anchor_candidates, allow_unique_occurrence_fallback)?;
     let sel_end_utf16 = sel_start_utf16 + word.encode_utf16().count();
 
     // 只扩展、不丢弃：选区横跨多个句子时原样录入用户所选文本，不做分句截断。
@@ -54,10 +56,20 @@ pub fn capture_in_context(
 /// 提供方的偏移坐标系存在已知怪癖：选区偏移与窗口文本的坐标系可能不一致
 /// （macOS 上如 Obsidian 阅读模式：偏移是文档级的、返回文本却是块级的）。
 /// 因此不盲信偏移，按优先级尝试候选锚点（由平台层给出，如窗口偏移 → 文档级
-/// 偏移 → 0），每个候选以“该位置的 UTF-16 子串等于所选文本”校验后才采用；
-/// 全部失败时退到“所选文本的唯一出现位置”（零次出现无法定位、多次出现有
-/// 歧义，均不采用）。仍失败返回 None——宁可降级为仅录词，也不切出错误的句子。
-pub fn find_anchor(context: &str, word: &str, candidates: &[isize]) -> Option<usize> {
+/// 偏移 → 0），每个候选以“该位置的 UTF-16 子串等于所选文本”校验后才采用。
+///
+/// `allow_unique_occurrence_fallback` 为 true 时，候选全部失败可退到“所选文本的
+/// 唯一出现位置”（零次出现无法定位、多次出现有歧义，均不采用）。该兜底只适用于
+/// macOS/Linux——它们的偏移由提供方直接报告、候选基本可信，兜底只是坐标系怪癖的
+/// 最后机会；Windows 的偏移是本地推导的（MoveEndpointByRange 前缀法），推导一旦
+/// 系统性失灵，兜底会把“定位失败”变成“自信地切出错误句子”，故传 false。
+/// 仍失败返回 None——宁可降级为仅录词，也不切出错误的句子。
+pub fn find_anchor(
+    context: &str,
+    word: &str,
+    candidates: &[isize],
+    allow_unique_occurrence_fallback: bool,
+) -> Option<usize> {
     let context_utf16: Vec<u16> = context.encode_utf16().collect();
     let word_utf16: Vec<u16> = word.encode_utf16().collect();
     if word_utf16.is_empty() {
@@ -76,6 +88,9 @@ pub fn find_anchor(context: &str, word: &str, candidates: &[isize]) -> Option<us
         if matches_at(candidate) {
             return Some(candidate as usize);
         }
+    }
+    if !allow_unique_occurrence_fallback {
+        return None;
     }
     let mut occurrences = context.match_indices(word);
     return match (occurrences.next(), occurrences.next()) {
@@ -112,7 +127,7 @@ mod tests {
         // 文档 "Hello world. This is a test."，窗口 loc=9，word "This" 在文档偏移 13
         let context = "ld. This is a te";
         // 候选 1：13 - 9 = 4，context[4..8] == "This"
-        assert_eq!(find_anchor(context, "This", &[13 - 9, 13, 0]), Some(4));
+        assert_eq!(find_anchor(context, "This", &[13 - 9, 13, 0], true), Some(4));
     }
 
     /// 锚点候选 2：提供方忽略窗口起点、从文档开头返回文本（文档级偏移）
@@ -120,7 +135,7 @@ mod tests {
     fn anchor_document_offset() {
         let context = "Hello world. This is";
         // 候选 1（13-9=4）命中 "o wo" 不匹配；候选 2（13）命中 "This"
-        assert_eq!(find_anchor(context, "This", &[13 - 9, 13, 0]), Some(13));
+        assert_eq!(find_anchor(context, "This", &[13 - 9, 13, 0], true), Some(13));
     }
 
     /// 锚点候选 3：提供方从选区开始返回文本
@@ -128,7 +143,7 @@ mod tests {
     fn anchor_selection_start() {
         let context = "This is a test.";
         // 候选 1（4）与候选 2（13，越界）均失败；候选 3（0）命中
-        assert_eq!(find_anchor(context, "This", &[13 - 9, 13, 0]), Some(0));
+        assert_eq!(find_anchor(context, "This", &[13 - 9, 13, 0], true), Some(0));
     }
 
     /// 锚点兜底：偏移完全失真时靠唯一出现位置定位；多处出现有歧义返回 None
@@ -136,24 +151,34 @@ mod tests {
     fn anchor_unique_occurrence() {
         let context = "jumped over. The fox runs. End.";
         assert_eq!(
-            find_anchor(context, "fox", &[9999 - 9000, 9999, 0]),
+            find_anchor(context, "fox", &[9999 - 9000, 9999, 0], true),
             Some("jumped over. The ".encode_utf16().count())
         );
         // 两次出现 → 歧义，不采用（上下文开头放非匹配内容，避免候选 0 先命中）
-        assert_eq!(find_anchor("a fox and fox", "fox", &[999, 9999, 0]), None);
+        assert_eq!(find_anchor("a fox and fox", "fox", &[999, 9999, 0], true), None);
     }
 
     /// 所选文本不在上下文中：返回 None（降级为仅录词，不切错句）
     #[test]
     fn anchor_not_found() {
-        assert_eq!(find_anchor("Hello world.", "zebra", &[0]), None);
+        assert_eq!(find_anchor("Hello world.", "zebra", &[0], true), None);
     }
 
     /// 含 emoji（UTF-16 代理对）的所选文本：按 UTF-16 码元校验与定位
     #[test]
     fn anchor_with_emoji() {
         // "say " 共 4 个 UTF-16 码元，😀 占 2 个
-        assert_eq!(find_anchor("say 😀 hi.", "😀", &[4]), Some(4));
+        assert_eq!(find_anchor("say 😀 hi.", "😀", &[4], true), Some(4));
+    }
+
+    /// 禁用唯一出现兜底（Windows 语义：推导偏移校验失败即放弃，不得猜位置）：
+    /// 词在上下文中唯一出现、但候选失真时，允许兜底命中、禁用则返回 None
+    #[test]
+    fn anchor_unique_occurrence_fallback_disabled() {
+        let context = "jumped over. The fox runs. End.";
+        let expected = "jumped over. The ".encode_utf16().count();
+        assert_eq!(find_anchor(context, "fox", &[999], true), Some(expected));
+        assert_eq!(find_anchor(context, "fox", &[999], false), None);
     }
 
     /// 块级上下文取句（Obsidian 阅读模式场景）：偏移是文档级的、
@@ -162,7 +187,7 @@ mod tests {
     fn capture_in_block_context() {
         let context = "First sentence here. The target word is fox.";
         let (capture, touched_edge) =
-            capture_in_context(context, "fox", &[5000 - 4000, 5000, 0], 4000)
+            capture_in_context(context, "fox", &[5000 - 4000, 5000, 0], 4000, true)
                 .expect("should capture");
         match capture {
             SentenceCapture::Expanded(sentence) => {
@@ -180,7 +205,7 @@ mod tests {
         let context = "One. Two three. Four.";
         let word = "Two three. Four"; // 用户手动跨句选择
         let (capture, touched_edge) =
-            capture_in_context(context, word, &[5], 0).expect("should capture");
+            capture_in_context(context, word, &[5], 0, true).expect("should capture");
         match capture {
             SentenceCapture::SelectionAsIs(text) => assert_eq!(text, word),
             _ => panic!("expected SelectionAsIs"),

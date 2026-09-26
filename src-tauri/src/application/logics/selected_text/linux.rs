@@ -266,7 +266,7 @@ async fn find_sentence_for_word(
             )
         })? as isize;
     // window_loc：窗口起点的文档级偏移（0 表示已对齐文本开头），供触边判定
-    match capture_in_context(&context, word, &[sel_start_utf16], window_start as isize) {
+    match capture_in_context(&context, word, &[sel_start_utf16], window_start as isize, true) {
         Some((capture, touched_edge)) => {
             if touched_edge {
                 log::info!(

@@ -517,6 +517,19 @@ function markCapturedWord(word: string): void {
     }
 }
 
+/** 弹出划词失败提示（失败原因按平台给出引导） */
+function showCaptureFailureDialog() {
+    // 失败引导按平台给出：macOS 是辅助功能授权问题；Windows 多为目标应用
+    // 不暴露文本（无 TextPattern）或前台窗口以管理员身份运行（UIPI 拦截）；
+    // Linux 多为目标应用未通过 AT-SPI 暴露选区
+    const hint = isMacOS.value
+        ? '请在“系统设置 → 隐私与安全性 → 辅助功能”中允许本应用，然后重试。'
+        : api.os.type() === 'windows'
+            ? '目标应用可能不支持 UI Automation，或前台窗口正以管理员身份运行（请换用普通权限的窗口重试）。'
+            : '目标应用可能未通过 AT-SPI 暴露选区（Linux 全局快捷键仅 X11 会话可用）。';
+    void dialog.message(`获取选中文本失败。\n\n${hint}`, { title: '划词录入失败', kind: 'error' });
+}
+
 /** 监听划词句子事件，并取走可能在主窗口重建期间暂存的句子 */
 async function initSentenceCapture() {
     // 主窗口被关闭后按快捷键会重建窗口，前端就绪之前 emit 的事件会丢失，
@@ -533,17 +546,12 @@ async function initSentenceCapture() {
         console.error(error);
     }
     try {
-        await api.event.listen('sentence-capture-failed', () => {
-            // 失败引导按平台给出：macOS 是辅助功能授权问题；Windows 多为目标应用
-            // 不暴露文本（无 TextPattern）或前台窗口以管理员身份运行（UIPI 拦截）；
-            // Linux 多为目标应用未通过 AT-SPI 暴露选区
-            const hint = isMacOS.value
-                ? '请在“系统设置 → 隐私与安全性 → 辅助功能”中允许本应用，然后重试。'
-                : api.os.type() === 'windows'
-                    ? '目标应用可能不支持 UI Automation，或前台窗口正以管理员身份运行（请换用普通权限的窗口重试）。'
-                    : '目标应用可能未通过 AT-SPI 暴露选区（Linux 全局快捷键仅 X11 会话可用）。';
-            void dialog.message(`获取选中文本失败。\n\n${hint}`, { title: '划词录入失败', kind: 'error' });
-        });
+        await api.event.listen('sentence-capture-failed', showCaptureFailureDialog);
+        // 取词失败时会弹出主窗口并提示；若前端当时尚未就绪，事件已丢失，
+        // 此处取回暂存的失败标记补弹提示
+        if (await utils.invoke<boolean>('take_pending_capture_failure')) {
+            showCaptureFailureDialog();
+        }
     } catch (error) {
         console.error(error);
     }
