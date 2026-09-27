@@ -9,12 +9,19 @@
 //!   Windows/Linux 无 Dock 概念，仅有托盘，menu-bar（配置值 dock 亦按其处理）
 //!   显示托盘、none 隐藏。
 //!
-//! 托盘菜单提供“打开”“退出”两个入口；macOS 额外提供“划词录入”（与全局快捷键
-//! 等效，为不设快捷键的用户提供鼠标操作入口，已设置快捷键时在菜单项中显示快捷键
-//! 提示；全局快捷键目前仅 macOS 支持）。这保证应用进入后台后仍可划词录入/唤起/
-//! 退出应用。macOS 的 Dock 图标菜单仅提供“划词录入”（“打开/退出”由系统自带：
-//! 左键点击 Dock 图标恢复窗口、右键菜单含系统“退出”）。两个菜单共用在 setup
-//! 阶段注册一次的 AppHandle::on_menu_event 事件处理。
+//! 托盘菜单提供“打开”“退出”“划词录入”三个入口（“划词录入”与全局快捷键等效，
+//! 为不设快捷键的用户提供鼠标操作入口；macOS 已设置快捷键时在菜单项中显示快捷键
+//! 提示）。这保证应用进入后台后仍可划词录入/唤起/退出应用。macOS 的 Dock 图标菜单
+//! 仅提供“划词录入”（“打开/退出”由系统自带：左键点击 Dock 图标恢复窗口、右键菜单
+//! 含系统“退出”）。两个菜单共用在 setup 阶段注册一次的 AppHandle::on_menu_event
+//! 事件处理。
+//!
+//! 菜单触发划词录入时，目标应用必须是前台窗口，取词才能打到正确的地方。macOS 的
+//! 菜单栏菜单不激活本应用（原前台应用不受影响）；**Windows 的托盘菜单相反**：
+//! tray-icon 在弹出菜单前会 `SetForegroundWindow` 自己的隐藏消息窗口（shell 要求，
+//! 否则点菜单外部菜单不消失），而 Windows 不会自动归还，于是取词会落到我们自己身上。
+//! 该问题的记录与归还见 logics::selected_text::windows_target（本模块负责在托盘
+//! 创建成功后安装记录器）。
 //!
 //! 托盘点击行为按平台惯例区分：Windows 左键单击直接打开主窗口、菜单仅右键弹出
 //! （点击事件经 AppHandle::on_tray_icon_event 处理）；macOS 左键即弹菜单；Linux
@@ -317,7 +324,13 @@ fn update_tray(app: &AppHandle, tray_visible: bool) {
     match builder.build(app) {
         // 记录已应用的图标，供后续主题/配置变化时比对是否需要换图
         #[cfg(not(target_os = "macos"))]
-        Ok(_) => set_last_applied_tray_icon((icon_shape, icon_size)),
+        Ok(_) => {
+            set_last_applied_tray_icon((icon_shape, icon_size));
+            // 托盘窗口此时才存在：安装“菜单弹出前记下前台窗口”的记录器
+            // （Windows 托盘菜单会抢走前台且不自动归还，见 selected_text::windows_target）
+            #[cfg(target_os = "windows")]
+            logics::selected_text::windows_target::install_tray_recorder();
+        }
         #[cfg(target_os = "macos")]
         Ok(_) => {}
         Err(error) => log::warn!("failed to build tray icon: {error}"),
@@ -332,8 +345,8 @@ fn build_tray_menu(app: &AppHandle) -> Option<tauri::menu::Menu<tauri::Wry>> {
 
     let mut items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = Vec::new();
 
-    // “划词录入”三端通用（与全局快捷键等效，点击托盘菜单不会激活本应用，
-    // 选中文本仍来自用户当前所在的应用）。
+    // “划词录入”三端通用（与全局快捷键等效；取词目标须为前台窗口，Windows 托盘菜单
+    // 抢走前台的问题由 selected_text::windows_target 在取词前归还解决）。
     // macOS 附带加速键提示（渲染为 ⌘⇧S 样式，无法解析时由 Tauri 静默忽略）；
     // Windows/Linux 不设加速键——菜单加速键只在本应用聚焦时触发，对全局划词
     // 快捷键没有提示以外的意义，且 muda 的 Cmd 记法在非 macOS 上语义不同
@@ -393,19 +406,6 @@ fn build_tray_menu(app: &AppHandle) -> Option<tauri::menu::Menu<tauri::Wry>> {
 #[cfg(target_os = "windows")]
 pub fn register_tray_icon_event_handler(app: &AppHandle) {
     app.on_tray_icon_event(|app, event| {
-        // 临时诊断（验证后移除）：托盘点击到达时采样前台——用于判断事件处理是否早于
-        // 菜单弹出（若早于，则“菜单弹出前记下目标窗口”这条路可行），以及点击瞬间
-        // 前台是否还是用户所在的应用
-        if let tauri::tray::TrayIconEvent::Click {
-            button,
-            button_state,
-            ..
-        } = &event
-        {
-            logics::selected_text::windows_probe::log_foreground_snapshot(&format!(
-                "tray click {button:?}/{button_state:?}"
-            ));
-        }
         if let tauri::tray::TrayIconEvent::Click {
             button: tauri::tray::MouseButton::Left,
             button_state: tauri::tray::MouseButtonState::Up,
@@ -427,7 +427,8 @@ pub fn register_tray_icon_event_handler(app: &AppHandle) {
 pub fn register_menu_event_handler(app: &AppHandle) {
     app.on_menu_event(|app, event| match event.id.as_ref() {
         // 划词录入：与全局快捷键相同的捕获流程（读取选中文本后录入主窗口）。
-        // 点击托盘/Dock 菜单不会激活本应用，选中文本仍来自用户当前所在的应用
+        // 点击托盘/Dock 菜单不会激活本应用，选中文本仍来自用户当前所在的应用；
+        // Windows 托盘菜单会抢走前台，由捕获流程内部先归还（见 shortcut 模块）
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         "capture" => super::shortcut::on_shortcut_pressed(
             app.clone(),
