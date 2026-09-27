@@ -18,6 +18,7 @@ import { FluentButton, FluentSelect, FluentInput, FluentRadio, dialog } from '..
 import {
     CardStatus,
     SentencePanel,
+    SentenceCaptureRing,
     CollinsCard,
     OxfordCard,
     YoudaoCard,
@@ -457,6 +458,12 @@ function regenerateAiPick() {
 // #endregion
 
 // #region 全局快捷键划词录入
+/**
+ * 后台仍在补取完整句子（Rust 侧重试在途）：句子面板角上的指示环据此显示/收束。
+ * 补取结果会覆盖先到的降级结果（仅词），指示环只是让"还会变"这件事有个连续、安静的信号。
+ */
+const captureSettling = ref(false);
+
 /** 录入捕获的句子：整体替换当前句子（分词同步重建为全新状态）并退出编辑模式；取句模式命中的单词会在分词结果中预选 */
 async function applyCapturedSentence(payload: CapturedSentencePayload) {
     const trimmed = payload.text.trim();
@@ -537,6 +544,21 @@ function showCaptureFailureDialog() {
 
 /** 监听划词句子事件，并取走可能在主窗口重建期间暂存的句子 */
 async function initSentenceCapture() {
+    // 后台补取状态：先挂监听、再主动查一次。重试在窗口显示之前就已启动，窗口被重建时
+    // "开始"事件必然丢失，只能靠 is_capture_settling 查回；若挂监听后已收到过事件，
+    // 则以事件为准（避免被这次查询返回的稍旧值回退）
+    let settlingEventReceived = false;
+    try {
+        await api.event.listen<boolean>('sentence-capture-settling', event => {
+            settlingEventReceived = true;
+            captureSettling.value = event.payload;
+        });
+        if (!settlingEventReceived) {
+            captureSettling.value = await utils.invoke<boolean>('is_capture_settling');
+        }
+    } catch (error) {
+        console.error(error);
+    }
     // 主窗口被关闭后按快捷键会重建窗口，前端就绪之前 emit 的事件会丢失，
     // 此时通过 take_pending_sentence 取回 Rust 侧暂存的句子
     try {
@@ -826,6 +848,7 @@ onBeforeMount(async () => {
             <SentencePanel :tokens="tokens" v-if="!showEdit" @mark="onMarkToken" @paint-start="onPaintStart" @paint-end="onPaintEnd" />
             <textarea class="fluent-textarea" v-model.trim="sentence" v-if="showEdit" ref="editTextArea"
                 :placeholder="editPlaceholder" @keydown="handleEditTextAreaKeydown"></textarea>
+            <SentenceCaptureRing :active="captureSettling" v-if="!showEdit" />
         </div>
         <div class="words-container">
             <div class="pronunciation-container" v-show="searchText.length > 0">
@@ -918,6 +941,8 @@ onBeforeMount(async () => {
     padding-right: calc(15px / 2);
     /* 需要设置此属性才能让 SentencePanel 的 overflow-y: auto 生效 */
     overflow-y: hidden;
+    /* SentenceCaptureRing 以此为定位基准，钉在句子面板右下角 */
+    position: relative;
 }
 
 .words-container {

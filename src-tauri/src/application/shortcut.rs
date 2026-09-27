@@ -64,6 +64,40 @@ pub fn take_pending_sentence(pending: State<PendingSentence>) -> Option<Captured
     return pending.0.lock().ok().and_then(|mut guard| guard.take());
 }
 
+/// “仍在后台补取完整句子”的在途标记（后台重试的存活状态）。
+///
+/// 供句子面板角上的工作指示器使用：前端据此显示/收束指示环。之所以要能主动查询
+/// 而不只靠事件——重试在 `get_selected_context` 内部就已启动，早于本应用窗口的
+/// 显示与聚焦，窗口被重建时前端尚未挂上监听，"开始"事件会丢失。
+#[derive(Debug)]
+pub struct CaptureSettling(pub Mutex<bool>);
+
+impl CaptureSettling {
+    pub fn new() -> Self {
+        return CaptureSettling(Mutex::new(false));
+    }
+}
+
+/// 查询是否正在后台补取完整句子。由前端在页面就绪时调用（与 take_pending_sentence
+/// 同属"补齐前端就绪前错过的事件"的手段）。
+#[tauri::command(rename_all = "snake_case")]
+pub fn is_capture_settling(settling: State<CaptureSettling>) -> bool {
+    return settling.0.lock().map(|guard| *guard).unwrap_or(false);
+}
+
+/// 更新在途标记并通知前端。emit 可能因前端尚未就绪而丢失，由
+/// `is_capture_settling` 的主动查询兜底。
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn set_capture_settling(app: &AppHandle, settling: bool) {
+    match app.state::<CaptureSettling>().0.lock() {
+        Ok(mut guard) => *guard = settling,
+        Err(error) => log::warn!("failed to update the settling flag: {error}"),
+    }
+    if let Err(error) = app.emit("sentence-capture-settling", settling) {
+        log::warn!("failed to emit sentence-capture-settling event: {error}");
+    }
+}
+
 /// 快捷键注册结果，emit 给前端用于设置页反馈
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ShortcutRegistration {
@@ -210,57 +244,13 @@ pub fn on_shortcut_pressed(app: AppHandle) {
         let word_to_sentence = logics::config::read_config(app.state::<ConfigPath>().0.as_str())
             .map(|config| config.word_to_sentence())
             .unwrap_or(true);
-        // 后台重试命中（无障碍树异步物化的应用，如 Word / Chromium 冷页面）时的补发：
-        // 更新暂存并 emit，前端用完整的取句结果覆盖先到的仅词结果
-        //
-        // 重试守卫：重试路径在目标窗口内搜索“持有选区的元素”（Windows）或按 pid
-        // 重建应用元素（macOS），可能撞错控件（残留选区、浏览器 UI 等）——
-        // 与主路径结果（模拟复制读到的才是用户真实选区）不一致时丢弃，避免用
-        // 错误内容覆盖用户已经看到的正确结果。
-        // 例外：重试的词漂移但句子包含权威词（Edge PDF 文本层错位，实测选区偏移
-        // 2 个字符）时，词替换为权威词后补发——句子是对的，只是词需要修正
+        // 主路径选区文本（重试守卫的比对基准）：取句命中时是词，降级/回退时是所选原文。
+        // 后台重试在 get_selected_context 内部就启动，此时主路径结果尚不可知，
+        // 故经此共享槽位在捕获返回后回填给重试回调
         let primary_text = std::sync::Arc::new(Mutex::new(None::<String>));
-        let retry_primary_text = primary_text.clone();
-        let retry_app = app.clone();
         let context = match logics::selected_text::get_selected_context(
             word_to_sentence,
-            move |context| {
-                if let Some(mut captured) = CapturedSentence::from_selected_context(context) {
-                    if let Ok(Some(primary)) =
-                        retry_primary_text.lock().map(|guard| guard.clone())
-                    {
-                        let word_matches =
-                            captured.word.as_deref().is_some_and(|word| word.trim() == primary);
-                        let text_matches = captured.text.trim() == primary;
-                        if !word_matches && !text_matches {
-                            if captured.word.is_some() && captured.text.contains(&primary) {
-                                log::info!(
-                                    "retry capture reconciled with the primary result: \
-                                     word {:?} -> {:?}",
-                                    captured.word, primary
-                                );
-                                captured =
-                                    CapturedSentence { text: captured.text, word: Some(primary) };
-                            } else {
-                                log::warn!(
-                                    "dropping the retry capture: it does not match the primary \
-                                     result (retry word {:?}, retry text {:.80?}, primary {:?})",
-                                    captured.word,
-                                    captured.text,
-                                    primary
-                                );
-                                return;
-                            }
-                        }
-                    }
-                    if let Ok(mut pending) = retry_app.state::<PendingSentence>().0.lock() {
-                        *pending = Some(captured.clone());
-                    }
-                    if let Err(error) = retry_app.emit("sentence-captured", captured) {
-                        log::warn!("failed to emit sentence-captured event (retry): {error}");
-                    }
-                }
-            },
+            retry_callbacks(app.clone(), primary_text.clone()),
         ) {
             Ok(context) => context,
             Err(capture_error) => {
@@ -287,8 +277,7 @@ pub fn on_shortcut_pressed(app: AppHandle) {
             Some(captured) => captured,
             None => return, // 未选中任何文本，静默忽略
         };
-        // 记录主路径的选区文本（重试守卫的比对基准）：取句命中时是词，
-        // 降级/回退时是所选原文。须在弹窗前记录——弹窗期间重试可能已命中
+        // 须在弹窗前记录——弹窗期间重试可能已命中
         if let Ok(mut guard) = primary_text.lock() {
             *guard = Some(captured.word.clone().unwrap_or(captured.text.clone()));
         }
@@ -303,6 +292,73 @@ pub fn on_shortcut_pressed(app: AppHandle) {
             log::warn!("failed to emit sentence-captured event: {error}");
         }
     });
+}
+
+/// 构造后台重试的生命周期回调：驱动"仍在补取"指示状态，并落地补发的完整句子。
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn retry_callbacks(
+    app: AppHandle,
+    primary_text: std::sync::Arc<Mutex<Option<String>>>,
+) -> logics::selected_text::RetryCallbacks {
+    let started_app = app.clone();
+    return logics::selected_text::RetryCallbacks {
+        on_started: Box::new(move || set_capture_settling(&started_app, true)),
+        on_finished: Box::new(move |outcome| {
+            if let Some(context) = outcome {
+                deliver_retry_capture(&app, &primary_text, context);
+            }
+            // 无论补发成功、被守卫丢弃还是超时放弃，都要结束"仍在补取"状态
+            set_capture_settling(&app, false);
+        }),
+    };
+}
+
+/// 后台重试补发结果的落地。
+///
+/// 重试守卫：重试路径在目标窗口内搜索"持有选区的元素"（Windows）或按 pid 重建
+/// 应用元素（macOS），可能撞错控件（残留选区、浏览器 UI 等）——与主路径结果
+/// （模拟复制读到的才是用户真实选区）不一致时丢弃，避免用错误内容覆盖用户
+/// 已经看到的正确结果。
+/// 例外：重试的词漂移但句子包含权威词（Edge PDF 文本层错位，实测选区偏移
+/// 2 个字符）时，词替换为权威词后补发——句子是对的，只是词需要修正
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn deliver_retry_capture(
+    app: &AppHandle,
+    primary_text: &Mutex<Option<String>>,
+    context: logics::selected_text::SelectedContext,
+) {
+    let Some(mut captured) = CapturedSentence::from_selected_context(context) else {
+        return;
+    };
+    if let Ok(Some(primary)) = primary_text.lock().map(|guard| guard.clone()) {
+        let word_matches = captured.word.as_deref().is_some_and(|word| word.trim() == primary);
+        let text_matches = captured.text.trim() == primary;
+        if !word_matches && !text_matches {
+            if captured.word.is_some() && captured.text.contains(&primary) {
+                log::info!(
+                    "retry capture reconciled with the primary result: word {:?} -> {:?}",
+                    captured.word,
+                    primary
+                );
+                captured = CapturedSentence { text: captured.text, word: Some(primary) };
+            } else {
+                log::warn!(
+                    "dropping the retry capture: it does not match the primary result \
+                     (retry word {:?}, retry text {:.80?}, primary {:?})",
+                    captured.word,
+                    captured.text,
+                    primary
+                );
+                return;
+            }
+        }
+    }
+    if let Ok(mut pending) = app.state::<PendingSentence>().0.lock() {
+        *pending = Some(captured.clone());
+    }
+    if let Err(error) = app.emit("sentence-captured", captured) {
+        log::warn!("failed to emit sentence-captured event (retry): {error}");
+    }
 }
 
 /// 显示并聚焦主窗口；若主窗口已不存在，则按 tauri.conf.json 中的窗口配置重建。

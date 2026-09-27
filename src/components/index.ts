@@ -10,6 +10,7 @@ export { default as ResetButton } from './ResetButton.vue';
 export { default as ReturnButton } from './ReturnButton.vue';
 export { default as ScrollMemory } from './ScrollMemory.vue';
 export { default as SentencePanel } from './SentencePanel.vue';
+export { default as SentenceCaptureRing } from './SentenceCaptureRing.vue';
 export { default as SettingButton } from './SettingButton.vue';
 export { default as SettingsNavIcon } from './SettingsNavIcon.vue';
 export { default as ShortcutRecorder } from './ShortcutRecorder.vue';

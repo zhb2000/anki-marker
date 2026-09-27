@@ -16,7 +16,7 @@
 //! 目标窗口 HWND（不跟随焦点——弹窗会夺走焦点），树就绪后补发完整结果。
 
 use super::capture::{capture_in_context, reconcile_with_primary, SentenceCapture};
-use super::SelectedContext;
+use super::{RetryCallbacks, SelectedContext};
 
 use ::windows::core::BSTR;
 use ::windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize};
@@ -53,11 +53,13 @@ pub fn get_selected_text() -> Result<String, String> {
 /// 返回 {句子, 权威词}；UIA 报错或词为空时回退模拟 Ctrl+C。
 /// word_to_sentence 为 false 时完全等同 get_selected_text 的行为。
 ///
-/// `on_retry_captured`：UIA 失败回退后，若目标应用的无障碍树在后台物化
-/// （Chromium 系按需激活），后台重试取到完整句子时经此回调补发结果。
+/// `callbacks`：UIA 失败回退后，若目标应用的无障碍树在后台物化
+/// （Chromium 系按需激活），后台重试取到完整句子时经 `on_finished` 补发结果；
+/// `on_started`/`on_finished` 同时供 UI 呈现"仍在补取"状态（见 RetryCallbacks
+/// 的调用约定）。
 pub fn get_selected_context(
     word_to_sentence: bool,
-    on_retry_captured: impl FnOnce(SelectedContext) + Send + 'static,
+    callbacks: RetryCallbacks,
 ) -> Result<SelectedContext, String> {
     if !word_to_sentence {
         return get_selected_text().map(|text| SelectedContext { text, word: None });
@@ -91,7 +93,7 @@ pub fn get_selected_context(
                 log::info!("no foreground window, skipping the background UIA selection retry");
             } else {
                 log::info!("spawning background UIA selection retry");
-                spawn_selection_retry(hwnd, on_retry_captured);
+                spawn_selection_retry(hwnd, callbacks);
             }
             log::warn!("UIA path failed, falling back to simulated Ctrl+C: {error}");
             let context = copy_via_ctrl_c(false).map(|text| SelectedContext { text, word: None })?;
@@ -382,24 +384,24 @@ static RETRYING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 
 /// 后台重试：Chromium 系应用在 UIA 客户端查询时才按需物化无障碍树，首次查询
 /// 可能失败。按固定间隔轮询目标窗口（锁定 HWND 重跑取句链路，不跟随系统焦点——
-/// 失败/成功弹窗会夺走焦点），取到非空选区后经 `on_captured` 补发完整结果；
-/// 超时放弃。
-fn spawn_selection_retry<F>(hwnd: ::windows::Win32::Foundation::HWND, on_captured: F)
-where
-    F: FnOnce(SelectedContext) + Send + 'static,
-{
+/// 失败/成功弹窗会夺走焦点），取到非空选区后经 `on_finished` 补发完整结果；
+/// 超时放弃（`on_finished(None)`）。
+fn spawn_selection_retry(hwnd: ::windows::Win32::Foundation::HWND, callbacks: RetryCallbacks) {
     use std::sync::atomic::Ordering;
 
     /// 轮询次数与间隔（总计约 6 秒，覆盖 Chromium 首次物化无障碍树的耗时）
     const RETRY_ATTEMPTS: usize = 10;
     const RETRY_INTERVAL_MS: u64 = 600;
 
+    // 同一时间只允许一个重试在途（被拦下时不触发任何回调：状态与在途的那个重试一致）
     if RETRYING.swap(true, Ordering::SeqCst) {
         return;
     }
     // HWND 是窗口句柄（实为数值，不含可析构资源），可安全跨线程传递
     let hwnd_raw = hwnd.0 as usize;
     std::thread::spawn(move || {
+        let RetryCallbacks { on_started, on_finished } = callbacks;
+        on_started();
         let hwnd = ::windows::Win32::Foundation::HWND(hwnd_raw as *mut std::ffi::c_void);
         for attempt in 1..=RETRY_ATTEMPTS {
             std::thread::sleep(std::time::Duration::from_millis(RETRY_INTERVAL_MS));
@@ -416,7 +418,7 @@ where
                         describe_context(&context)
                     );
                     RETRYING.store(false, Ordering::SeqCst);
-                    on_captured(context);
+                    on_finished(Some(context));
                     return;
                 }
                 Ok(_) => {
@@ -429,6 +431,7 @@ where
         }
         log::info!("UIA selection retry gave up after {RETRY_ATTEMPTS} attempts");
         RETRYING.store(false, Ordering::SeqCst);
+        on_finished(None);
     });
 }
 

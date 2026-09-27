@@ -16,7 +16,7 @@
 //! 词原文，与既有的 AX 成功路径语义一致。
 
 use super::capture::{capture_in_context, SentenceCapture};
-use super::SelectedContext;
+use super::{RetryCallbacks, SelectedContext};
 
 pub fn get_selected_text() -> Result<String, String> {
     if let Ok(text) = get_selected_text_by_ax() {
@@ -33,11 +33,12 @@ pub fn get_selected_text() -> Result<String, String> {
 /// AX 拿到词但取句失败返回 {词原文, None}；AX 报错或词为空时回退 AppleScript（同现有逻辑）。
 /// word_to_sentence 为 false 时完全等同现有 get_selected_text 的行为。
 ///
-/// `on_retry_captured`：AX 失败回退后，若目标应用的无障碍树在后台异步物化
-/// （如 Word），后台重试取到完整句子时经此回调补发结果（见 spawn_selection_retry）。
+/// `callbacks`：AX 失败回退后，若目标应用的无障碍树在后台异步物化（如 Word），
+/// 后台重试取到完整句子时经 `on_finished` 补发结果；`on_started`/`on_finished`
+/// 同时供 UI 呈现"仍在补取"状态（见 RetryCallbacks 的调用约定）。
 pub fn get_selected_context(
     word_to_sentence: bool,
-    on_retry_captured: impl FnOnce(SelectedContext) + Send + 'static,
+    callbacks: RetryCallbacks,
 ) -> Result<SelectedContext, String> {
     if !word_to_sentence {
         return get_selected_text().map(|text| SelectedContext { text, word: None });
@@ -57,7 +58,7 @@ pub fn get_selected_context(
             // 若拿到了目标应用 pid，同时启动后台重试——无障碍树异步物化后补发句子
             if let Some(pid) = ax_error.retry_pid {
                 log::info!("spawning background AX selection retry for pid {pid}");
-                spawn_selection_retry(pid, on_retry_captured);
+                spawn_selection_retry(pid, callbacks);
             }
             log::warn!("AX path failed, falling back to AppleScript: {}", ax_error.message);
         }
@@ -533,12 +534,9 @@ static RETRYING_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32
 /// 后台重试：部分应用（实测 Word）的无障碍树在首次被查询后才异步物化——
 /// 首次划词时是只有百余节点的桩树，反复查询几秒后树才建成（所以第二次划词
 /// 才成功）。此函数在后台按固定间隔轮询目标应用（pid 不随前台切换失效）：
-/// 唤醒属性 → 树搜索 → 取句链路，树就绪后取到句子并通过 `on_captured` 补发。
-/// 总轮询窗口约 RETRY_ATTEMPTS * RETRY_INTERVAL_MS，超时放弃。
-fn spawn_selection_retry<F>(pid: i32, on_captured: F)
-where
-    F: FnOnce(SelectedContext) + Send + 'static,
-{
+/// 唤醒属性 → 树搜索 → 取句链路，树就绪后取到句子并通过 `on_finished` 补发。
+/// 总轮询窗口约 RETRY_ATTEMPTS * RETRY_INTERVAL_MS，超时放弃（`on_finished(None)`）。
+fn spawn_selection_retry(pid: i32, callbacks: RetryCallbacks) {
     use core_foundation::base::{CFType, TCFType};
     use std::sync::atomic::Ordering;
 
@@ -547,10 +545,13 @@ where
     const RETRY_INTERVAL_MS: u64 = 600;
 
     // 同一时间只允许一个重试在途，避免连按快捷键叠加多个轮询线程
+    // （被拦下时不触发任何回调：状态与在途的那个重试保持一致）
     if RETRYING_PID.swap(pid, Ordering::SeqCst) != 0 {
         return;
     }
     std::thread::spawn(move || {
+        let RetryCallbacks { on_started, on_finished } = callbacks;
+        on_started();
         for attempt in 1..=RETRY_ATTEMPTS {
             std::thread::sleep(std::time::Duration::from_millis(RETRY_INTERVAL_MS));
             unsafe {
@@ -571,12 +572,13 @@ where
                     log::info!("AX selection retry succeeded on attempt {attempt}");
                     let context = context_from_word_and_element(&element, &word);
                     RETRYING_PID.store(0, Ordering::SeqCst);
-                    on_captured(context);
+                    on_finished(Some(context));
                     return;
                 }
             }
         }
         RETRYING_PID.store(0, Ordering::SeqCst);
+        on_finished(None);
     });
 }
 

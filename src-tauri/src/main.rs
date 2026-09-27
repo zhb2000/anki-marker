@@ -112,6 +112,7 @@ fn main() {
             app.manage(application::dict::DictPath::new(portable.0, app.path())?);
             app.manage(Mutex::new(None::<Connection>));
             app.manage(application::shortcut::PendingSentence::new());
+            app.manage(application::shortcut::CaptureSettling::new());
 
             // 注册配置中设置的划词全局快捷键
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -194,6 +195,7 @@ fn main() {
             application::dict::sanitize_filename,
             application::shortcut::take_pending_sentence,
             application::shortcut::take_pending_capture_failure,
+            application::shortcut::is_capture_settling,
             application::shortcut::is_accessibility_trusted,
             application::shortcut::request_accessibility_trust,
             application::shortcut::get_shortcut_registration,

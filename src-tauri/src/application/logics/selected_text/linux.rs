@@ -18,7 +18,7 @@
 //! 期望的 UTF-16 码元不同，经 char_offset_to_utf16 换算后再切句。
 
 use super::capture::{capture_in_context, char_offset_to_utf16, SentenceCapture};
-use super::SelectedContext;
+use super::{RetryCallbacks, SelectedContext};
 
 use atspi::proxy::accessible::AccessibleProxy;
 use atspi::proxy::collection::CollectionProxy;
@@ -42,11 +42,11 @@ pub fn get_selected_text() -> Result<String, String> {
 /// 拿到词但取句失败返回 {词原文, None}；AT-SPI 报错或词为空时回退读 PRIMARY 选区。
 /// word_to_sentence 为 false 时完全等同 get_selected_text 的行为。
 ///
-/// `_on_retry_captured`：Linux 侧暂不做后台重试（AT-SPI 应用树一般即时物化，
+/// `_callbacks`：Linux 侧暂不做后台重试（AT-SPI 应用树一般即时物化，
 /// 不像 macOS Word 那样有桩树窗口期），保留形参保持三端签名一致。
 pub fn get_selected_context(
     word_to_sentence: bool,
-    _on_retry_captured: impl FnOnce(SelectedContext) + Send + 'static,
+    _callbacks: RetryCallbacks,
 ) -> Result<SelectedContext, String> {
     if !word_to_sentence {
         return get_selected_text().map(|text| SelectedContext { text, word: None });
