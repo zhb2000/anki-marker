@@ -33,7 +33,8 @@
 //! 再做周期性对账轮询；代价是回调必须**极轻**（同一文档：“If a hook function does not
 //! process events quickly enough, USER resources are lowered, eventually resulting in a
 //! fault or extremely slow response times”），所以回调里只做过滤、写一个 HWND 与时刻，
-//! 绝不做 UIA/COM/剪贴板这类事。
+//! 绝不做 UIA/COM/剪贴板这类事（同理，归还日志里的应用名只在归还路径解析，见
+//! `describe_target_window`，不放进回调）。
 //!
 //! 两个必须知道的边界：
 //! - 钩子只报**变化**，不报初始状态 → 安装前先取一次当前前台窗口播种（否则“静默启动、
@@ -53,7 +54,11 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use ::windows::Win32::Foundation::HWND;
+use ::windows::core::PWSTR;
+use ::windows::Win32::Foundation::{CloseHandle, HWND};
+use ::windows::Win32::System::Threading::{
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 use ::windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use ::windows::Win32::UI::WindowsAndMessaging::{
     GetClassNameW, GetForegroundWindow, GetMessageW, GetWindowLongPtrW, GetWindowThreadProcessId,
@@ -198,10 +203,12 @@ pub fn ensure_foreign_foreground() {
         );
         return;
     };
+    // 目标窗口在整段归还流程里不变，应用名只解析一次（跨进程调用，别每行日志都查）
+    let target_description = describe_target_window(target);
     log::info!(
         "the foreground window belongs to this process (taken by the tray menu); restoring {} \
          (recorded {} s ago)",
-        describe_window(target),
+        target_description,
         recorded_age().map(|age| age.as_secs()).unwrap_or_default(),
     );
     let started = Instant::now();
@@ -214,7 +221,7 @@ pub fn ensure_foreign_foreground() {
             log::info!(
                 "foreground window restored after {} ms: {}",
                 started.elapsed().as_millis(),
-                describe_window(target)
+                target_description
             );
             return;
         }
@@ -223,7 +230,7 @@ pub fn ensure_foreign_foreground() {
     log::warn!(
         "the foreground window did not switch to {} within {} ms; the capture will most likely \
          miss the target app",
-        describe_window(target),
+        target_description,
         RESTORE_TIMEOUT.as_millis()
     );
 }
@@ -291,6 +298,9 @@ fn belongs_to_self(hwnd: HWND) -> bool {
 
 /// 日志用的窗口描述：句柄 + 进程 id + 类名（类名足以辨认目标：Chrome_WidgetWin_1 /
 /// Notepad / ApplicationFrameWindow 等）。
+///
+/// 只在钩子回调等“必须极轻”的路径使用；能负担跨进程调用的路径（归还）用
+/// `describe_target_window`，那里会额外解析出应用名。
 fn describe_window(hwnd: HWND) -> String {
     let mut pid = 0u32;
     unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut u32)) };
@@ -299,6 +309,52 @@ fn describe_window(hwnd: HWND) -> String {
         hwnd.0 as usize,
         window_class(hwnd)
     );
+}
+
+/// 归还路径的窗口描述：比 `describe_window` 多一个应用名（如 `chrome.exe`）。
+///
+/// Chromium 系应用的顶层窗口类都是 `Chrome_WidgetWin_1`（Chrome/Edge/Brave…），
+/// 光看类名分不出是哪个应用，排查“归还给了谁”时应用名很关键。
+fn describe_target_window(hwnd: HWND) -> String {
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut u32)) };
+    let name = process_image_name(pid)
+        .map(|name| format!("{name}, "))
+        .unwrap_or_default();
+    return format!(
+        "{:#x} (pid {pid}, {name}class {:?})",
+        hwnd.0 as usize,
+        window_class(hwnd)
+    );
+}
+
+/// 进程可执行文件名（如 `chrome.exe` / `msedge.exe`）；取不到时返回 None。
+///
+/// 这是**跨进程调用**（OpenProcess + 查询进程镜像路径），因此只在取词/归还线程上
+/// 调用，绝不放钩子回调里（见模块文档），失败（权限不足、进程已退出、路径过长）时
+/// 日志退化为不含应用名。
+fn process_image_name(pid: u32) -> Option<String> {
+    if pid == 0 {
+        return None;
+    }
+    // PROCESS_QUERY_LIMITED_INFORMATION：Vista 起对更高完整性级别（提权）的进程也能打开
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+    // 路径可能超过 MAX_PATH，给足缓冲；仍不足时查询失败 → 退化不显示应用名
+    let mut buffer = [0u16; 1024];
+    let mut length = buffer.len() as u32;
+    let result = unsafe {
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            PWSTR(buffer.as_mut_ptr()),
+            &mut length,
+        )
+    };
+    let _ = unsafe { CloseHandle(process) };
+    result.ok()?;
+    let path = String::from_utf16_lossy(&buffer[..length as usize]);
+    // 只取文件名；用 rsplit 兼容两种分隔符，不依赖 std::path 的宿主平台语义
+    return Some(path.rsplit(['\\', '/']).next().unwrap_or(&path).to_string());
 }
 
 /// 取窗口类名（GetClassNameW）；失败返回 "?"。

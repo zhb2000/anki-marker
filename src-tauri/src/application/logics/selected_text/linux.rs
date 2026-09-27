@@ -16,6 +16,18 @@
 //!
 //! 注意 AT-SPI 的文本偏移按字符（Unicode codepoint）计，与共享 capture 模块
 //! 期望的 UTF-16 码元不同，经 char_offset_to_utf16 换算后再切句。
+//!
+//! ## 待办：托盘菜单触发时的取词目标（2026-09-28 记，尚未实机验证）
+//!
+//! Windows 上托盘菜单会抢走前台窗口（菜单由 tray-icon 持有，见 windows_target），
+//! Linux 的结构相同——菜单由宿主面板（libappindicator / SNI）持有，从菜单项触发时
+//! 活跃窗口（`State::Active`）不在用户所在的应用上，AT-SPI 两段式取词（活跃窗口内
+//! 查 Focused 元素 / 树搜索）因此大概率取不到；回退读 PRIMARY 与焦点无关，仍能取到
+//! 已选中的**词**，但拿不到选区偏移与上下文，即取不到句子。待办方向（与 Windows
+//! 同构）：记录“用户最近所在的应用窗口”，在菜单触发的取词前把活动窗口还回去——
+//! X11 下可用 EWMH（`_NET_ACTIVE_WINDOW` / `_NET_CLIENT_LIST_STACKING`）或
+//! `_NET_ACTIVE_WINDOW` 客户端消息，Wayland 下没有等价物（另一个已接受的限制）。
+//! 前提是先实机确认症状（Ubuntu 24 VM：菜单项取词是否只录到词、是否取不到句子）。
 
 use super::capture::{capture_in_context, char_offset_to_utf16, SentenceCapture};
 use super::{RetryCallbacks, SelectedContext};

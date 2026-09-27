@@ -8,8 +8,10 @@
 //! UIA 拿不到选区（控件不支持 TextPattern、GetSelection 为空或“成功”但返回空串，
 //! 如自绘文本的编辑器）时回退纯 Ctrl+C。剪贴板序号不变的语义按 UIA 路径分流：
 //! UIA 能正常响应（返回空串）说明应用合作、只是真没选——静默；UIA 报错（查询
-//! 都失败）且剪贴板不变，多为前台窗口以管理员身份运行（UIPI 拦截注入输入）——
-//! 报取词失败。
+//! 都失败）且剪贴板不变——报取词失败。此时有两种成因：前台窗口以管理员身份运行
+//! （UIPI 拦截注入输入），或前台窗口本就是我们自己的窗口（托盘菜单抢占前台且未
+//! 归还，见 windows_target——该情形已由 ensure_foreign_foreground 前置处理，走到这里
+//! 说明归还也没成，会另记一条诊断日志）。
 //!
 //! UIA 无需特殊权限。剪贴板备份/恢复是尽力而为的（非文本剪贴板跳过备份恢复）。
 //! 后台重试：Chromium 系应用在 UIA 客户端查询时才按需物化无障碍树，重试锁定
@@ -459,8 +461,9 @@ fn bstr_to_string(text: &BSTR) -> Result<String, String> {
 ///
 /// `silent_if_unchanged`：剪贴板序号在注入后未变化的语义。true（UIA 路径能
 /// 正常响应、只是没读到选区）= 什么都没选，返回空串静默；false（UIA 查询
-/// 本身失败）= 前台应用不理会注入的输入，多为前台窗口以管理员身份运行
-/// （UIPI 拦截），返回 Err 由前端弹失败提示。
+/// 本身失败）= 注入的输入没被任何文本控件接受，多为前台窗口以管理员身份运行
+/// （UIPI 拦截），或取词目标压根不在前台（托盘菜单抢占前台且未归还，见
+/// windows_target；此时调用方已先记一条诊断日志），返回 Err 由前端弹失败提示。
 fn copy_via_ctrl_c(silent_if_unchanged: bool) -> Result<String, String> {
     let backup = clipboard_read_text().ok();
     if backup.is_none() {
@@ -475,8 +478,8 @@ fn copy_via_ctrl_c(silent_if_unchanged: bool) -> Result<String, String> {
             return Ok(String::new());
         }
         return Err(
-            "the clipboard did not change after the simulated Ctrl+C (the foreground window may be \
-             running as administrator, which blocks injected input)"
+            "the clipboard did not change after the simulated Ctrl+C (the target window may not be \
+             in the foreground, or it is running as administrator, which blocks injected input)"
                 .to_string(),
         );
     }

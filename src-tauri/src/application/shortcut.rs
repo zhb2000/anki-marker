@@ -276,7 +276,9 @@ pub fn on_shortcut_pressed(app: AppHandle, trigger: CaptureTrigger) {
             Ok(context) => context,
             Err(capture_error) => {
                 // 常见原因：macOS 未授予辅助功能权限；Windows 前台窗口以管理员身份
-                // 运行（UIPI 拦截）；Linux 目标应用未通过 AT-SPI 暴露选区
+                // 运行（UIPI 拦截）或取词目标不在前台（托盘菜单抢占前台且未归还，
+                // 见 selected_text::windows_target）；Linux 目标应用未通过 AT-SPI
+                // 暴露选区且 PRIMARY 也为空
                 log::warn!("text capture failed: {capture_error}");
                 //
                 // 失败也要弹出主窗口：否则录入失败对用户完全无感知（分不清是没启动、
@@ -320,7 +322,9 @@ pub fn on_shortcut_pressed(app: AppHandle, trigger: CaptureTrigger) {
 /// Windows 的托盘菜单弹出前会抢走前台窗口，且系统不会自动归还（实机验证：
 /// 菜单关闭后 800ms 前台仍是托盘窗口），取词因此会落到我们自己的窗口上——
 /// UIA 焦点元素没有 TextPattern、注入的 Ctrl+C 也送不出去。
-/// 快捷键路径（以及 macOS/Linux 的菜单）无此问题，空实现。
+/// macOS 的菜单栏菜单不激活本应用，无此问题；**Linux 有同类问题但尚未处理**
+/// （托盘菜单由宿主面板持有，活动窗口不在目标应用上）——见 selected_text::linux
+/// 模块文档里的待办。快捷键路径无需归还，故空实现。
 #[cfg(target_os = "windows")]
 fn restore_foreground_before_capture(trigger: CaptureTrigger) {
     match trigger {

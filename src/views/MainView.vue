@@ -531,14 +531,16 @@ function markCapturedWord(word: string): void {
 
 /** 弹出划词失败提示（失败原因按平台给出引导） */
 function showCaptureFailureDialog() {
-    // 失败引导按平台给出：macOS 是辅助功能授权问题；Windows 多为目标应用
-    // 不暴露文本（无 TextPattern）或前台窗口以管理员身份运行（UIPI 拦截）；
-    // Linux 多为目标应用未通过 AT-SPI 暴露选区
+    // 失败引导按平台给出。Windows 走到这里说明两条路都没成：UIA 没拿到选区
+    // （焦点元素没有 TextPattern），且模拟的 Ctrl+C 也没能改变剪贴板——常见于以
+    // 管理员身份运行的窗口（UIPI 拦注入）或受保护的界面；另一种情况是取词目标
+    // 不在前台（从托盘菜单触发却没归还到位），点一下目标应用窗口即可重新记录目标。
+    // macOS 是辅助功能授权问题；Linux 是 AT-SPI 未暴露选区且 PRIMARY 也没读到。
     const hint = isMacOS.value
         ? '请在“系统设置 → 隐私与安全性 → 辅助功能”中允许本应用，然后重试。'
         : api.os.type() === 'windows'
-            ? '目标应用可能不支持 UI Automation，或前台窗口正以管理员身份运行（请换用普通权限的窗口重试）。'
-            : '目标应用可能未通过 AT-SPI 暴露选区（Linux 全局快捷键仅 X11 会话可用）。';
+            ? '目标应用既没有通过 UI Automation 暴露选区，也没有响应模拟的 Ctrl+C 复制（常见于以管理员身份运行的窗口，请换用普通权限的窗口重试）。若从托盘菜单触发，请先点击目标应用窗口再重试。'
+            : '目标应用没有通过 AT-SPI 暴露选区，也没能读到 PRIMARY 选区（请确认已选中文本；GNOME Wayland 下不支持读取 PRIMARY）。';
     void dialog.message(`获取选中文本失败。\n\n${hint}`, { title: '划词录入失败', kind: 'error' });
 }
 
