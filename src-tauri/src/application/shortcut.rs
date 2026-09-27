@@ -114,18 +114,33 @@ pub struct ShortcutRegistration {
 /// 静默注册（配置文件监视器兜底）路径同样更新缓存，保证缓存始终为真实状态。
 static LAST_REGISTRATION: Mutex<Option<ShortcutRegistration>> = Mutex::new(None);
 
+/// 划词没有录入内容的原因（emit 给前端，用于给出对应的提示文案）。
+///
+/// 两种原因对用户是不同的事：`Empty` 是"目标应用里没有可取用的选区"（真的没选中，
+/// 或应用不向无障碍接口暴露选区），`Failed` 是取词过程报错。以前 `Empty` 是静默的
+/// （避免误按快捷键时被打扰），但托盘菜单路径下静默会让用户无法区分"没选中"
+/// "应用不支持"与"取词目标取错了"，故两种都反馈。
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CaptureFailure {
+    /// 目标应用里没有可取用的选区
+    Empty,
+    /// 取词过程报错（无障碍查询与模拟复制都没拿到内容）
+    Failed,
+}
+
 /// “划词失败”暂存标记：失败时需弹出主窗口并提示，若前端尚未就绪
 /// （窗口刚重建、页面未加载完），emit 的事件会丢失，前端启动时经
 /// `take_pending_capture_failure` 取走标记补弹提示。
-static PENDING_CAPTURE_FAILURE: Mutex<bool> = Mutex::new(false);
+static PENDING_CAPTURE_FAILURE: Mutex<Option<CaptureFailure>> = Mutex::new(None);
 
-/// 取走“划词失败”暂存标记；无暂存返回 false。由前端在页面就绪时调用。
+/// 取走“划词失败”暂存标记（含失败种类）；无暂存返回 null。由前端在页面就绪时调用。
 #[tauri::command(rename_all = "snake_case")]
-pub fn take_pending_capture_failure() -> bool {
+pub fn take_pending_capture_failure() -> Option<CaptureFailure> {
     return PENDING_CAPTURE_FAILURE
         .lock()
-        .map(|mut guard| std::mem::take(&mut *guard))
-        .unwrap_or(false);
+        .ok()
+        .and_then(|mut guard| guard.take());
 }
 
 /// 查询最近一次全局快捷键注册结果（含启动时前端尚未就绪而错过 emit 的情况）；无记录返回 null
@@ -280,25 +295,20 @@ pub fn on_shortcut_pressed(app: AppHandle, trigger: CaptureTrigger) {
                 // 见 selected_text::windows_target）；Linux 目标应用未通过 AT-SPI
                 // 暴露选区且 PRIMARY 也为空
                 log::warn!("text capture failed: {capture_error}");
-                //
-                // 失败也要弹出主窗口：否则录入失败对用户完全无感知（分不清是没启动、
-                // 卡死还是失败）。先弹窗再 emit，窗口内的前端才能弹出失败提示；
-                // 窗口刚重建、前端尚未就绪时经暂存标记兜底补弹
-                if let Err(error) = show_and_focus_main_window(&app) {
-                    log::warn!("failed to show main window after a capture failure: {error}");
-                }
-                if let Ok(mut pending) = PENDING_CAPTURE_FAILURE.lock() {
-                    *pending = true;
-                }
-                if let Err(error) = app.emit("sentence-capture-failed", ()) {
-                    log::warn!("failed to emit sentence-capture-failed event: {error}");
-                }
+                report_capture_failure(&app, CaptureFailure::Failed);
                 return;
             }
         };
         let captured = match CapturedSentence::from_selected_context(context) {
             Some(captured) => captured,
-            None => return, // 未选中任何文本，静默忽略
+            None => {
+                // 目标应用里没有可取用的选区：真的没选中，或应用不向无障碍接口暴露选区。
+                // 与取词报错同样给反馈——静默时用户分不清"没选中""应用不支持"与
+                // "取词目标取错了"（托盘菜单路径下尤其明显）
+                log::info!("no text captured: the target app returned an empty selection");
+                report_capture_failure(&app, CaptureFailure::Empty);
+                return;
+            }
         };
         // 须在弹窗前记录——弹窗期间重试可能已命中
         if let Ok(mut guard) = primary_text.lock() {
@@ -315,6 +325,25 @@ pub fn on_shortcut_pressed(app: AppHandle, trigger: CaptureTrigger) {
             log::warn!("failed to emit sentence-captured event: {error}");
         }
     });
+}
+
+/// 划词没有录入内容时的统一反馈：弹出主窗口，并让前端提示原因（`failure` 区分
+/// “没有取到选区”与“取词报错”）。
+///
+/// 弹出主窗口是必需的：否则失败对用户完全无感知（分不清是没启动、卡死还是失败）。
+/// 先弹窗再 emit，窗口内的前端才能弹出提示；窗口刚重建、前端尚未就绪时经暂存标记
+/// 兜底补弹。
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn report_capture_failure(app: &AppHandle, failure: CaptureFailure) {
+    if let Err(error) = show_and_focus_main_window(app) {
+        log::warn!("failed to show main window after a capture failure: {error}");
+    }
+    if let Ok(mut pending) = PENDING_CAPTURE_FAILURE.lock() {
+        *pending = Some(failure);
+    }
+    if let Err(error) = app.emit("sentence-capture-failed", failure) {
+        log::warn!("failed to emit sentence-capture-failed event: {error}");
+    }
 }
 
 /// 菜单触发的取词在捕获前归还前台窗口（仅 Windows 需要）。

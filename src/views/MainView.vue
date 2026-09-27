@@ -529,19 +529,41 @@ function markCapturedWord(word: string): void {
     }
 }
 
-/** 弹出划词失败提示（失败原因按平台给出引导） */
-function showCaptureFailureDialog() {
-    // 失败引导按平台给出。Windows 走到这里说明两条路都没成：UIA 没拿到选区
-    // （焦点元素没有 TextPattern），且模拟的 Ctrl+C 也没能改变剪贴板——常见于以
-    // 管理员身份运行的窗口（UIPI 拦注入）或受保护的界面；另一种情况是取词目标
-    // 不在前台（从托盘菜单触发却没归还到位），点一下目标应用窗口即可重新记录目标。
-    // macOS 是辅助功能授权问题；Linux 是 AT-SPI 未暴露选区且 PRIMARY 也没读到。
-    const hint = isMacOS.value
-        ? '请在“系统设置 → 隐私与安全性 → 辅助功能”中允许本应用，然后重试。'
-        : api.os.type() === 'windows'
-            ? '目标应用既没有通过 UI Automation 暴露选区，也没有响应模拟的 Ctrl+C 复制（常见于以管理员身份运行的窗口，请换用普通权限的窗口重试）。若从托盘菜单触发，请先点击目标应用窗口再重试。'
-            : '目标应用没有通过 AT-SPI 暴露选区，也没能读到 PRIMARY 选区（请确认已选中文本；GNOME Wayland 下不支持读取 PRIMARY）。';
-    void dialog.message(`获取选中文本失败。\n\n${hint}`, { title: '划词录入失败', kind: 'error' });
+/**
+ * 划词没有录入内容的原因（与后端 CaptureFailure 对应）：
+ * empty = 目标应用里没有可取用的选区；failed = 取词过程报错
+ */
+type CaptureFailure = 'empty' | 'failed';
+
+/** 弹出划词未录入内容的提示（按失败种类与平台给出引导） */
+function showCaptureFailureDialog(failure: CaptureFailure) {
+    // 两种提示都以操作失败处理（ContentDialog 的 kind 只有 error/warning 两级，
+    // 而 warning 是给破坏性操作确认用的）。
+    //
+    // empty：目标应用里没有可取用的选区——真的没选中文字，或应用不向无障碍接口
+    // 暴露选区（Windows 上部分 UWP 应用如此；macOS 上如 VSCode 的编辑器）。
+    // 托盘菜单路径下的取词目标是“用户最近所在的应用窗口”，所以还要提示先点回目标应用。
+    //
+    // failed：无障碍查询与模拟复制都没拿到内容——Windows 上常见于以管理员身份
+    // 运行的窗口（UIPI 拦截注入）；macOS 上多为辅助功能未授权；Linux 上为 AT-SPI
+    // 未暴露选区且 PRIMARY 也为空。
+    const isWindows = api.os.type() === 'windows';
+    let message: string;
+    if (failure === 'empty') {
+        message = isMacOS.value
+            ? '取词目标里没有可取用的选区：可能没有选中文字，也可能该应用不向辅助功能接口暴露选区（如 VSCode 的编辑器）。请选中文字后重试。'
+            : isWindows
+                ? '取词目标里没有可取用的选区：可能没有选中文字，也可能该应用不向无障碍接口暴露选区（部分 UWP 应用如此）。\n\n从托盘菜单触发时，取词目标是“你最近所在的应用窗口”，请先点击要取词的应用窗口再重试。'
+                : '取词目标里没有可取用的选区：可能没有选中文字，也可能该应用未通过 AT-SPI 暴露选区；GNOME Wayland 下也不支持读取 PRIMARY 选区。请选中文字后重试。';
+    } else {
+        message = isMacOS.value
+            ? '获取选中文本失败。\n\n请在“系统设置 → 隐私与安全性 → 辅助功能”中允许本应用，然后重试。'
+            : isWindows
+                ? '获取选中文本失败。\n\n目标应用既没有通过 UI Automation 暴露选区，也没有响应模拟的 Ctrl+C 复制（常见于以管理员身份运行的窗口，请换用普通权限的窗口重试）。若从托盘菜单触发，请先点击目标应用窗口再重试。'
+                : '获取选中文本失败。\n\n目标应用没有通过 AT-SPI 暴露选区，也没能读到 PRIMARY 选区（请确认已选中文本；GNOME Wayland 下不支持读取 PRIMARY）。';
+    }
+    const title = failure === 'empty' ? '没有取到文本' : '划词录入失败';
+    void dialog.message(message, { title, kind: 'error' });
 }
 
 /** 监听划词句子事件，并取走可能在主窗口重建期间暂存的句子 */
@@ -575,11 +597,14 @@ async function initSentenceCapture() {
         console.error(error);
     }
     try {
-        await api.event.listen('sentence-capture-failed', showCaptureFailureDialog);
-        // 取词失败时会弹出主窗口并提示；若前端当时尚未就绪，事件已丢失，
-        // 此处取回暂存的失败标记补弹提示
-        if (await utils.invoke<boolean>('take_pending_capture_failure')) {
-            showCaptureFailureDialog();
+        await api.event.listen<CaptureFailure>('sentence-capture-failed', event => {
+            showCaptureFailureDialog(event.payload);
+        });
+        // 划词未录入内容时会弹出主窗口并提示；若前端当时尚未就绪，事件已丢失，
+        // 此处取回暂存的失败原因补弹提示
+        const pendingFailure = await utils.invoke<CaptureFailure | null>('take_pending_capture_failure');
+        if (pendingFailure != null) {
+            showCaptureFailureDialog(pendingFailure);
         }
     } catch (error) {
         console.error(error);
