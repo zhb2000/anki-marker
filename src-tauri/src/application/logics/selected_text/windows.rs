@@ -14,8 +14,8 @@
 //! UIA 无需特殊权限。剪贴板备份/恢复是尽力而为的（非文本剪贴板跳过备份恢复）。
 //! 后台重试：Chromium 系应用在 UIA 客户端查询时才按需物化无障碍树，重试锁定
 //! 目标窗口 HWND（不跟随焦点——弹窗会夺走焦点），树就绪后补发完整结果；
-//! 目标窗口由 windows_target::retry_target 给出（前台优先，托盘菜单抢走前台时
-//! 退到菜单前记下的用户窗口——见 windows_target）。
+//! 目标窗口由 windows_target::retry_target 给出（前台优先，托盘菜单占着前台时
+//! 退到那里跟踪的“用户最近所在的应用窗口”——见 windows_target）。
 
 use super::capture::{capture_in_context, reconcile_with_primary, SentenceCapture};
 use super::{RetryCallbacks, SelectedContext};
@@ -90,8 +90,8 @@ pub fn get_selected_context(
             // 按需物化，树就绪后补发句子。
             // 重试锁定目标窗口的 HWND 而不是跟随焦点：随后的回退结果/失败提示
             // 会弹出本应用窗口夺走焦点，跟随焦点会把查询打到我们自己的窗口上；
-            // 托盘菜单路径下前台还可能被托盘窗口占着（见 windows_target），
-            // retry_target 优先取前台、否则取菜单前记下的用户窗口
+            // 托盘菜单路径下前台还可能是我们自己的窗口（见 windows_target），
+            // retry_target 优先取前台、否则退回跟踪到的用户应用窗口
             if super::windows_target::foreground_is_own() {
                 // 诊断：此时 UIA 报的“focused element 不支持 TextPattern”指的很可能是
                 // 我们自己的窗口（托盘菜单抢走前台且未归还），与目标应用无关

@@ -20,8 +20,10 @@
 //! 菜单栏菜单不激活本应用（原前台应用不受影响）；**Windows 的托盘菜单相反**：
 //! tray-icon 在弹出菜单前会 `SetForegroundWindow` 自己的隐藏消息窗口（shell 要求，
 //! 否则点菜单外部菜单不消失），而 Windows 不会自动归还，于是取词会落到我们自己身上。
-//! 该问题的记录与归还见 logics::selected_text::windows_target（本模块负责在托盘
-//! 创建成功后安装记录器）。
+//! 好在托盘菜单弹出前的前台窗口本就不可靠（常见操作是“快捷键取词 → 本应用窗口弹出 →
+//! 关窗回后台 → 点托盘菜单”，点托盘时前台仍是我们自己的隐藏窗口），因此由
+//! logics::selected_text::windows_target 在启动时就开始跟踪“用户最近所在的应用窗口”，
+//! 并在取词前归还前台。
 //!
 //! 托盘点击行为按平台惯例区分：Windows 左键单击直接打开主窗口、菜单仅右键弹出
 //! （点击事件经 AppHandle::on_tray_icon_event 处理）；macOS 左键即弹菜单；Linux
@@ -324,13 +326,7 @@ fn update_tray(app: &AppHandle, tray_visible: bool) {
     match builder.build(app) {
         // 记录已应用的图标，供后续主题/配置变化时比对是否需要换图
         #[cfg(not(target_os = "macos"))]
-        Ok(_) => {
-            set_last_applied_tray_icon((icon_shape, icon_size));
-            // 托盘窗口此时才存在：安装“菜单弹出前记下前台窗口”的记录器
-            // （Windows 托盘菜单会抢走前台且不自动归还，见 selected_text::windows_target）
-            #[cfg(target_os = "windows")]
-            logics::selected_text::windows_target::install_tray_recorder();
-        }
+        Ok(_) => set_last_applied_tray_icon((icon_shape, icon_size)),
         #[cfg(target_os = "macos")]
         Ok(_) => {}
         Err(error) => log::warn!("failed to build tray icon: {error}"),

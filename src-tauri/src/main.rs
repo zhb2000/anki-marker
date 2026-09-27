@@ -129,6 +129,11 @@ fn main() {
             // Windows 托盘图标左键点击打开主窗口（macOS/Linux 无此交互，见 menubar.rs）
             #[cfg(target_os = "windows")]
             application::menubar::register_tray_icon_event_handler(app.handle());
+            // Windows：跟踪“用户最近所在的应用窗口”，供托盘菜单取词时归还前台
+            // （托盘菜单会抢走前台且不自动归还，见 selected_text::windows_target）。
+            // 必须在这里就启动——记录的是用户此前所在的应用，等要用时再跟踪就晚了
+            #[cfg(target_os = "windows")]
+            application::logics::selected_text::windows_target::install_foreground_watcher();
             // Windows：监听任务栏（系统「Windows 模式」）深浅变化，托盘图标跟随系统时实时换图。
             // 需在窗口创建之后挂载（config 中的窗口在 setup 之前已创建）
             #[cfg(target_os = "windows")]
