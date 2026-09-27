@@ -15,41 +15,58 @@
 //!
 //! ## 做法
 //!
-//! 1. **记**：启动时起的后台跟踪线程，以固定间隔记下**最近一个“像应用窗口”的外来
-//!    前台窗口**——即“用户最近所在的应用”。过滤掉本进程窗口、不可见窗口、工具窗口与
-//!    不可激活窗口（托盘图标、浮出层、提示条都是这两类）、以及 shell/桌面窗口类。
+//! 1. **记**：启动时起的跟踪线程安装 `EVENT_SYSTEM_FOREGROUND` 事件钩子
+//!    （`WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS`），在前台窗口变化时记下
+//!    **最近一个“像应用窗口”的外来前台窗口**——即“用户最近所在的应用”。过滤掉本进程
+//!    窗口、不可见窗口、工具窗口与不可激活窗口（托盘图标、浮出层、提示条都是这些）、
+//!    以及 shell/桌面窗口类。
 //! 2. **还**：菜单触发的取词在捕获前 `SetForegroundWindow(记录窗口)` 并等待生效，
 //!    之后 UIA 焦点元素与注入的 Ctrl+C 自然命中目标应用；后台重试锁定的 HWND 也随之
 //!    正确（见 `retry_target`）。
 //!
-//! 记录带时间戳，且窗口持续为前台时**不断刷新**：记录语义是“用户当前所在的应用”，
-//! 过期只发生在“前台长时间是本应用/不可用窗口”之后（此时旧目标已不可信，宁可不取词
-//! 也不取错）。快捷键路径不经过托盘菜单，取词前会清掉记录（见 `forget_recorded_target`）。
+//! ## 为什么用钩子而不是轮询
+//!
+//! 轮询（曾用过 250ms 一轮）的代价是持续定时唤醒（约 240 次/分钟），而钩子在空闲时
+//! 零唤醒——线程阻塞在 `GetMessage`，只在真正的前台变化时才被叫醒。文档对该机制给出
+//! 的保证是明确的（MSAA《Out-of-Context Hook Functions》：“assures that the callback
+//! function receives all events in the order in which they are generated”），因此不需要
+//! 再做周期性对账轮询；代价是回调必须**极轻**（同一文档：“If a hook function does not
+//! process events quickly enough, USER resources are lowered, eventually resulting in a
+//! fault or extremely slow response times”），所以回调里只做过滤、写一个 HWND 与时刻，
+//! 绝不做 UIA/COM/剪贴板这类事。
+//!
+//! 两个必须知道的边界：
+//! - 钩子只报**变化**，不报初始状态 → 安装前先取一次当前前台窗口播种（否则“静默启动、
+//!   用户已经在某个应用里”时，在用户切走之前不会收到任何事件）。
+//! - 作用域是**当前桌面**（`SetWinEventHook` 的 `idProcess = 0` 即
+//!   “all processes on the current desktop”）→ 安全桌面（UAC/Ctrl+Alt+Del）上的事件
+//!   收不到；但切到安全桌面并不改变我们桌面上的前台窗口，记录通常仍然有效。
+//!
+//! 记录**不设有效期**：它的语义就是“用户最近所在的那个应用窗口”，无论多久以前。
+//! 这与快捷键路径同构——快捷键取的也是“当前应用里此刻的选区”，不管那选区是五分钟前
+//! 还是三小时前划的。曾试过给记录设时间上限，但在事件驱动下没有意义：时刻只在检测到
+//! 应用切换时才刷新，用户停在同一应用里读一小时也不会产生事件，于是“上限”会把完全
+//! 有效的目标判成过期（典型症状是“取词后在卡片里编辑一会儿，再回托盘就取不到”）。
+//! 记录的时刻只保留给日志用（`recorded_age`），便于事后发现“归还了一个很久以前的应用”。
+//! 快捷键路径不经过托盘菜单，取词前会清掉记录（见 `forget_recorded_target`）。
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use ::windows::Win32::Foundation::HWND;
+use ::windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId, IsWindow,
-    IsWindowVisible, SetForegroundWindow, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GetClassNameW, GetForegroundWindow, GetMessageW, GetWindowLongPtrW, GetWindowThreadProcessId,
+    IsWindow, IsWindowVisible, SetForegroundWindow, EVENT_SYSTEM_FOREGROUND, GWL_EXSTYLE, MSG,
+    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
-
-/// 后台跟踪的轮询间隔。250ms 足够——用户切到某个应用再伸手去点托盘远不止这个时间；
-/// 每轮只有两个轻量 API 调用。
-const WATCH_INTERVAL: Duration = Duration::from_millis(250);
-
-/// 记录的有效期：超过则不再用于归还。记录语义是“用户当前所在的应用”，窗口在前台期间
-/// 时间戳不断刷新，所以这里衡量的是“用户离开目标应用多久了”。取 5 分钟：足够覆盖
-/// “取词后在卡片里编辑一会儿再回托盘”，又不至于把一小时前的应用当成当前目标。
-const RECORD_TTL: Duration = Duration::from_secs(300);
 
 /// 归还前台的等待上限与轮询间隔。`SetForegroundWindow` 的生效是异步的（前台状态在该
 /// 线程处理下一条消息时才结算），必须等它真正落到目标窗口再取词。
 const RESTORE_TIMEOUT: Duration = Duration::from_millis(300);
 const RESTORE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-/// 最近一个“用户所在的应用窗口”（HWND 数值 + 最近一次被观察到在前台的时刻）。
+/// 最近一个“用户所在的应用窗口”（HWND 数值 + 记录时刻）。
 ///
 /// HWND 只是数值句柄、不含可析构资源，跨线程读写安全（同 selected_text::windows
 /// 把 HWND 转 usize 跨线程的做法）。
@@ -58,27 +75,80 @@ static RECORDED_TARGET: Mutex<Option<(usize, Instant)>> = Mutex::new(None);
 /// 启动前台窗口跟踪（应用 setup 阶段调用一次，Windows）。
 ///
 /// 必须早于用户进入目标应用：记录的是“用户最近所在的应用”，若等托盘创建时才开始
-/// 跟踪，用户此前在哪个应用里就已无从得知了。
+/// 跟踪，用户此前在哪个应用里就已无从得知了。安装钩子的线程同时负责泵消息——
+/// out-of-context 钩子的事件只在安装它的线程处理消息时才被投递。
 pub fn install_foreground_watcher() {
-    std::thread::spawn(|| loop {
-        std::thread::sleep(WATCH_INTERVAL);
-        let hwnd = unsafe { GetForegroundWindow() };
-        if hwnd.0.is_null() || !is_recordable(hwnd) {
-            // 前台是本应用或不可用窗口（托盘菜单期间即如此）：保留上一次的记录
-            continue;
-        }
-        let raw = hwnd.0 as usize;
-        if recorded_raw() != Some(raw) {
-            log::info!(
-                "recorded the last foreign foreground window: {}",
-                describe_window(hwnd)
+    std::thread::spawn(|| {
+        // 播种：钩子只报变化，不报初始状态（静默启动、用户已在某应用里时尤其需要）
+        record_foreground(unsafe { GetForegroundWindow() });
+
+        let hook = unsafe {
+            SetWinEventHook(
+                EVENT_SYSTEM_FOREGROUND,
+                EVENT_SYSTEM_FOREGROUND,
+                None,
+                Some(foreground_event_proc),
+                0, // 所有进程
+                0, // 所有线程
+                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+            )
+        };
+        if hook.is_invalid() {
+            log::warn!(
+                "failed to install the foreground event hook; capturing from the tray menu will \
+                 keep failing on Windows"
             );
+            return;
         }
-        if let Ok(mut guard) = RECORDED_TARGET.lock() {
-            // 每次采样都刷新时刻（记录衡量的是“多久没在目标应用里了”）
-            *guard = Some((raw, Instant::now()));
+        // 消息泵：线程阻塞在 GetMessage 时零唤醒，事件在 GetMessage 内部被投递到
+        // 上面的回调（本线程没有窗口，故无需 TranslateMessage/DispatchMessage）。
+        // 循环只在收到 WM_QUIT（返回值 0）或出错（-1）时结束。
+        let mut message = MSG::default();
+        loop {
+            if unsafe { GetMessageW(&mut message, None, 0, 0) }.0 <= 0 {
+                break;
+            }
         }
+        let _ = unsafe { UnhookWinEvent(hook) };
     });
+}
+
+/// `EVENT_SYSTEM_FOREGROUND` 回调：前台窗口变化时记录候选目标。
+///
+/// 回调必须极轻（见模块文档），故只做过滤与一次记录写入，不做任何跨进程调用。
+unsafe extern "system" fn foreground_event_proc(
+    _hook: HWINEVENTHOOK,
+    event: u32,
+    hwnd: HWND,
+    _id_object: i32,
+    _id_child: i32,
+    _event_thread: u32,
+    _event_time: u32,
+) {
+    if event != EVENT_SYSTEM_FOREGROUND {
+        return;
+    }
+    record_foreground(hwnd);
+}
+
+/// 把候选窗口写入记录（并在目标变化时记一行日志）。
+///
+/// 候选不通过过滤时不动记录——保留“用户最近所在的那个应用”，这正是托盘菜单抢走前台
+/// 之后我们唯一还能拿到的线索。
+fn record_foreground(hwnd: HWND) {
+    if hwnd.0.is_null() || !is_recordable(hwnd) {
+        return;
+    }
+    let raw = hwnd.0 as usize;
+    if recorded_raw() != Some(raw) {
+        log::info!(
+            "recorded the last foreign foreground window: {}",
+            describe_window(hwnd)
+        );
+    }
+    if let Ok(mut guard) = RECORDED_TARGET.lock() {
+        *guard = Some((raw, Instant::now()));
+    }
 }
 
 /// 是否值得记为取词目标——即“用户正在使用的应用窗口”。
@@ -122,14 +192,17 @@ pub fn ensure_foreign_foreground() {
     }
     let Some(target) = recorded_target() else {
         log::warn!(
-            "the foreground window belongs to this process and no usable target window is \
-             recorded (none seen recently); the capture will most likely miss the target app"
+            "the foreground window belongs to this process and no target window is recorded \
+             (none seen yet, or the recorded window is gone); the capture will most likely miss \
+             the target app"
         );
         return;
     };
     log::info!(
-        "the foreground window belongs to this process (taken by the tray menu); restoring {}",
-        describe_window(target)
+        "the foreground window belongs to this process (taken by the tray menu); restoring {} \
+         (recorded {} s ago)",
+        describe_window(target),
+        recorded_age().map(|age| age.as_secs()).unwrap_or_default(),
     );
     let started = Instant::now();
     // 返回值只表示“调用是否被受理”，调用可能被前台锁拒绝，真正是否生效由下面的轮询
@@ -183,12 +256,11 @@ pub fn forget_recorded_target() {
     }
 }
 
-/// 取可用的记录目标（未过期、窗口仍存在且不属于本进程）；不可用时返回 None。
+/// 取可用的记录目标（窗口仍存在且不属于本进程）；无记录或记录已失效时返回 None。
+///
+/// 不设时间上限（见模块文档）：记录恒为“用户最近所在的应用窗口”。
 fn recorded_target() -> Option<HWND> {
-    let (raw, recorded_at) = RECORDED_TARGET.lock().ok().and_then(|guard| *guard)?;
-    if recorded_at.elapsed() > RECORD_TTL {
-        return None;
-    }
+    let (raw, _) = RECORDED_TARGET.lock().ok().and_then(|guard| *guard)?;
     let hwnd = HWND(raw as *mut std::ffi::c_void);
     if !unsafe { IsWindow(Some(hwnd)) }.as_bool() || belongs_to_self(hwnd) {
         return None;
@@ -196,7 +268,16 @@ fn recorded_target() -> Option<HWND> {
     return Some(hwnd);
 }
 
-/// 已记录窗口的句柄数值（仅用于判断前台是否已切换，不做过期与有效性检查）。
+/// 记录的年龄（仅用于日志：让“归还了一个很久以前的应用”在日志里可见）。
+fn recorded_age() -> Option<Duration> {
+    return RECORDED_TARGET
+        .lock()
+        .ok()
+        .and_then(|guard| *guard)
+        .map(|(_, recorded_at)| recorded_at.elapsed());
+}
+
+/// 已记录窗口的句柄数值（仅用于判断目标是否变化，不做过期与有效性检查）。
 fn recorded_raw() -> Option<usize> {
     return RECORDED_TARGET.lock().ok().and_then(|guard| *guard).map(|(raw, _)| raw);
 }
