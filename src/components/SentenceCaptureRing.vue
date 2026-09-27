@@ -12,6 +12,9 @@ import { onBeforeUnmount, ref, watch } from 'vue';
  * "最短可见时长"这类人为常量——最短可见即入场与退场两段动画自身的时长。
  * 循环期的弧长不取 0（否则工作期间环会周期性整个消失，反而像闪烁），只在退场收束时归零。
  *
+ * 收束是**尾巴顺着头部的方向追上来**（头部沿路径不动、尾巴向前扫过），而不是反过来
+ * 把头部往回收——后者在屏幕上是一段逆着旋转方向的倒放，观感像卡带倒转。
+ *
  * 逐帧动画由 requestAnimationFrame 直接驱动而非 CSS keyframes：CSS 改
  * animation-name 会重启动画、相位跳变，无法从中途优雅收束。
  */
@@ -37,8 +40,9 @@ const ARC_MAX = 0.7;
 
 type Phase = 'idle' | 'entering' | 'looping' | 'settling';
 
-/** 弧长（占整圈比例）、旋转角（度）、整体不透明度：由逐帧函数直接赋值 */
+/** 弧长（整圈的比例）、弧起点沿圆周的位置（整圈的比例）、旋转角（度）、整体不透明度 */
 const arc = ref(0);
+const arcStart = ref(0);
 const angle = ref(0);
 const opacity = ref(0);
 
@@ -52,11 +56,17 @@ let loopAngleBase = 0;
 let enterFromArc = 0;
 let enterFromAngle = 0;
 let settleFromArc = 0;
+let settleFromStart = 0;
 let settleFromAngle = 0;
 let rafId = 0;
 
 function easeOutCubic(t: number): number {
     return 1 - (1 - t) ** 3;
+}
+
+/** 两端导数为零的平滑起止：收束用它，避免尾巴起手/收尾出现速度突变 */
+function smoothstep(t: number): number {
+    return t * t * (3 - 2 * t);
 }
 
 function scheduleFrame(): void {
@@ -101,8 +111,11 @@ function renderFrame(now: number): void {
 
     if (phase === 'settling') {
         const t = Math.min(elapsed / SETTLE_MS, 1);
-        // 弧长收到 0；旋转同时轻微减速（角速度取 OMEGA·(1 - 0.6t)，积分得下式的角度增量）
-        arc.value = settleFromArc * (1 - easeOutCubic(t));
+        const eased = smoothstep(t);
+        // 尾巴沿路径向前扫过、头部停在原处：两者都朝顺时针走，弧长顺势收到 0
+        arcStart.value = settleFromStart + settleFromArc * eased;
+        arc.value = settleFromArc * (1 - eased);
+        // 旋转同时轻微减速（角速度取 OMEGA·(1 - 0.6t)，积分得下式的角度增量）
         angle.value = settleFromAngle + OMEGA * SETTLE_MS * (t - 0.3 * t * t);
         // 圆头描边在弧长趋零时仍会残留一个点，故在弧长已近乎不可见的末段整体淡出，
         // 让"消失"是干净的（不依赖是否恰好收到 0）
@@ -119,6 +132,12 @@ function renderFrame(now: number): void {
 
 /** 开始工作指示 */
 function start(): void {
+    // 弧起点归一化到路径原点：面板角上只有把起点收在原点附近，弧才不会越过路径终点
+    // 被截断。起点后移的等量位移补偿到旋转角上（屏上角度 = 旋转 + 起点角），位置不变
+    if (arcStart.value !== 0) {
+        angle.value += arcStart.value * 360;
+        arcStart.value = 0;
+    }
     enterFromArc = arc.value;
     enterFromAngle = angle.value;
     phase = 'entering';
@@ -127,12 +146,13 @@ function start(): void {
     scheduleFrame();
 }
 
-/** 收束退场：弧长从当前值收到 0，随后自行隐藏 */
+/** 收束退场：尾巴顺旋转方向追上来，弧长归零后自行隐藏 */
 function settle(): void {
     if (phase === 'idle' || phase === 'settling') {
         return;
     }
     settleFromArc = arc.value;
+    settleFromStart = arcStart.value;
     settleFromAngle = angle.value;
     phase = 'settling';
     phaseStart = performance.now();
@@ -154,21 +174,20 @@ onBeforeUnmount(stopFrames);
     <svg class="sentence-capture-ring" :style="{ transform: `rotate(${angle}deg)`, opacity }" width="16"
         height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
         <circle cx="8" cy="8" :r="RADIUS" fill="none"
-            :stroke-dasharray="`${(arc * CIRCUMFERENCE).toFixed(2)} ${CIRCUMFERENCE.toFixed(2)}`" />
+            :stroke-dasharray="`${(arc * CIRCUMFERENCE).toFixed(2)} ${CIRCUMFERENCE.toFixed(2)}`"
+            :stroke-dashoffset="(-arcStart * CIRCUMFERENCE).toFixed(2)" />
     </svg>
 </template>
 
 <style scoped>
 .sentence-capture-ring {
-    /* 钉在句子面板右下角内侧、跨在面板边框上（角的角标位置）。
-       几何：.sentence-container 的右 padding 7.5px、下 padding 15px，面板下 padding 8px，
-       16px 的环放进 15px 的留白带必然跨界——故取 right 7px（外缘与面板右边框齐平）、
-       bottom 6px（上缘离正文末行 1px），既不压正文、也不贴到窗口边。
-       绝对定位相对 .sentence-container 而非面板——面板自身是滚动容器
+    /* 钉在句子面板（白色圆角面板）右下角内侧，整个环落在面板内：
+       .sentence-container 的右 padding 7.5px、下 padding 15px 正是面板右边框/下边框的位置，
+       各再加 5px 内缩。绝对定位相对 .sentence-container 而非面板——面板自身是滚动容器
        （overflow-y: auto），放进去会随内容滚走并被裁剪 */
     position: absolute;
-    right: 7px;
-    bottom: 6px;
+    right: calc(15px / 2 + 5px);
+    bottom: calc(15px + 5px);
     /* 纯展示：不参与命中测试，避免干扰面板上的词元拖刷/点击手势 */
     pointer-events: none;
     transform-origin: center;
