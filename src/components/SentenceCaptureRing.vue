@@ -40,6 +40,18 @@ const OMEGA = 360 / CYCLE_MS;
 /** 循环态的弧长区间（占整圈的比例）：不取 0，保证工作期间环持续可见、不闪断 */
 const ARC_MIN = 0.12;
 const ARC_MAX = 0.7;
+/**
+ * 循环态弧起点的锚定中心：弧起点 = 本值 − 弧长/2。
+ *
+ * "减半个弧长"正是让两端都不倒退的关键：弧长变化量被头、尾各承担一半，于是
+ * 头部速度 = 基准 + 弧长变化率/2、尾巴速度 = 基准 − 弧长变化率/2，二者恒为正——
+ * 伸长段头部领先，收缩段尾巴追上，任何时刻都没有端点朝反方向走。
+ * 反过来把起点钉死在路径原点，弧长变化就全压在头部上，收缩段头部必然倒退。
+ *
+ * 取值只受"起点 + 弧长 ≤ 1（占整圈比例）"约束——越过路径终点会被截断、弧被切短。
+ * 弧长最大 0.7 时起点为 −0.35、头部为 +0.35，故本值取 0.40 两侧都留有余量。
+ */
+const ARC_ANCHOR = 0.4;
 
 type Phase = 'idle' | 'entering' | 'looping' | 'settling';
 
@@ -90,9 +102,15 @@ function renderFrame(now: number): void {
 
     if (phase === 'entering') {
         const t = Math.min(elapsed / ENTER_MS, 1);
+        // 入场由头部单独伸长（尾巴沿路径不动）——这段观感最好，保持不动
         arc.value = enterFromArc + (ARC_MIN - enterFromArc) * easeOutCubic(t);
         angle.value = enterFromAngle + OMEGA * elapsed;
         if (t >= 1) {
+            // 交接给循环态：把弧起点挪到循环的锚定值（见 ARC_ANCHOR）。位移差等量补偿到
+            // 旋转角上（屏上角度 = 旋转 + 起点角），屏幕位置逐点不变，故这一步不可见
+            const anchor = ARC_ANCHOR - arc.value / 2;
+            angle.value += (arcStart.value - anchor) * 360;
+            arcStart.value = anchor;
             phase = 'looping';
             loopStart = now;
             loopAngleBase = angle.value;
@@ -106,6 +124,8 @@ function renderFrame(now: number): void {
         // 升余弦：一个周期内平滑地伸长再缩短，两端导数为零（无折角）
         const swell = 0.5 - 0.5 * Math.cos((2 * Math.PI * (loopElapsed % CYCLE_MS)) / CYCLE_MS);
         arc.value = ARC_MIN + (ARC_MAX - ARC_MIN) * swell;
+        // 起点随弧长反向移动半个弧长：伸长段头部领先、收缩段尾巴追上，两端全程只前进
+        arcStart.value = ARC_ANCHOR - arc.value / 2;
         angle.value = loopAngleBase + OMEGA * loopElapsed;
         scheduleFrame();
         return;
@@ -130,12 +150,8 @@ function renderFrame(now: number): void {
 
 /** 开始工作指示 */
 function start(): void {
-    // 弧起点归一化到路径原点：面板角上只有把起点收在原点附近，弧才不会越过路径终点
-    // 被截断。起点后移的等量位移补偿到旋转角上（屏上角度 = 旋转 + 起点角），位置不变
-    if (arcStart.value !== 0) {
-        angle.value += arcStart.value * 360;
-        arcStart.value = 0;
-    }
+    // 起点由循环态自行锚定（见 ARC_ANCHOR），取值有界、不会累积到越过路径终点，
+    // 故无需再做归一化。入场刻意不动起点：尾巴沿路径停住，由头部单独伸长
     enterFromArc = arc.value;
     enterFromAngle = angle.value;
     phase = 'entering';
