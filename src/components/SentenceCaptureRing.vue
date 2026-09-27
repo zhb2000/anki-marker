@@ -15,6 +15,9 @@ import { onBeforeUnmount, ref, watch } from 'vue';
  * 收束是**尾巴顺着头部的方向追上来**（头部沿路径不动、尾巴向前扫过），而不是反过来
  * 把头部往回收——后者在屏幕上是一段逆着旋转方向的倒放，观感像卡带倒转。
  *
+ * 另一处偏离 Fluent 规格的取舍：端点用平头而非圆头（原因见样式里的注释）。圆头会让弧长
+ * 的视觉长度有个约一个描边宽的硬下限，收束就变成"缩到一个点后消失"而不是"缩短到 0"。
+ *
  * 逐帧动画由 requestAnimationFrame 直接驱动而非 CSS keyframes：CSS 改
  * animation-name 会重启动画、相位跳变，无法从中途优雅收束。
  */
@@ -40,11 +43,10 @@ const ARC_MAX = 0.7;
 
 type Phase = 'idle' | 'entering' | 'looping' | 'settling';
 
-/** 弧长（整圈的比例）、弧起点沿圆周的位置（整圈的比例）、旋转角（度）、整体不透明度 */
+/** 弧长（整圈的比例）、弧起点沿圆周的位置（整圈的比例）、旋转角（度） */
 const arc = ref(0);
 const arcStart = ref(0);
 const angle = ref(0);
-const opacity = ref(0);
 
 let phase: Phase = 'idle';
 /** 当前阶段的起始时间戳 */
@@ -117,13 +119,9 @@ function renderFrame(now: number): void {
         arc.value = settleFromArc * (1 - eased);
         // 旋转同时轻微减速（角速度取 OMEGA·(1 - 0.6t)，积分得下式的角度增量）
         angle.value = settleFromAngle + OMEGA * SETTLE_MS * (t - 0.3 * t * t);
-        // 圆头描边在弧长趋零时仍会残留一个点，故在弧长已近乎不可见的末段整体淡出，
-        // 让"消失"是干净的（不依赖是否恰好收到 0）
-        opacity.value = t < 0.7 ? 1 : 1 - easeOutCubic((t - 0.7) / 0.3);
         if (t >= 1) {
             phase = 'idle';
             arc.value = 0;
-            opacity.value = 0;
             return; // 收束完成，不再排下一帧
         }
         scheduleFrame();
@@ -142,7 +140,6 @@ function start(): void {
     enterFromAngle = angle.value;
     phase = 'entering';
     phaseStart = performance.now();
-    opacity.value = 1;
     scheduleFrame();
 }
 
@@ -171,8 +168,8 @@ onBeforeUnmount(stopFrames);
 </script>
 
 <template>
-    <svg class="sentence-capture-ring" :style="{ transform: `rotate(${angle}deg)`, opacity }" width="16"
-        height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+    <svg class="sentence-capture-ring" :style="{ transform: `rotate(${angle}deg)` }" width="16" height="16"
+        viewBox="0 0 16 16" aria-hidden="true" focusable="false">
         <circle cx="8" cy="8" :r="RADIUS" fill="none"
             :stroke-dasharray="`${(arc * CIRCUMFERENCE).toFixed(2)} ${CIRCUMFERENCE.toFixed(2)}`"
             :stroke-dashoffset="(-arcStart * CIRCUMFERENCE).toFixed(2)" />
@@ -202,6 +199,10 @@ onBeforeUnmount(stopFrames);
 .sentence-capture-ring circle {
     stroke: currentColor;
     stroke-width: 1.6;
-    stroke-linecap: round;
+    /* 平头端点，不是 Fluent 的圆头：圆头半径 0.8px 使弧长的"视觉长度"有个硬下限——
+       弧长远短于一个描边宽时，画出来仍是约 1.6px 的点，视觉上不再跟着缩短，
+       于是收束读起来是"缩到一个点后消失"而不是"弧长缩短到 0"。平头端点没有这个下限，
+       弧长归零即什么都不画。代价是弧的两端由圆头变平头（16px、1.6px 描边下差别很小） */
+    stroke-linecap: butt;
 }
 </style>
