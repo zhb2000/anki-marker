@@ -216,31 +216,41 @@ pub fn on_shortcut_pressed(app: AppHandle) {
         // 重试守卫：重试路径在目标窗口内搜索“持有选区的元素”（Windows）或按 pid
         // 重建应用元素（macOS），可能撞错控件（残留选区、浏览器 UI 等）——
         // 与主路径结果（模拟复制读到的才是用户真实选区）不一致时丢弃，避免用
-        // 错误内容覆盖用户已经看到的正确结果
+        // 错误内容覆盖用户已经看到的正确结果。
+        // 例外：重试的词漂移但句子包含权威词（Edge PDF 文本层错位，实测选区偏移
+        // 2 个字符）时，词替换为权威词后补发——句子是对的，只是词需要修正
         let primary_text = std::sync::Arc::new(Mutex::new(None::<String>));
         let retry_primary_text = primary_text.clone();
         let retry_app = app.clone();
         let context = match logics::selected_text::get_selected_context(
             word_to_sentence,
             move |context| {
-                if let Some(captured) = CapturedSentence::from_selected_context(context) {
+                if let Some(mut captured) = CapturedSentence::from_selected_context(context) {
                     if let Ok(Some(primary)) =
                         retry_primary_text.lock().map(|guard| guard.clone())
                     {
-                        let retry_matches = captured
-                            .word
-                            .as_deref()
-                            .map(|word| word.trim() == primary)
-                            .unwrap_or_else(|| captured.text.trim() == primary);
-                        if !retry_matches {
-                            log::warn!(
-                                "dropping the retry capture: it does not match the primary \
-                                 result (retry word {:?}, retry text {:.80?}, primary {:?})",
-                                captured.word,
-                                captured.text,
-                                primary
-                            );
-                            return;
+                        let word_matches =
+                            captured.word.as_deref().is_some_and(|word| word.trim() == primary);
+                        let text_matches = captured.text.trim() == primary;
+                        if !word_matches && !text_matches {
+                            if captured.word.is_some() && captured.text.contains(&primary) {
+                                log::info!(
+                                    "retry capture reconciled with the primary result: \
+                                     word {:?} -> {:?}",
+                                    captured.word, primary
+                                );
+                                captured =
+                                    CapturedSentence { text: captured.text, word: Some(primary) };
+                            } else {
+                                log::warn!(
+                                    "dropping the retry capture: it does not match the primary \
+                                     result (retry word {:?}, retry text {:.80?}, primary {:?})",
+                                    captured.word,
+                                    captured.text,
+                                    primary
+                                );
+                                return;
+                            }
                         }
                     }
                     if let Ok(mut pending) = retry_app.state::<PendingSentence>().0.lock() {

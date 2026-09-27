@@ -223,16 +223,17 @@ mod tests {
     /// 切片在原串中不连续——句子字节偏移若用 len() 累计会逐渐失真（偏早），
     /// 选区靠近句子末尾时会错配到后面的句子（Windows GitHub 信息流实测：
     /// 选中 "MSYS2" 却切出后面的仓库链接）。此例中两个 "。\n\n" 段被过滤，
-    /// 选词 "this"（UTF-16 偏移 43）必须返回其真实所在的句子
+    /// 选词 "this"（UTF-16 偏移 39：前缀 "。\n\n。\n\n" 占 6 码元/10 字节，
+    /// 漂移量恰为 10 字节，旧实现会把选区错配到后面的句子）必须返回其真实所在的句子
     #[test]
     fn filtered_segment_offset_drift() {
         let context = "。\n\n。\n\nMSYS2 is here at the very end of this. Next.";
         assert_eq!(
-            find_sentence(context, 43, 47).as_deref(),
+            find_sentence(context, 39, 43).as_deref(),
             Some("MSYS2 is here at the very end of this.")
         );
-        // 相交计数同样使用精确偏移：选词 1，跨句选择 "this. Next" 为 2
-        assert_eq!(count_intersecting_sentences(context, 43, 47), 1);
-        assert_eq!(count_intersecting_sentences(context, 43, 54), 2);
+        // 相交计数同样使用精确偏移：选词 1，跨句选择 "this. Next"（UTF-16 [39, 49)）为 2
+        assert_eq!(count_intersecting_sentences(context, 39, 43), 1);
+        assert_eq!(count_intersecting_sentences(context, 39, 49), 2);
     }
 }

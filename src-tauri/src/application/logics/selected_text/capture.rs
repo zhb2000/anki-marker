@@ -6,6 +6,8 @@
 //! 异（详见 find_anchor），因此所有候选锚点都要经“该位置的 UTF-16 子串等于
 //! 所选文本”校验后才采用——宁可降级为仅录词，也不切出错误的句子。
 
+#[cfg(any(target_os = "windows", test))]
+use super::SelectedContext;
 use crate::application::logics::sentence::{
     count_intersecting_sentences, find_sentence_with_range,
 };
@@ -139,9 +141,58 @@ pub fn char_offset_to_utf16(s: &str, char_offset: usize) -> Option<usize> {
     return (char_offset == s.chars().count()).then_some(utf16_offset);
 }
 
+/// 用权威选区文本调和平台 API 的捕获结果。
+///
+/// 权威文本来自模拟复制读到的剪贴板内容——拷贝成功的语义下它恒为用户真实选区；
+/// 而平台无障碍 API 报告的选区可能漂移（Edge PDF 的 Adobe 引擎：文本层与视觉渲染
+/// 错位，实测选区偏移 2 个字符，"reconstruction" 读出为 "onstruction qu"）或在
+/// 极端情况下撞错控件。
+///
+/// 调和规则（`primary` 为 None/空表示无法取得权威文本，原样返回平台结果）：
+/// - 平台取句成功（有 word）：句子包含权威词 → 句子保留、词替换为权威词（修正
+///   漂移，前端预选与词典查询随之恢复正常）；不包含 → 平台读错了选区，降级为仅
+///   录入权威文本；
+/// - 平台未取句（降级/原样录入）：直接以权威文本为准。
+///
+/// 仅 Windows 使用（macOS AX 的选区报告未见漂移，保持纯 AX 链路）；test 保留以便
+/// 单测在各平台运行。
+#[cfg(any(target_os = "windows", test))]
+pub fn reconcile_with_primary(
+    text: String,
+    word: Option<String>,
+    primary: Option<String>,
+) -> SelectedContext {
+    let Some(primary) = primary.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()) else {
+        return SelectedContext { text, word };
+    };
+    return match word {
+        Some(platform_word) if text.contains(&primary) => {
+            if platform_word.trim() != primary {
+                // 词漂移但句子正确：替换为权威词（Edge PDF 文本层错位场景）
+                log::info!(
+                    "capture reconciled with the clipboard: word {:?} -> {:?}",
+                    platform_word, primary
+                );
+            }
+            SelectedContext { text, word: Some(primary) }
+        }
+        Some(platform_word) => {
+            // 句子不含权威词：平台读错了选区（撞错控件/漂移越界），降级录权威文本
+            log::warn!(
+                "platform capture does not match the clipboard selection, degrading to the \
+                 clipboard text (platform word {platform_word:?}, platform text {:.80?}, \
+                 clipboard {primary:?})",
+                text
+            );
+            SelectedContext { text: primary, word: None }
+        }
+        None => SelectedContext { text: primary, word: None },
+    };
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{capture_in_context, char_offset_to_utf16, find_anchor, SentenceCapture};
+    use super::{capture_in_context, char_offset_to_utf16, find_anchor, reconcile_with_primary, SentenceCapture};
 
     /// 锚点候选 1：提供方忠实响应请求窗口（窗口偏移有效）
     #[test]
@@ -246,5 +297,57 @@ mod tests {
         assert_eq!(char_offset_to_utf16("say 😀 hi", 4), Some(4)); // 😀 起点
         assert_eq!(char_offset_to_utf16("say 😀 hi", 5), Some(6)); // 😀 之后
         assert_eq!(char_offset_to_utf16("你好世界", 2), Some(2)); // BMP 字符两者一致
+    }
+
+    /// 剪贴板权威调和（Windows）：词漂移时替换、撞错控件时降级、无权威时原样
+    #[test]
+    fn reconcile_with_clipboard_primary() {
+        // 词漂移但句子含权威词（Edge PDF 实测形态）：句子保留、词替换
+        let reconciled = reconcile_with_primary(
+            "without loss of reconstruction quality.".to_string(),
+            Some("onstruction qu".to_string()),
+            Some("reconstruction".to_string()),
+        );
+        assert_eq!(reconciled.text, "without loss of reconstruction quality.");
+        assert_eq!(reconciled.word.as_deref(), Some("reconstruction"));
+
+        // 句子不含权威词（撞错控件/漂移越界）：降级为仅录入权威文本
+        let reconciled = reconcile_with_primary(
+            "LiGameAcademy/.github".to_string(),
+            Some("ademy".to_string()),
+            Some("reconstruction".to_string()),
+        );
+        assert_eq!(reconciled.text, "reconstruction");
+        assert_eq!(reconciled.word, None);
+
+        // 词本就一致：不产生任何变化
+        let reconciled = reconcile_with_primary(
+            "the word is here.".to_string(),
+            Some("word".to_string()),
+            Some("word".to_string()),
+        );
+        assert_eq!(reconciled.text, "the word is here.");
+        assert_eq!(reconciled.word.as_deref(), Some("word"));
+
+        // 无权威文本（剪贴板未变/读失败）：原样返回平台结果
+        let reconciled =
+            reconcile_with_primary("a sentence.".to_string(), Some("sentence".to_string()), None);
+        assert_eq!(reconciled.text, "a sentence.");
+        assert_eq!(reconciled.word.as_deref(), Some("sentence"));
+        let reconciled = reconcile_with_primary(
+            "onstruction qu".to_string(),
+            None,
+            Some("  ".to_string()), // 空白视为无权威
+        );
+        assert_eq!(reconciled.text, "onstruction qu");
+
+        // 未取句（降级/原样录入）：以权威文本为准
+        let reconciled = reconcile_with_primary(
+            "onstruction qu".to_string(),
+            None,
+            Some("reconstruction".to_string()),
+        );
+        assert_eq!(reconciled.text, "reconstruction");
+        assert_eq!(reconciled.word, None);
     }
 }

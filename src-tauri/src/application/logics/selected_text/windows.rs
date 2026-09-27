@@ -1,22 +1,21 @@
-//! Windows 取词实现：UI Automation（TextPattern）优先，失败回退模拟 Ctrl+C 读剪贴板。
+//! Windows 取词实现：UI Automation（TextPattern）+ 模拟 Ctrl+C 剪贴板权威调和。
 //!
-//! 与 macOS 版同构：UIA 无需特殊权限（读不了以管理员身份运行的前台窗口——
-//! UIPI 会同时挡下 UIA 跨进程读取与 SendInput 注入，此时两级路径都会失败，
-//! 由前端弹失败提示）。UIA 拿不到选区（控件不支持 TextPattern、GetSelection
-//! 为空或“成功”但返回空串，如自绘文本的编辑器）时回退 SendInput 模拟 Ctrl+C，
-//! 剪贴板备份/恢复是尽力而为的（非文本剪贴板跳过备份恢复，语义与 macOS 一致）。
+//! 两条路径分工：UIA 提供选区偏移与上下文（剪贴板做不到）；模拟 Ctrl+C 读到的
+//! 剪贴板内容是用户真实选区（UIA 做不到的权威——Edge PDF 的 Adobe 引擎文本层与
+//! 视觉渲染错位，UIA 选区实测漂移 2 个字符）。因此 UIA 成功后仍经 Ctrl+C 调和
+//! （reconcile_with_primary）：句子含权威词则替换词、不含则降级录权威文本。
 //!
-//! 选词取句（word-to-sentence）：UIA 不直接提供选区偏移，用同一套 TextRange
-//! 机器推导——选区向两侧扩出上下文窗口（MoveEndpointByUnit 越界自动截停），
-//! 再把窗口副本的终点收缩到选区起点，前缀文本的 UTF-16 长度即选区偏移
-//! （窗口、前缀、选区来自同一提供方的同一接口，坐标系自洽），交给共享的
-//! capture 模块校验锚点并切句。
+//! UIA 拿不到选区（控件不支持 TextPattern、GetSelection 为空或“成功”但返回空串，
+//! 如自绘文本的编辑器）时回退纯 Ctrl+C。剪贴板序号不变的语义按 UIA 路径分流：
+//! UIA 能正常响应（返回空串）说明应用合作、只是真没选——静默；UIA 报错（查询
+//! 都失败）且剪贴板不变，多为前台窗口以管理员身份运行（UIPI 拦截注入输入）——
+//! 报取词失败。
 //!
-//! 后台重试：Chromium 系应用在 UIA 客户端查询时才按需物化无障碍树，首次查询
-//! 可能撞上树未就绪——此时立即回退 Ctrl+C 保证录入不阻塞，同时后台轮询重跑
-//! UIA 链路，树就绪后补发完整结果（语义同 macOS 的 spawn_selection_retry）。
+//! UIA 无需特殊权限。剪贴板备份/恢复是尽力而为的（非文本剪贴板跳过备份恢复）。
+//! 后台重试：Chromium 系应用在 UIA 客户端查询时才按需物化无障碍树，重试锁定
+//! 目标窗口 HWND（不跟随焦点——弹窗会夺走焦点），树就绪后补发完整结果。
 
-use super::capture::{capture_in_context, SentenceCapture};
+use super::capture::{capture_in_context, reconcile_with_primary, SentenceCapture};
 use super::SelectedContext;
 
 use ::windows::core::BSTR;
@@ -28,17 +27,30 @@ use ::windows::Win32::UI::Accessibility::{
 };
 
 pub fn get_selected_text() -> Result<String, String> {
-    if let Ok(text) = uia_selected_text() {
-        if !text.trim().is_empty() {
-            return Ok(text);
+    match uia_selected_text() {
+        Ok(text) if !text.trim().is_empty() => {
+            // UIA 拿到文本：仍经剪贴板调和（选区漂移/撞错控件的修正；
+            // 调和失败即剪贴板未变时原样返回 UIA 结果）
+            return Ok(reconcile_with_primary(text, None, copy_via_ctrl_c(true).ok()).text);
         }
-        // UIA “成功”但为空：无法区分“真没选”与“应用不暴露选区”，回退 Ctrl+C 再判一次
+        Ok(_) => {
+            // UIA “成功”但为空：无法区分“真没选”与“应用不暴露选区”（如 VSCode），
+            // 回退 Ctrl+C 再判一次；应用对 UIA 响应正常，剪贴板不变即为真没选——静默
+            log::warn!(
+                "UIA path returned empty selected text (no selection or the app does not \
+                 expose its selection via UIA), falling back to simulated Ctrl+C"
+            );
+            return copy_via_ctrl_c(true);
+        }
+        Err(error) => {
+            log::warn!("UIA path failed, falling back to simulated Ctrl+C: {error}");
+            return copy_via_ctrl_c(false);
+        }
     }
-    return get_selected_text_by_ctrl_c();
 }
 
-/// word_to_sentence 为 true 时尝试“选词取句”：UIA 全链路成功返回 {句子, 词}；
-/// 拿到词但取句失败返回 {词原文, None}；UIA 报错或词为空时回退模拟 Ctrl+C。
+/// word_to_sentence 为 true 时尝试“选词取句”：UIA 全链路成功后再经剪贴板调和
+/// 返回 {句子, 权威词}；UIA 报错或词为空时回退模拟 Ctrl+C。
 /// word_to_sentence 为 false 时完全等同 get_selected_text 的行为。
 ///
 /// `on_retry_captured`：UIA 失败回退后，若目标应用的无障碍树在后台物化
@@ -52,20 +64,26 @@ pub fn get_selected_context(
     }
     match uia_selected_context() {
         Ok(context) if !context.text.trim().is_empty() => {
-            log::info!("capture via UIA: {}", describe_context(&context));
-            return Ok(context);
+            let reconciled =
+                reconcile_with_primary(context.text, context.word, copy_via_ctrl_c(true).ok());
+            log::info!("capture via UIA: {}", describe_context(&reconciled));
+            return Ok(reconciled);
         }
         Ok(_) => {
             // UIA “成功”但为空：无法区分“真没选”与“应用不暴露选区”，回退 Ctrl+C
-            // 再判一次；不触发后台重试，以免给“未选中就按快捷键”的常见操作增加延迟
+            // 再判一次（静默模式：剪贴板不变 = 真没选）；不触发后台重试，以免给
+            // “未选中就按快捷键”的常见操作增加延迟
             log::warn!(
                 "UIA path returned empty selected text (no selection or the app does not \
                  expose its selection via UIA), falling back to simulated Ctrl+C"
             );
+            return copy_via_ctrl_c(true).map(|text| SelectedContext { text, word: None });
         }
         Err(error) => {
-            // UIA 失败：立即回退 Ctrl+C 保证录入不阻塞；同时启动后台重试——
-            // Chromium 系应用的无障碍树在被 UIA 客户端查询后按需物化，树就绪后补发句子。
+            // UIA 失败：立即回退 Ctrl+C 保证录入不阻塞（严格模式：剪贴板不变 =
+            // 前台应用不理会注入的输入，多为 UIPI 提权窗口——报取词失败）；
+            // 同时启动后台重试——Chromium 系应用的无障碍树在被 UIA 客户端查询后
+            // 按需物化，树就绪后补发句子。
             // 重试锁定当前前台窗口的 HWND 而不是跟随焦点：随后的回退结果/失败提示
             // 会弹出本应用窗口夺走焦点，跟随焦点会把查询打到我们自己的窗口上
             let hwnd = unsafe { ::windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
@@ -76,13 +94,11 @@ pub fn get_selected_context(
                 spawn_selection_retry(hwnd, on_retry_captured);
             }
             log::warn!("UIA path failed, falling back to simulated Ctrl+C: {error}");
+            let context = copy_via_ctrl_c(false).map(|text| SelectedContext { text, word: None })?;
+            log::info!("capture via simulated Ctrl+C: {}", describe_context(&context));
+            return Ok(context);
         }
     }
-    return get_selected_text_by_ctrl_c().map(|text| {
-        let context = SelectedContext { text, word: None };
-        log::info!("capture via simulated Ctrl+C: {}", describe_context(&context));
-        return context;
-    });
 }
 
 /// 结果日志的描述串：词与录入文本（各截断到 80 字符），用于实机定位"读错控件"
@@ -426,23 +442,42 @@ fn bstr_to_string(text: &BSTR) -> Result<String, String> {
 /// 读取新文本 → 恢复备份。剪贴板备份/恢复是尽力而为的：当前内容不是文本
 /// （图片/文件）时跳过备份与恢复、只做复制读取（代价与 macOS 回退一致：
 /// 此类场景下原剪贴板内容会被复制的文本覆盖）。
-fn get_selected_text_by_ctrl_c() -> Result<String, String> {
+///
+/// `silent_if_unchanged`：剪贴板序号在注入后未变化的语义。true（UIA 路径能
+/// 正常响应、只是没读到选区）= 什么都没选，返回空串静默；false（UIA 查询
+/// 本身失败）= 前台应用不理会注入的输入，多为前台窗口以管理员身份运行
+/// （UIPI 拦截），返回 Err 由前端弹失败提示。
+fn copy_via_ctrl_c(silent_if_unchanged: bool) -> Result<String, String> {
     let backup = clipboard_read_text().ok();
     if backup.is_none() {
         log::info!("no text on the clipboard to back up (or the clipboard is busy)");
     }
     let sequence_before = unsafe { ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };
     send_ctrl_c();
-    // 轮询剪贴板序号而非固定 sleep：既快又能区分“复制成功”与“前台应用不理会
-    // 注入的输入”（超时多为 UIPI——前台窗口以管理员身份运行，SendInput 被静默丢弃）
-    wait_clipboard_change(sequence_before)?;
+    // 轮询剪贴板序号而非固定 sleep：既快又能区分“复制成功”与“剪贴板未变”
+    if !wait_clipboard_change(sequence_before) {
+        if silent_if_unchanged {
+            restore_clipboard_quietly(backup);
+            return Ok(String::new());
+        }
+        return Err(
+            "the clipboard did not change after the simulated Ctrl+C (the foreground window may be \
+             running as administrator, which blocks injected input)"
+                .to_string(),
+        );
+    }
     let text = clipboard_read_text()?;
+    restore_clipboard_quietly(backup);
+    return Ok(text);
+}
+
+/// 恢复剪贴板备份（尽力而为，失败仅记日志）。
+fn restore_clipboard_quietly(backup: Option<String>) {
     if let Some(backup) = backup {
         if let Err(error) = clipboard_write_text(&backup) {
             log::warn!("failed to restore the clipboard after the simulated Ctrl+C: {error}");
         }
     }
-    return Ok(text);
 }
 
 /// 通过 SendInput 注入一次 Ctrl+C。
@@ -486,8 +521,8 @@ fn send_ctrl_c() {
     }
 }
 
-/// 轮询剪贴板序号直到变化或超时（15ms 间隔、300ms 超时）。
-fn wait_clipboard_change(sequence_before: u32) -> Result<(), String> {
+/// 轮询剪贴板序号直到变化或超时（15ms 间隔、300ms 超时）；超时返回 false。
+fn wait_clipboard_change(sequence_before: u32) -> bool {
     use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 
     const POLL_INTERVAL_MS: u64 = 15;
@@ -496,15 +531,11 @@ fn wait_clipboard_change(sequence_before: u32) -> Result<(), String> {
     let start = std::time::Instant::now();
     while start.elapsed().as_millis() < TIMEOUT_MS {
         if unsafe { GetClipboardSequenceNumber() } != sequence_before {
-            return Ok(());
+            return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
     }
-    return Err(
-        "the clipboard did not change after the simulated Ctrl+C (the foreground window may be \
-         running as administrator, which blocks injected input)"
-            .to_string(),
-    );
+    return false;
 }
 
 /// 打开剪贴板（带有限重试）：剪贴板是全局独占资源，其他程序（剪贴板管理器、
@@ -618,7 +649,7 @@ mod tests {
     #[test]
     #[ignore = "injects keystrokes and touches the real clipboard"]
     fn ctrl_c_fallback_smoke_test() {
-        let result = super::get_selected_text_by_ctrl_c();
-        eprintln!("get_selected_text_by_ctrl_c() -> {:?}", result.map(|text| text.chars().count()));
+        let result = super::copy_via_ctrl_c(false);
+        eprintln!("copy_via_ctrl_c() -> {:?}", result.map(|text| text.chars().count()));
     }
 }
