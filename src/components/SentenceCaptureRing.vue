@@ -188,12 +188,8 @@ onBeforeUnmount(stopFrames);
     /* 纯展示：不参与命中测试，避免干扰面板上的词元拖刷/点击手势 */
     pointer-events: none;
     transform-origin: center;
-    /* 安静的中性色（不用高饱和 accent）：浅色下是中性灰，深色下是半透明白 */
-    color: #8a8a8a;
-}
-
-:global(html.dark) .sentence-capture-ring {
-    color: #ffffff73;
+    /* 中性、可见但不抢注意力；深浅主题由 token 给出（见 fluent-styles.css 里的语义说明） */
+    color: var(--indicator-color);
 }
 
 .sentence-capture-ring circle {

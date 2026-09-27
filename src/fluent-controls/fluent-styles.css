@@ -42,6 +42,11 @@
     /* icon button */
     --icon-button-background: #D4D7D7;
     --processing-background: #e4e4e4;
+    /* 环境型工作指示（当前用于句子面板角上的补取指示环）：中性、可见但不抢注意力。
+       不用 accent——accent 在本应用承担"可交互/主操作/开启态"，而这类指示是用户
+       没看见也无损的被动状态；也不用 --processing-background，那是块状填充，
+       作 1.6px 细线太淡 */
+    --indicator-color: #6b6b6b;
     --hyperlink-hover-background: rgba(0, 0, 0, 0.1);
     --icon-button-filter-hover: brightness(90%);
     --icon-button-filter-active: brightness(80%);
@@ -147,6 +152,8 @@ html.dark {
     /* icon button */
     --icon-button-background: #ffffff14;
     --processing-background: #ffffff14;
+    /* 环境型工作指示，语义见浅色块同名 token */
+    --indicator-color: #ffffff73;
     --hyperlink-hover-background: #ffffff14;
     --icon-button-filter-hover: brightness(140%);
     --icon-button-filter-active: brightness(80%);
