@@ -29,14 +29,26 @@ const props = defineProps<{ active: boolean }>();
 const RADIUS = 6.6;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-/** 一轮周期：弧长伸缩一次 + 旋转一圈。同周期让"收束"不必依赖人为的最短可见时长 */
-const CYCLE_MS = 1200;
+/** 旋转一圈的时长：这是"工作中"的基础节拍 */
+const ROTATION_MS = 1200;
+/**
+ * 一轮伸缩周期内旋转的圈数。
+ *
+ * 不取整数：取 1 时，弧长每轮"收到最短"都发生在同一个旋转相位上，模 360° 后落回同一个
+ * 屏幕角度——整段动效就被钉在一个固定节拍上，看久了像原地打点。略大于 1，最短点每轮
+ * 前移 0.176 圈（≈63°），于是读成持续前进而非循环。
+ * 1.176 = 1568/1333，取自 Material 的实现（MDC Web 容器旋转 1568ms 与弧长动画 1333ms）。
+ * 不能取小：两端都不倒退要求旋转圈数 ≥ 弧长变化率峰值的一半（0.58×π/2 ≈ 0.911）。
+ */
+const ROTATION_TURNS = 1.176;
+/** 弧长伸缩周期（一轮"伸长→缩短"）：比旋转周期长，这就是两者不成整数比的来源 */
+const CYCLE_MS = ROTATION_MS * ROTATION_TURNS;
 /** 入场：弧长长到循环态的最小弧长 */
 const ENTER_MS = 200;
 /** 退场：弧长从当前值收到 0 */
 const SETTLE_MS = 280;
-/** 旋转角速度（度/毫秒）：与周期绑定，保证一个周期恰好转一圈 */
-const OMEGA = 360 / CYCLE_MS;
+/** 旋转角速度（度/毫秒） */
+const OMEGA = 360 / ROTATION_MS;
 /** 循环态的弧长区间（占整圈的比例）：不取 0，保证工作期间环持续可见、不闪断 */
 const ARC_MIN = 0.12;
 const ARC_MAX = 0.7;
