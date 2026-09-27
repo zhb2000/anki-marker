@@ -69,7 +69,10 @@ fn main() {
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, _shortcut, event| {
                 if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                    application::shortcut::on_shortcut_pressed(app.clone());
+                    application::shortcut::on_shortcut_pressed(
+                        app.clone(),
+                        application::shortcut::CaptureTrigger::Shortcut,
+                    );
                 }
             })
             .build(),

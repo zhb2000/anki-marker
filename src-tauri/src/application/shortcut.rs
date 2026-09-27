@@ -232,14 +232,36 @@ pub fn request_accessibility_trust() {
     }
 }
 
+/// 划词捕获的触发来源。
+///
+/// 两种来源在“前台窗口归属”上的处境不同：全局快捷键不改变前台窗口，目标应用始终
+/// 持有焦点；托盘/Dock 菜单则要先弹菜单，Windows 上菜单弹出前 tray-icon 会把前台
+/// 让给自己的隐藏消息窗口（见 logics::selected_text::windows_probe 的模块文档），
+/// 捕获因此可能打在错误的目标上。目前该信息仅用于 Windows 侧的诊断探针。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureTrigger {
+    /// 全局快捷键
+    Shortcut,
+    /// 托盘图标菜单 / macOS Dock 菜单的“划词录入”
+    Menu,
+}
+
 /// 全局快捷键被按下时调用：读取当前选中的句子并录入主窗口。
 ///
 /// 时序要求：必须先读取选中文本、再聚焦本应用窗口——若先聚焦，读取（或模拟的
 /// Cmd+C / Ctrl+C）将作用于本应用自身。读取过程可能阻塞（等待剪贴板或跨进程
 /// 无障碍调用），故放独立线程执行。
+///
+/// `trigger` 区分触发来源：菜单触发的路径需要额外的诊断（Windows）——见
+/// `probe_trigger_snapshot` / `probe_menu_timeline`。
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-pub fn on_shortcut_pressed(app: AppHandle) {
+pub fn on_shortcut_pressed(app: AppHandle, trigger: CaptureTrigger) {
+    // 临时诊断（验证后移除）：在触发线程上立即采样——菜单路径下这一刻仍在
+    // WM_COMMAND 的处理过程中，是观察“菜单刚关闭时前台是谁”的最佳时点
+    probe_trigger_snapshot(trigger);
     std::thread::spawn(move || {
+        // 临时诊断（验证后移除）：菜单路径下先采样前台窗口时间线（阻塞约 800ms）
+        probe_menu_timeline(trigger);
         // 选词取句开关：每次触发时读配置，读取失败默认开启（与配置缺省值一致）
         let word_to_sentence = logics::config::read_config(app.state::<ConfigPath>().0.as_str())
             .map(|config| config.word_to_sentence())
@@ -293,6 +315,36 @@ pub fn on_shortcut_pressed(app: AppHandle) {
         }
     });
 }
+
+/// 临时诊断（验证后移除）：在触发线程上立即采样前台窗口状态。
+/// 菜单路径下这一刻仍在 WM_COMMAND 的处理过程中（菜单已关闭、前台状态尚未结算），
+/// 是判断“菜单刚关闭时前台/键盘焦点在谁身上”的关键时点。
+#[cfg(target_os = "windows")]
+fn probe_trigger_snapshot(trigger: CaptureTrigger) {
+    logics::selected_text::windows_probe::log_foreground_snapshot(&format!(
+        "trigger {trigger:?} (handler entry)"
+    ));
+}
+
+#[cfg(not(target_os = "windows"))]
+fn probe_trigger_snapshot(_trigger: CaptureTrigger) {}
+
+/// 临时诊断（验证后移除）：菜单路径下在捕获线程采样前台窗口时间线（阻塞约 800ms，
+/// 随后才真正取词——同时也是“延迟后能否取到词”的探针）；快捷键路径只记一条对照组。
+#[cfg(target_os = "windows")]
+fn probe_menu_timeline(trigger: CaptureTrigger) {
+    if trigger == CaptureTrigger::Menu {
+        log::info!("tray-menu capture: sampling the foreground window timeline before capturing");
+        logics::selected_text::windows_probe::log_menu_trigger_timeline();
+    } else {
+        logics::selected_text::windows_probe::log_foreground_snapshot(
+            "shortcut trigger (capture thread)",
+        );
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn probe_menu_timeline(_trigger: CaptureTrigger) {}
 
 /// 构造后台重试的生命周期回调：驱动"仍在补取"指示状态，并落地补发的完整句子。
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]

@@ -17,6 +17,9 @@ mod linux;
 mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
+// 临时诊断探针（托盘菜单取词失败的前台窗口归属排查，验证后移除）
+#[cfg(target_os = "windows")]
+pub(crate) mod windows_probe;
 
 #[cfg(target_os = "macos")]
 pub fn get_selected_context(

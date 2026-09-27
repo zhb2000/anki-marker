@@ -393,6 +393,19 @@ fn build_tray_menu(app: &AppHandle) -> Option<tauri::menu::Menu<tauri::Wry>> {
 #[cfg(target_os = "windows")]
 pub fn register_tray_icon_event_handler(app: &AppHandle) {
     app.on_tray_icon_event(|app, event| {
+        // 临时诊断（验证后移除）：托盘点击到达时采样前台——用于判断事件处理是否早于
+        // 菜单弹出（若早于，则“菜单弹出前记下目标窗口”这条路可行），以及点击瞬间
+        // 前台是否还是用户所在的应用
+        if let tauri::tray::TrayIconEvent::Click {
+            button,
+            button_state,
+            ..
+        } = &event
+        {
+            logics::selected_text::windows_probe::log_foreground_snapshot(&format!(
+                "tray click {button:?}/{button_state:?}"
+            ));
+        }
         if let tauri::tray::TrayIconEvent::Click {
             button: tauri::tray::MouseButton::Left,
             button_state: tauri::tray::MouseButtonState::Up,
@@ -416,7 +429,10 @@ pub fn register_menu_event_handler(app: &AppHandle) {
         // 划词录入：与全局快捷键相同的捕获流程（读取选中文本后录入主窗口）。
         // 点击托盘/Dock 菜单不会激活本应用，选中文本仍来自用户当前所在的应用
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        "capture" => super::shortcut::on_shortcut_pressed(app.clone()),
+        "capture" => super::shortcut::on_shortcut_pressed(
+            app.clone(),
+            super::shortcut::CaptureTrigger::Menu,
+        ),
         // 打开主窗口：复用划词快捷键/Dock 点击/托盘点击的显示并聚焦逻辑
         "open" => {
             if let Err(error) = super::shortcut::show_and_focus_main_window(app) {
