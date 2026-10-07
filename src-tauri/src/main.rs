@@ -62,13 +62,17 @@ fn main() {
             Some(vec!["--hidden"]),
         ));
 
-    // 全局快捷键（划词录入句子），目前仅支持 macOS
-    #[cfg(target_os = "macos")]
+    // 全局快捷键（划词录入句子）。注意：Linux 侧仅 X11 会话可用
+    //（global-hotkey 依赖 X11，Wayland 会话下注册会失败并在设置页显示错误）
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     let builder = builder.plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, _shortcut, event| {
                 if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                    application::shortcut::on_shortcut_pressed(app.clone());
+                    application::shortcut::on_shortcut_pressed(
+                        app.clone(),
+                        application::shortcut::CaptureTrigger::Shortcut,
+                    );
                 }
             })
             .build(),
@@ -81,7 +85,7 @@ fn main() {
 
     // 主窗口点关闭按钮的行为可配置（keep-running-on-close），三端一致——
     // 默认仅隐藏窗口、应用保持后台运行，由托盘图标（macOS 为 Dock/菜单栏图标）
-    // 或划词快捷键（仅 macOS）再次唤起；配置为不保持运行时则直接退出应用。
+    // 或划词快捷键再次唤起；配置为不保持运行时则直接退出应用。
     let builder = builder.on_window_event(|window, event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
             if application::menubar::keep_running_on_close(window.app_handle()) {
@@ -111,9 +115,10 @@ fn main() {
             app.manage(application::dict::DictPath::new(portable.0, app.path())?);
             app.manage(Mutex::new(None::<Connection>));
             app.manage(application::shortcut::PendingSentence::new());
+            app.manage(application::shortcut::CaptureSettling::new());
 
-            // 注册配置中设置的划词全局快捷键（仅 macOS）
-            #[cfg(target_os = "macos")]
+            // 注册配置中设置的划词全局快捷键
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             application::shortcut::update_from_config(app.handle());
 
             // 托盘/Dock 图标菜单：注册共用的菜单事件处理（托盘菜单三端通用，
@@ -124,6 +129,11 @@ fn main() {
             // Windows 托盘图标左键点击打开主窗口（macOS/Linux 无此交互，见 menubar.rs）
             #[cfg(target_os = "windows")]
             application::menubar::register_tray_icon_event_handler(app.handle());
+            // Windows：跟踪“用户最近所在的应用窗口”，供托盘菜单取词时归还前台
+            // （托盘菜单会抢走前台且不自动归还，见 selected_text::windows_target）。
+            // 必须在这里就启动——记录的是用户此前所在的应用，等要用时再跟踪就晚了
+            #[cfg(target_os = "windows")]
+            application::logics::selected_text::windows_target::install_foreground_watcher();
             // Windows：监听任务栏（系统「Windows 模式」）深浅变化，托盘图标跟随系统时实时换图。
             // 需在窗口创建之后挂载（config 中的窗口在 setup 之前已创建）
             #[cfg(target_os = "windows")]
@@ -192,6 +202,8 @@ fn main() {
             application::dict::get_word_base,
             application::dict::sanitize_filename,
             application::shortcut::take_pending_sentence,
+            application::shortcut::take_pending_capture_failure,
+            application::shortcut::is_capture_settling,
             application::shortcut::is_accessibility_trusted,
             application::shortcut::request_accessibility_trust,
             application::shortcut::get_shortcut_registration,

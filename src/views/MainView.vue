@@ -18,6 +18,7 @@ import { FluentButton, FluentSelect, FluentInput, FluentRadio, dialog } from '..
 import {
     CardStatus,
     SentencePanel,
+    SentenceCaptureRing,
     CollinsCard,
     OxfordCard,
     YoudaoCard,
@@ -457,12 +458,23 @@ function regenerateAiPick() {
 // #endregion
 
 // #region 全局快捷键划词录入
+/**
+ * 后台仍在补取完整句子（Rust 侧重试在途）：句子面板角上的指示环据此显示/收束。
+ * 补取结果会覆盖先到的降级结果（仅词），指示环只是让"还会变"这件事有个连续、安静的信号。
+ */
+const captureSettling = ref(false);
+
 /** 录入捕获的句子：整体替换当前句子（分词同步重建为全新状态）并退出编辑模式；取句模式命中的单词会在分词结果中预选 */
 async function applyCapturedSentence(payload: CapturedSentencePayload) {
     const trimmed = payload.text.trim();
     if (trimmed.length === 0) {
         return;
     }
+    // 捕获来源日志（console 会转发到应用日志文件）：定位“错句覆盖”类问题时
+    // 区分事件/暂存回放，并与 Rust 侧的 capture 日志对照
+    console.log(
+        `[capture] applying: word=${JSON.stringify(payload.word)}, text=${JSON.stringify(trimmed.slice(0, 80))}`
+    );
     // 按快捷键取词时应用可能停留在设置页：切回主界面，避免句子已被替换但用户看到的仍是设置页；
     // 离开前立即落盘设置页可能还未防抖保存的修改（与设置页返回按钮行为一致）
     if (router.currentRoute.value.path !== '/') {
@@ -517,8 +529,60 @@ function markCapturedWord(word: string): void {
     }
 }
 
+/**
+ * 划词没有录入内容的原因（与后端 CaptureFailure 对应）：
+ * empty = 目标应用里没有可取用的选区；failed = 取词过程报错
+ */
+type CaptureFailure = 'empty' | 'failed';
+
+/** 弹出划词未录入内容的提示（按失败种类与平台给出引导） */
+function showCaptureFailureDialog(failure: CaptureFailure) {
+    // 两种提示都以操作失败处理（ContentDialog 的 kind 只有 error/warning 两级，
+    // 而 warning 是给破坏性操作确认用的）。
+    //
+    // empty：目标应用里没有可取用的选区——真的没选中文字，或应用不向无障碍接口
+    // 暴露选区（Windows 上部分 UWP 应用如此；macOS 上如 VSCode 的编辑器）。
+    // 托盘菜单路径下的取词目标是“用户最近所在的应用窗口”，所以还要提示先点回目标应用。
+    //
+    // failed：无障碍查询与模拟复制都没拿到内容——Windows 上常见于以管理员身份
+    // 运行的窗口（UIPI 拦截注入）；macOS 上多为辅助功能未授权；Linux 上为 AT-SPI
+    // 未暴露选区且 PRIMARY 也为空。
+    const isWindows = api.os.type() === 'windows';
+    let message: string;
+    if (failure === 'empty') {
+        message = isMacOS.value
+            ? '取词目标里没有可取用的选区：可能没有选中文字，也可能该应用不向辅助功能接口暴露选区（如 VSCode 的编辑器）。请选中文字后重试。'
+            : isWindows
+                ? '取词目标里没有可取用的选区：可能没有选中文字，也可能该应用不向无障碍接口暴露选区（部分 UWP 应用如此）。\n\n从托盘菜单触发时，取词目标是“你最近所在的应用窗口”，请先点击要取词的应用窗口再重试。'
+                : '取词目标里没有可取用的选区：可能没有选中文字，也可能该应用未通过 AT-SPI 暴露选区；GNOME Wayland 下也不支持读取 PRIMARY 选区。请选中文字后重试。';
+    } else {
+        message = isMacOS.value
+            ? '获取选中文本失败。\n\n请在“系统设置 → 隐私与安全性 → 辅助功能”中允许本应用，然后重试。'
+            : isWindows
+                ? '获取选中文本失败。\n\n目标应用既没有通过 UI Automation 暴露选区，也没有响应模拟的 Ctrl+C 复制（常见于以管理员身份运行的窗口，请换用普通权限的窗口重试）。若从托盘菜单触发，请先点击目标应用窗口再重试。'
+                : '获取选中文本失败。\n\n目标应用没有通过 AT-SPI 暴露选区，也没能读到 PRIMARY 选区（请确认已选中文本；GNOME Wayland 下不支持读取 PRIMARY）。';
+    }
+    const title = failure === 'empty' ? '没有取到文本' : '划词录入失败';
+    void dialog.message(message, { title, kind: 'error' });
+}
+
 /** 监听划词句子事件，并取走可能在主窗口重建期间暂存的句子 */
 async function initSentenceCapture() {
+    // 后台补取状态：先挂监听、再主动查一次。重试在窗口显示之前就已启动，窗口被重建时
+    // "开始"事件必然丢失，只能靠 is_capture_settling 查回；若挂监听后已收到过事件，
+    // 则以事件为准（避免被这次查询返回的稍旧值回退）
+    let settlingEventReceived = false;
+    try {
+        await api.event.listen<boolean>('sentence-capture-settling', event => {
+            settlingEventReceived = true;
+            captureSettling.value = event.payload;
+        });
+        if (!settlingEventReceived) {
+            captureSettling.value = await utils.invoke<boolean>('is_capture_settling');
+        }
+    } catch (error) {
+        console.error(error);
+    }
     // 主窗口被关闭后按快捷键会重建窗口，前端就绪之前 emit 的事件会丢失，
     // 此时通过 take_pending_sentence 取回 Rust 侧暂存的句子
     try {
@@ -533,12 +597,15 @@ async function initSentenceCapture() {
         console.error(error);
     }
     try {
-        await api.event.listen('sentence-capture-failed', () => {
-            void dialog.message(
-                '获取选中文本失败。\n\n请在“系统设置 → 隐私与安全性 → 辅助功能”中允许本应用，然后重试。',
-                { title: '划词录入失败', kind: 'error' }
-            );
+        await api.event.listen<CaptureFailure>('sentence-capture-failed', event => {
+            showCaptureFailureDialog(event.payload);
         });
+        // 划词未录入内容时会弹出主窗口并提示；若前端当时尚未就绪，事件已丢失，
+        // 此处取回暂存的失败原因补弹提示
+        const pendingFailure = await utils.invoke<CaptureFailure | null>('take_pending_capture_failure');
+        if (pendingFailure != null) {
+            showCaptureFailureDialog(pendingFailure);
+        }
     } catch (error) {
         console.error(error);
     }
@@ -808,6 +875,7 @@ onBeforeMount(async () => {
             <SentencePanel :tokens="tokens" v-if="!showEdit" @mark="onMarkToken" @paint-start="onPaintStart" @paint-end="onPaintEnd" />
             <textarea class="fluent-textarea" v-model.trim="sentence" v-if="showEdit" ref="editTextArea"
                 :placeholder="editPlaceholder" @keydown="handleEditTextAreaKeydown"></textarea>
+            <SentenceCaptureRing :active="captureSettling" v-if="!showEdit" />
         </div>
         <div class="words-container">
             <div class="pronunciation-container" v-show="searchText.length > 0">
@@ -900,6 +968,8 @@ onBeforeMount(async () => {
     padding-right: calc(15px / 2);
     /* 需要设置此属性才能让 SentencePanel 的 overflow-y: auto 生效 */
     overflow-y: hidden;
+    /* SentenceCaptureRing 以此为定位基准，钉在句子面板右下角 */
+    position: relative;
 }
 
 .words-container {

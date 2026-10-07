@@ -20,7 +20,9 @@ const MODIFIER_CODES = new Set([
 
 /** 将键盘事件转换为全局快捷键字符串（如 "Cmd+Shift+KeyS"）；组合不完整时返回 null */
 function eventToShortcut(event: KeyboardEvent): string | null {
-    // macOS 上 Meta 为 Cmd；Ctrl/Alt/Shift 按实际按键记录
+    // metaKey 统一记为 "Cmd"：macOS 上为 Cmd 键，Windows/Linux 上为 Win/Super 键——
+    // 后端 global-hotkey 把 Cmd/Meta/Super 解析为同一修饰键，跨平台无需区分；
+    // 显示层（logics/shortcut.ts）按平台映射为对应名称
     const modifiers: string[] = [];
     if (event.metaKey) modifiers.push('Cmd');
     if (event.ctrlKey) modifiers.push('Ctrl');
