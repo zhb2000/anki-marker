@@ -1,125 +1,224 @@
 #!/usr/bin/env python3
-"""Generate vector-icons/icon.svg (vector replica of src-tauri/icons/icon.png).
+"""Generate vector-icons/icon-v2.svg (second vector replica of src-tauri/icons/icon.png).
+
+Shape and colour parameters were measured / least-squares fitted on icon.png's
+512px pixel grid ("PNG frame"), then mapped uniformly onto a pure white
+macOS-grid base (412px rounded square at 50,50 -- same base as icon.svg).
 
 Usage:
-    python3 gen_icon.py
-    rsvg-convert -w 512 -h 512 icon.svg -o /tmp/render.png
+    python3 gen_icon_v2.py
+    rsvg-convert -w 512 -h 512 icon-v2.svg -o /tmp/icon-v2.png
 """
 import math
+from pathlib import Path
 
-CX, CY = 252.5, 261.0
-R_OUT, R_IN = 171.0, 87.0
-D_OUT, D_IN = 24.0, 17.0  # corner rounding distances
+OUT = Path(__file__).with_name('icon-v2.svg')
+
+# ---------- base (final canvas) ----------
+CANVAS = 512
+BASE_X, BASE_Y, BASE_SIZE, BASE_R = 50.0, 50.0, 412.0, 92.5
+# the (slightly irregular) base of icon.png, used to map PNG frame -> final canvas
+PNG_BASE_CX, PNG_BASE_CY, PNG_BASE_SIZE = 255.0, 255.5, 465.5
+
+# ---------- star (PNG frame) ----------
+STAR_C = (252.0, 258.2)
+# radii of the sharp (un-rounded) star vertices; the two lower arms are a bit longer
+STAR_R_TIP, STAR_R_BOTTOM, STAR_R_IN = 300.1, 330.5, 100.7
+TIP_R, VALLEY_R = 41.7, 24.25         # corner rounding radii: tips / valleys
+RING = 25.2                           # dark outline thickness (fill = outline inset by RING)
+
+# ---------- marker (PNG frame) ----------
+# local frame: origin on the barrel axis level with the nib tip, +u along the pen
+# axis (towards the lower right), +y perpendicular (towards the lower left)
+PEN_ORIGIN = (293.1, 304.0)
+PEN_ANGLE = 44.0
+NIB_Y, NIB_R = 3.75, 10.5       # nib tip cap: centre sits slightly off-axis, radius
+# flare from the tip cap to the barrel, one cubic per side: (handle 1 u, handle 2 u, end u)
+FLARE_UP = (65.7, 75.2, 95.9)   # y < 0 side
+FLARE_DN = (80.8, 66.7, 91.0)   # y > 0 side
+BODY_HW = 69.3                  # barrel half width
+BODY_END = 260.0                # well past the base edge (clipped)
+WIN_HW = 45.3                   # inner window half width
+BAND_TOP, BAND_FLAT = 81.5, 24.5  # white band: flat top and its half width
+BAND_SIDE = 92.4                # the band's chamfers meet the window sides here
+BAND_ROUND = (5.0, 3.5)         # corner softening (flat/chamfer, chamfer/side)
+BLUE_START = 102.6
+SPLIT = 6.2                     # light (y < SPLIT) / dark (y > SPLIT) stripe boundary
+KEYLINE = 19.5                  # white gap between marker and star
+
+# ---------- colours (vertical gradients, stops keyed by PNG-frame y) ----------
+RING_STOPS = [(80, '#01B8FA'), (200, '#0274C3'), (250, '#024E8C'), (350, '#013157'), (420, '#012C4B')]
+FILL_STOPS = [(95, '#03E2FE'), (170, '#01CDFF'), (330, '#027BF2'), (400, '#0263F5')]
+LIGHT_STOPS = [(348, '#01CAFF'), (449, '#0180FC')]
+DARK_STOPS = [(385, '#0182F3'), (470, '#0156EA')]
+NAVY = '#022E4D'
 
 
-def star_path():
-    pts = []
-    for k in range(5):
-        a_out = math.radians(-90 + 72 * k)
-        a_in = math.radians(-54 + 72 * k)
-        pts.append((CX + R_OUT * math.cos(a_out), CY + R_OUT * math.sin(a_out), 'o'))
-        pts.append((CX + R_IN * math.cos(a_in), CY + R_IN * math.sin(a_in), 'i'))
-    n = len(pts)
-    segs = []
+def scale():
+    return BASE_SIZE / PNG_BASE_SIZE
+
+
+def tf(p):
+    """PNG frame -> final canvas."""
+    s = scale()
+    return (BASE_X + BASE_SIZE / 2 + s * (p[0] - PNG_BASE_CX),
+            BASE_Y + BASE_SIZE / 2 + s * (p[1] - PNG_BASE_CY))
+
+
+def num(v):
+    s = f'{v:.2f}'.rstrip('0').rstrip('.')
+    return '0' if s == '-0' else s
+
+
+def pt(p):
+    return f'{num(p[0])} {num(p[1])}'
+
+
+# ---------- star geometry ----------
+def star_vertices():
+    cx, cy = STAR_C
+    out = []
+    for k in range(10):
+        a = math.radians(-90 + 36 * k)
+        r = STAR_R_IN if k % 2 else (STAR_R_BOTTOM if k in (4, 6) else STAR_R_TIP)
+        out.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    return out
+
+
+def inset(poly, d):
+    """Move every edge line towards the star centre by d, re-intersect neighbours."""
+    cx, cy = STAR_C
+    lines = []
+    n = len(poly)
     for i in range(n):
-        vx, vy, t = pts[i]
-        px, py, _ = pts[i - 1]
-        nx, ny, _ = pts[(i + 1) % n]
-        dd = D_OUT if t == 'o' else D_IN
-        e1 = math.hypot(vx - px, vy - py)
-        e2 = math.hypot(nx - vx, ny - vy)
-        p1 = (vx + (px - vx) / e1 * dd, vy + (py - vy) / e1 * dd)
-        p2 = (vx + (nx - vx) / e2 * dd, vy + (ny - vy) / e2 * dd)
-        segs.append((p1, (vx, vy), p2))
-    # start at the exit point of the last vertex, then round every vertex in order
-    (p1, c, p2) = segs[-1]
-    d = f"M {p2[0]:.1f} {p2[1]:.1f} "
-    for p1, c, p2 in segs:
-        d += f"L {p1[0]:.1f} {p1[1]:.1f} Q {c[0]:.1f} {c[1]:.1f} {p2[0]:.1f} {p2[1]:.1f} "
-    d += "Z"
-    return d
+        (ax, ay), (bx, by) = poly[i], poly[(i + 1) % n]
+        ex, ey = bx - ax, by - ay
+        L = math.hypot(ex, ey)
+        ex, ey = ex / L, ey / L
+        nx, ny = -ey, ex
+        if (cx - ax) * nx + (cy - ay) * ny < 0:
+            nx, ny = -nx, -ny
+        lines.append(((ax + nx * d, ay + ny * d), (ex, ey)))
+    out = []
+    for i in range(n):
+        (p1, e1), (p2, e2) = lines[i - 1], lines[i]
+        det = e1[0] * -e2[1] - e1[1] * -e2[0]
+        t = ((p2[0] - p1[0]) * -e2[1] - (p2[1] - p1[1]) * -e2[0]) / det
+        out.append((p1[0] + e1[0] * t, p1[1] + e1[1] * t))
+    return out
 
 
-# marker: local coords, origin = star center, +x = pen axis (45 deg down-right)
-# nib tip x=30 -> collar x=120; barrel rect x 120..335 half-width 60
-def nib_path():
-    tip, collar, ht, hc = 62.0, 120.0, 11.0, 28.0
-    return (f"M {tip} {-ht} "
-            f"Q {tip + 32} {-hc + 8} {collar} {-hc} "   # upper side, slight concave
-            f"L {collar} {hc} "
-            f"Q {tip + 32} {hc - 8} {tip} {ht} "        # lower side, symmetric
-            f"Q {tip - 13} 0 {tip} {-ht} Z")            # rounded tip cap
+def rounded_path(poly, radii):
+    """Closed path with every vertex rounded by a tangent circular arc (PNG frame in, canvas out)."""
+    s = scale()
+    n = len(poly)
+    d = ''
+    for i in range(n):
+        vx, vy = poly[i]
+        px, py = poly[i - 1]
+        qx, qy = poly[(i + 1) % n]
+        l1, l2 = math.hypot(px - vx, py - vy), math.hypot(qx - vx, qy - vy)
+        e1 = ((px - vx) / l1, (py - vy) / l1)
+        e2 = ((qx - vx) / l2, (qy - vy) / l2)
+        half = math.acos(max(-1.0, min(1.0, e1[0] * e2[0] + e1[1] * e2[1]))) / 2
+        t = radii[i] / math.tan(half)
+        t1 = (vx + e1[0] * t, vy + e1[1] * t)
+        t2 = (vx + e2[0] * t, vy + e2[1] * t)
+        # arc turns the same way as the polygon at this vertex
+        turn = (vx - px) * (qy - vy) - (vy - py) * (qx - vx)
+        sweep = 1 if turn > 0 else 0
+        d += f"{'M' if i == 0 else 'L'}{pt(tf(t1))}A{num(radii[i] * s)} {num(radii[i] * s)} 0 0 {sweep} {pt(tf(t2))}"
+    return d + 'Z'
 
 
-def barrel_path(x0=120.0, x1=350.0, hw=64.0, rx=26.0):
-    return (f"M {x0} {-hw + rx} Q {x0} {-hw} {x0 + rx} {-hw} "
-            f"L {x1} {-hw} Q {x1 + rx} {-hw} {x1 + rx} {-hw + rx} "
-            f"L {x1 + rx} {hw - rx} Q {x1 + rx} {hw} {x1} {hw} "
-            f"L {x0 + rx} {hw} Q {x0} {hw} {x0} {hw - rx} Z")
+# ---------- marker geometry ----------
+def pen(u, y):
+    a = math.radians(PEN_ANGLE)
+    ox, oy = PEN_ORIGIN
+    return tf((ox + u * math.cos(a) - y * math.sin(a), oy + u * math.sin(a) + y * math.cos(a)))
 
 
-def core_path(x0=134.0, x1=328.0, hw=44.0, rx=22.0):
-    return barrel_path(x0, x1, hw, rx)
+def P(u, y):
+    return pt(pen(u, y))
 
 
-star = star_path()
-nib = nib_path()
-barrel = barrel_path()
-core = core_path()
+def marker_outline():
+    r = NIB_R * scale()
+    top, bot = NIB_Y - NIB_R, NIB_Y + NIB_R
+    (a1, a2, a3), (b1, b2, b3) = FLARE_UP, FLARE_DN
+    return (f'M{P(0, top)}'
+            f'C{P(a1, top)} {P(a2, -BODY_HW)} {P(a3, -BODY_HW)}'
+            f'L{P(BODY_END, -BODY_HW)}L{P(BODY_END, BODY_HW)}L{P(b3, BODY_HW)}'
+            f'C{P(b2, BODY_HW)} {P(b1, bot)} {P(0, bot)}'
+            f'A{num(r)} {num(r)} 0 0 1 {P(-NIB_R, NIB_Y)}'
+            f'A{num(r)} {num(r)} 0 0 1 {P(0, top)}Z')
 
-svg = f'''<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+
+def window_outline():
+    """Window hole: chamfered top (the white band's upper edge), softened corners."""
+    pts = [(BODY_END, -WIN_HW), (BAND_SIDE, -WIN_HW), (BAND_TOP, -BAND_FLAT),
+           (BAND_TOP, BAND_FLAT), (BAND_SIDE, WIN_HW), (BODY_END, WIN_HW)]
+    cut = [0, BAND_ROUND[1], BAND_ROUND[0], BAND_ROUND[0], BAND_ROUND[1], 0]
+    d = f'M{P(*pts[0])}'
+    for i in range(1, 5):
+        (pu, py), (vu, vy), (nu, ny) = pts[i - 1], pts[i], pts[i + 1]
+        l1, l2 = math.hypot(pu - vu, py - vy), math.hypot(nu - vu, ny - vy)
+        t1 = (vu + (pu - vu) / l1 * cut[i], vy + (py - vy) / l1 * cut[i])
+        t2 = (vu + (nu - vu) / l2 * cut[i], vy + (ny - vy) / l2 * cut[i])
+        d += f'L{P(*t1)}Q{P(vu, vy)} {P(*t2)}'
+    return d + f'L{P(*pts[5])}Z'
+
+
+def quad(u0, u1, y0, y1):
+    return f'M{P(u0, y0)}L{P(u1, y0)}L{P(u1, y1)}L{P(u0, y1)}Z'
+
+
+def gradient(gid, stops):
+    y0, y1 = tf((0, stops[0][0]))[1], tf((0, stops[-1][0]))[1]
+    s = ''.join(f'<stop offset="{num((tf((0, y))[1] - y0) / (y1 - y0))}" stop-color="{c}"/>' for y, c in stops)
+    return (f'<linearGradient id="{gid}" x1="0" y1="{num(y0)}" x2="0" y2="{num(y1)}" '
+            f'gradientUnits="userSpaceOnUse">{s}</linearGradient>')
+
+
+def build():
+    s = scale()
+    star = star_vertices()
+    fill = inset(star, RING)
+    radii = [TIP_R if k % 2 == 0 else VALLEY_R for k in range(10)]
+    fill_radii = [TIP_R - RING if k % 2 == 0 else VALLEY_R + RING for k in range(10)]
+    over = 4.0  # window contents run this far under the navy frame, so its edges stay crisp
+    base = (f'x="{num(BASE_X)}" y="{num(BASE_Y)}" width="{num(BASE_SIZE)}" '
+            f'height="{num(BASE_SIZE)}" rx="{num(BASE_R)}"')
+    silhouette = marker_outline()
+    return f'''<svg width="{CANVAS}" height="{CANVAS}" viewBox="0 0 {CANVAS} {CANVAS}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <!-- macOS-style base: 412x412 rounded rect, radius 92.5 -->
-    <rect id="base" x="50" y="50" width="412" height="412" rx="92.5"/>
-    <clipPath id="baseClip"><rect x="50" y="50" width="412" height="412" rx="92.5"/></clipPath>
-
-    <linearGradient id="starFill" x1="256" y1="80" x2="256" y2="448" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#06DCFF"/>
-      <stop offset="0.39" stop-color="#01B4FF"/>
-      <stop offset="1" stop-color="#0169EE"/>
-    </linearGradient>
-    <linearGradient id="starStroke" x1="256" y1="70" x2="256" y2="460" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#0FA0E4"/>
-      <stop offset="0.4" stop-color="#0272C4"/>
-      <stop offset="1" stop-color="#073F84"/>
-    </linearGradient>
-    <!-- barrel gradient along pen axis (45 deg, shoulder -> tip end) -->
-    <linearGradient id="bodyGrad" x1="345" y1="345" x2="480" y2="480" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#4EC7FA"/>
-      <stop offset="0.25" stop-color="#26B4F8"/>
-      <stop offset="0.55" stop-color="#0084EE"/>
-      <stop offset="1" stop-color="#0A50D6"/>
-    </linearGradient>
+    <!-- a mask (not clip-path) so the rounded edge is anti-aliased once, on the finished
+         artwork: a white base + separately clipped marker would leave a white AA fringe -->
+    <mask id="base" maskUnits="userSpaceOnUse" x="0" y="0" width="{CANVAS}" height="{CANVAS}"><rect {base} fill="#FFFFFF"/></mask>
+    {gradient('ring', RING_STOPS)}
+    {gradient('fill', FILL_STOPS)}
+    {gradient('light', LIGHT_STOPS)}
+    {gradient('dark', DARK_STOPS)}
   </defs>
-
-  <use href="#base" fill="#FFFFFF"/>
-
-  <g clip-path="url(#baseClip)">
-    <g transform="translate(256 258) scale(0.92) translate(-256 -258)">
-      <!-- star: dark outline layer + gradient fill -->
-      <path d="{star}" fill="url(#starStroke)" stroke="url(#starStroke)" stroke-width="21"/>
-      <path d="{star}" fill="url(#starFill)"/>
-
-      <!-- marker -->
-      <g transform="translate(256 258) rotate(45)">
-        <!-- white keyline halo -->
-        <g fill="#FFFFFF" stroke="#FFFFFF" stroke-width="21" stroke-linejoin="round">
-          <path d="{nib}"/>
-          <path d="{barrel}"/>
-        </g>
-        <!-- dark navy silhouette -->
-        <g fill="#002B50">
-          <path d="{nib}"/>
-          <path d="{barrel}"/>
-        </g>
-        <!-- blue core with inner white ring -->
-        <path d="{core}" fill="url(#bodyGrad)" stroke="#FFFFFF" stroke-width="12"/>
-      </g>
-    </g>
+  <g mask="url(#base)">
+    <rect width="{CANVAS}" height="{CANVAS}" fill="#FFFFFF"/>
+    <!-- star: dark outline, then the gradient face inset by the outline width -->
+    <path d="{rounded_path(star, radii)}" fill="url(#ring)"/>
+    <path d="{rounded_path(fill, fill_radii)}" fill="url(#fill)"/>
+    <!-- marker: white keyline cut into the star -->
+    <path d="{silhouette}" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="{num(2 * KEYLINE * s)}" stroke-linejoin="round"/>
+    <!-- window contents: white cap band, light + dark barrel stripes -->
+    <path d="{quad(BAND_TOP - over, BLUE_START + 3, -WIN_HW - over, WIN_HW + over)}" fill="#FFFFFF"/>
+    <path d="{quad(BLUE_START, BODY_END, -WIN_HW - over, WIN_HW + over)}" fill="url(#light)"/>
+    <path d="{quad(BLUE_START, BODY_END, SPLIT, WIN_HW + over)}" fill="url(#dark)"/>
+    <!-- navy body with the window cut out -->
+    <path d="{silhouette}{window_outline()}" fill="{NAVY}" fill-rule="evenodd"/>
   </g>
 </svg>
 '''
 
-with open('/Users/zhb/projects/anki-marker/vector-icons/icon.svg', 'w') as f:
-    f.write(svg)
-print("written", len(svg), "bytes")
+
+if __name__ == '__main__':
+    svg = build()
+    OUT.write_text(svg)
+    print('written', OUT, len(svg), 'bytes')
