@@ -9,24 +9,41 @@
 //! docs/selected-text-research.local.md）。
 //! 两条路径均要求在“系统设置 → 隐私与安全性 → 辅助功能”中授权本应用。
 //!
+//! 取句的几类提供方：标准 AX 文本元素（AXSelectedTextRange + AXStringForRange）、
+//! WebKit 网页（AXTextMarker，见 webkit_selected_context）、PDFKit 文档（Preview、
+//! Safari 的 PDF 查看器：选区位置不可得，经整页文本匹配定位，见
+//! find_sentence_in_pdf_pages）。
+//!
+//! 回退 Cmd+C 后“剪贴板未变”的语义按 AX 路径分流（借鉴 Windows 端）：AX 能正常
+//! 响应（返回空串）= 没读到选区，返回空串由调用方提示“没有选区”；AX 查询本身报错
+//! 且剪贴板不变 = 无法证明目标里有选区，报取词失败。每次取词都会记日志：取词目标
+//! 的 pid/进程名（`capture target`，目标是本应用自己时会特别标明）与最终结果预览。
+//!
 //! 选词取句（word-to-sentence）开启时入口为 get_selected_context：
 //! AX 先读选中的词，再经 AXSelectedTextRange / AXStringForRange 读取词所在的
 //! 上下文窗口并切出整个句子；选区横跨多个句子时（用户手动跨句/跨行选择）
 //! 原样录入所选文本——只扩展、不丢弃；取句链路任一环节失败时降级为仅录入
 //! 词原文，与既有的 AX 成功路径语义一致。
 
-use super::capture::{capture_in_context, SentenceCapture};
+use super::capture::{capture_in_context, describe_context, SentenceCapture};
 use super::{RetryCallbacks, SelectedContext};
 
 pub fn get_selected_text() -> Result<String, String> {
-    if let Ok(text) = get_selected_text_by_ax() {
-        if !text.trim().is_empty() {
-            return Ok(text);
+    match get_selected_text_by_ax() {
+        Ok(text) if !text.trim().is_empty() => return Ok(text),
+        Ok(_) => {
+            // AX “成功”但为空：可能是真的没选中文本，也可能是目标应用不通过 AX
+            // 暴露选区（如 VSCode），无法区分，统一回退到模拟 Cmd+C 再判一次；
+            // AX 能正常响应，剪贴板不变即视为没选中——返回空串由调用方提示
+            return get_selected_text_by_applescript(true);
         }
-        // AX “成功”但为空：可能是真的没选中文本，也可能是目标应用不通过 AX
-        // 暴露选区（如 VSCode），无法区分，统一回退到模拟 Cmd+C 再判一次
+        Err(error) => {
+            // AX 查询本身失败：剪贴板不变不能说明“没选中”（取词目标可能取错了、
+            // 焦点在安全输入框、应用不理会模拟按键），按取词失败报错
+            log::warn!("AX path failed, falling back to AppleScript: {error}");
+            return get_selected_text_by_applescript(false);
+        }
     }
-    return get_selected_text_by_applescript();
 }
 
 /// word_to_sentence 为 true 时尝试“选词取句”：AX 全链路成功返回 {句子, 词}；
@@ -41,10 +58,19 @@ pub fn get_selected_context(
     callbacks: RetryCallbacks,
 ) -> Result<SelectedContext, String> {
     if !word_to_sentence {
-        return get_selected_text().map(|text| SelectedContext { text, word: None });
+        let context = get_selected_text().map(|text| SelectedContext { text, word: None })?;
+        log::info!("capture (sentence mode off): {}", describe_context(&context));
+        return Ok(context);
     }
-    match get_selected_context_by_ax() {
-        Ok(context) if !context.text.trim().is_empty() => return Ok(context),
+    // AX 报错（true）与 AX 正常但选区为空（false）在回退 Cmd+C 后对“剪贴板未变”
+    // 的解读不同，见 get_selected_text_by_applescript 的 silent_if_unchanged
+    // AX 报错时的补全目标：模拟复制只拿到词后，尝试用目标应用的 PDF 页面文本取句
+    let mut pdf_refine_pid: Option<i32> = None;
+    let silent_if_unchanged = match get_selected_context_by_ax() {
+        Ok(context) if !context.text.trim().is_empty() => {
+            log::info!("capture via AX: {}", describe_context(&context));
+            return Ok(context);
+        }
         Ok(_) => {
             // AX “成功”但为空：无法区分“真没选”与“应用不暴露选区”（如 VSCode 的
             // Monaco 编辑器），回退模拟 Cmd+C 再判一次；记日志便于诊断各应用的 AX 暴露情况
@@ -52,6 +78,7 @@ pub fn get_selected_context(
                 "AX path returned empty selected text (no selection or the app does not \
                  expose its selection via AX), falling back to AppleScript"
             );
+            true
         }
         Err(ax_error) => {
             // AX 失败（含树搜索无果）：立即回退 AppleScript 保证录入不阻塞；
@@ -61,9 +88,21 @@ pub fn get_selected_context(
                 spawn_selection_retry(pid, callbacks);
             }
             log::warn!("AX path failed, falling back to AppleScript: {}", ax_error.message);
+            pdf_refine_pid = ax_error.retry_pid.or_else(frontmost_application_pid);
+            false
+        }
+    };
+    let mut context = get_selected_text_by_applescript(silent_if_unchanged)
+        .map(|text| SelectedContext { text, word: None })?;
+    if let Some(pid) = pdf_refine_pid {
+        if !context.text.trim().is_empty() {
+            if let Some(refined) = refine_with_pdf_pages(pid, &context.text) {
+                context = refined;
+            }
         }
     }
-    return get_selected_text_by_applescript().map(|text| SelectedContext { text, word: None });
+    log::info!("capture via simulated Cmd+C: {}", describe_context(&context));
+    return Ok(context);
 }
 
 /// macOS 辅助功能 C API（ApplicationServices 框架）的最小 FFI 绑定。
@@ -114,6 +153,9 @@ mod ax_ffi {
             parameter: CFTypeRef,
             value: *mut CFTypeRef,
         ) -> AXError;
+        /// 取 AXTextMarkerRange 的起点 marker（Copy 规则，返回值已 retain，调用者
+        /// 负责释放）。WebKit 的 AXTextMarker 体系公开 C API，随 HIServices 导出。
+        pub fn AXTextMarkerRangeCopyStartMarker(range: CFTypeRef) -> CFTypeRef;
         /// 创建包装 C 结构体的 AXValue（Create 规则，返回值已 retain，调用者负责释放）。
         pub fn AXValueCreate(
             the_type: AXValueType,
@@ -134,6 +176,10 @@ mod ax_ffi {
         /// 按下标取数组元素（CFArrayGetValueAtIndex；Get 规则，元素借用自数组，
         /// 数组存活期间有效，调用者不得释放）。
         pub fn CFArrayGetValueAtIndex(the_array: CFTypeRef, idx: isize) -> CFTypeRef;
+        /// CFAttributedString 的类型 id（AX 的 AXAttributedStringForRange 返回此类型）。
+        pub fn CFAttributedStringGetTypeID() -> usize;
+        /// 取富文本的纯文本部分（Get 规则：借用自富文本对象，不得释放）。
+        pub fn CFAttributedStringGetString(a_str: CFTypeRef) -> CFStringRef;
     }
 
     /// “当前焦点元素”属性名，即 kAXFocusedUIElementAttribute 的值。
@@ -159,6 +205,29 @@ mod ax_ffi {
     pub const STRING_FOR_RANGE_PARAMETERIZED_ATTRIBUTE: &str = "AXStringForRange";
     /// “文本字符数”属性名，即 kAXNumberOfCharactersAttribute 的值。
     pub const NUMBER_OF_CHARACTERS_ATTRIBUTE: &str = "AXNumberOfCharacters";
+    /// 包装 CGRect 的 AXValue 类型标签，即 kAXValueTypeCGRect。
+    pub const AX_VALUE_CG_RECT_TYPE: AXValueType = 3;
+    /// “角色”属性名，即 kAXRoleAttribute 的值。
+    pub const ROLE_ATTRIBUTE: &str = "AXRole";
+    /// “父元素”属性名，即 kAXParentAttribute 的值。
+    pub const PARENT_ATTRIBUTE: &str = "AXParent";
+    /// “屏幕坐标系下的外框”属性名，即 kAXFrameAttribute 的值。
+    pub const FRAME_ATTRIBUTE: &str = "AXFrame";
+    /// 按范围取富文本的参数化属性名（PDFKit 的 AXPage 元素用它暴露整页文本）。
+    pub const ATTRIBUTED_STRING_FOR_RANGE_PARAMETERIZED_ATTRIBUTE: &str =
+        "AXAttributedStringForRange";
+    /// WebKit 的“选区 marker 范围”属性名（Safari 等 WebKit 视图不提供 AXSelectedText /
+    /// AXSelectedTextRange，网页选区只经 AXTextMarker 体系暴露）。
+    pub const SELECTED_TEXT_MARKER_RANGE_ATTRIBUTE: &str = "AXSelectedTextMarkerRange";
+    /// 按 marker 范围取子串的参数化属性名。
+    pub const STRING_FOR_TEXT_MARKER_RANGE_PARAMETERIZED_ATTRIBUTE: &str =
+        "AXStringForTextMarkerRange";
+    /// 取 marker 所在段落的 marker 范围的参数化属性名。
+    pub const PARAGRAPH_TEXT_MARKER_RANGE_PARAMETERIZED_ATTRIBUTE: &str =
+        "AXParagraphTextMarkerRangeForTextMarker";
+    /// 由两个 marker（数组，无需有序）构造范围的参数化属性名。
+    pub const RANGE_FOR_UNORDERED_MARKERS_PARAMETERIZED_ATTRIBUTE: &str =
+        "AXTextMarkerRangeForUnorderedTextMarkers";
 }
 
 /// 获取系统当前焦点 UI 元素。
@@ -185,8 +254,38 @@ fn get_focused_ui_element_by_ax() -> Result<core_foundation::base::CFType, Strin
             return Err(format!("failed to get focused UI element: AXError {err}"));
         }
         // AXUIElementCopyAttributeValue 遵循 Copy 规则（返回已 retain 的对象）。
-        return Ok(TCFType::wrap_under_create_rule(focused_ref));
+        let focused: core_foundation::base::CFType = TCFType::wrap_under_create_rule(focused_ref);
+        // 诊断：记录取词实际打到哪个应用上（“读错控件”“目标取成了本应用自己”
+        // 一类问题全靠这条日志定位）
+        log::info!("capture target: {}", describe_element_owner(&focused));
+        return Ok(focused);
     }
+}
+
+/// 焦点元素所属进程的描述串（pid、进程名；是本应用自己时特别标明）。
+fn describe_element_owner(element: &core_foundation::base::CFType) -> String {
+    let Some(pid) = get_element_pid(element) else {
+        return "unknown process".to_string();
+    };
+    let name = process_name(pid).unwrap_or_else(|| "?".to_string());
+    return if pid as u32 == std::process::id() {
+        format!("pid {pid} ({name}) — this app itself, not the target app")
+    } else {
+        format!("pid {pid} ({name})")
+    };
+}
+
+/// 按 pid 查进程名（libproc 的 proc_name，随 libSystem 链接）；失败返回 None。
+fn process_name(pid: i32) -> Option<String> {
+    extern "C" {
+        fn proc_name(pid: i32, buffer: *mut std::ffi::c_void, buffersize: u32) -> i32;
+    }
+    let mut buffer = [0u8; 128];
+    let length = unsafe { proc_name(pid, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
+    if length <= 0 {
+        return None;
+    }
+    return Some(String::from_utf8_lossy(&buffer[..length as usize]).into_owned());
 }
 
 /// 读取辅助功能元素的字符串属性值；AX 报错、空指针或值非字符串时返回 Err。
@@ -318,7 +417,14 @@ fn copy_i64_attribute_by_ax(
 /// 注意：未授予辅助功能权限时此处会失败，由调用方回退或提示。
 fn get_selected_text_by_ax() -> Result<String, String> {
     let focused = get_focused_ui_element_by_ax()?;
-    return copy_string_attribute_by_ax(&focused, ax_ffi::SELECTED_TEXT_ATTRIBUTE);
+    return match copy_string_attribute_by_ax(&focused, ax_ffi::SELECTED_TEXT_ATTRIBUTE) {
+        Ok(text) => Ok(text),
+        // WebKit 视图（Safari 等）不提供 AXSelectedText，改读 marker 范围
+        Err(error) => match webkit_selected_text(&focused) {
+            Some(text) => Ok(text),
+            None => Err(error),
+        },
+    };
 }
 
 /// AX 取句链路的失败：携带诊断信息与（可能存在的）后台重试句柄（目标应用 pid）。
@@ -342,6 +448,12 @@ fn get_selected_context_by_ax() -> Result<SelectedContext, AxAttemptError> {
     let word = match copy_string_attribute_by_ax(&focused, ax_ffi::SELECTED_TEXT_ATTRIBUTE) {
         Ok(word) => word,
         Err(focused_error) => {
+            // WebKit 视图（Safari 等）：选区只经 AXTextMarkerRange 暴露，先走 marker 链路。
+            // 命中即返回——含“确认是 WebKit 页面但没有选区”的空结果，避免对没选中的
+            // 常见操作白白做树搜索与后台重试
+            if let Some(context) = webkit_selected_context(&focused) {
+                return Ok(context);
+            }
             // 焦点元素读不到选区（如 Zotero 笔记编辑器：kAXErrorNoValue，焦点落在
             // 容器上）：立即做一次树搜索（部分应用首次即可命中）；无果则把目标
             // 应用 pid 交给后台重试——无障碍树可能异步物化，实测 Word 第二次划词
@@ -373,6 +485,162 @@ fn get_selected_context_by_ax() -> Result<SelectedContext, AxAttemptError> {
     return Ok(context_from_word_and_element(&focused, &word));
 }
 
+/// 参数化属性读取（Copy 规则，返回值随 Drop 释放）；AX 报错或空指针返回 Err。
+fn copy_parameterized_attribute_by_ax(
+    element: &core_foundation::base::CFType,
+    attribute: &'static str,
+    parameter: core_foundation::base::CFTypeRef,
+) -> Result<core_foundation::base::CFType, String> {
+    use core_foundation::base::{CFTypeRef, TCFType};
+    use core_foundation::string::CFString;
+
+    unsafe {
+        let attribute_ref = CFString::from_static_string(attribute);
+        let mut value_ref: CFTypeRef = std::ptr::null();
+        let err = ax_ffi::AXUIElementCopyParameterizedAttributeValue(
+            element.as_CFTypeRef(),
+            attribute_ref.as_concrete_TypeRef(),
+            parameter,
+            &mut value_ref,
+        );
+        if err != 0 || value_ref.is_null() {
+            return Err(format!("failed to copy parameterized attribute \"{attribute}\": AXError {err}"));
+        }
+        return Ok(TCFType::wrap_under_create_rule(value_ref));
+    }
+}
+
+/// 读取 marker 范围对应的文本（AXStringForTextMarkerRange）。
+fn string_for_marker_range_by_ax(
+    element: &core_foundation::base::CFType,
+    range: &core_foundation::base::CFType,
+) -> Result<String, String> {
+    use core_foundation::base::{CFGetTypeID, TCFType};
+    use core_foundation::string::{CFString, CFStringRef};
+
+    let value = copy_parameterized_attribute_by_ax(
+        element,
+        ax_ffi::STRING_FOR_TEXT_MARKER_RANGE_PARAMETERIZED_ATTRIBUTE,
+        range.as_CFTypeRef(),
+    )?;
+    unsafe {
+        if CFGetTypeID(value.as_CFTypeRef()) != CFString::type_id() {
+            return Err("string for marker range is not a string".to_string());
+        }
+        let string: CFString = TCFType::wrap_under_get_rule(value.as_CFTypeRef() as CFStringRef);
+        return Ok(string.to_string());
+    }
+}
+
+/// WebKit 视图（Safari、Mail、App Store 等内嵌 WebKit 的应用）的选中文本。
+///
+/// WebKit 不提供 AXSelectedText / AXSelectedTextRange，网页选区只经 AXTextMarker 体系
+/// 暴露（实测 Safari：任一网页元素的 AXSelectedTextMarkerRange 都指向页面级选区，
+/// 经 AXStringForTextMarkerRange 读文本）。元素没有该属性（非 WebKit）返回 None，
+/// 空选区返回 Some("")。
+fn webkit_selected_text(element: &core_foundation::base::CFType) -> Option<String> {
+    let range = copy_element_attribute_by_ax(element, ax_ffi::SELECTED_TEXT_MARKER_RANGE_ATTRIBUTE)
+        .ok()?;
+    return Some(string_for_marker_range_by_ax(element, &range).unwrap_or_default());
+}
+
+/// WebKit 视图的选词取句：选区 marker 范围 → 词；所在段落的 marker 范围 → 上下文；
+/// “段首到选区起点”的前缀范围文本长度 → 选区在段内的 UTF-16 偏移 → 共享 capture
+/// 校验锚点并切句（与 Windows UIA 的前缀法同构）。
+///
+/// 返回 None = 不是 WebKit 视图（调用方走其他链路）；Some(空文本) = 是 WebKit 页面但
+/// 没有选区；取句失败降级为仅录词原文。不用 WebKit 自带的句子范围
+/// （AXSentenceTextMarkerRangeForTextMarker），以保持各应用的分句规则一致。
+fn webkit_selected_context(
+    element: &core_foundation::base::CFType,
+) -> Option<SelectedContext> {
+    let word = webkit_selected_text(element)?;
+    if word.trim().is_empty() {
+        return Some(SelectedContext { text: word, word: None });
+    }
+    log::info!("found the selection via the WebKit text marker API");
+    return Some(match find_sentence_for_webkit_selection(element, &word) {
+        Ok(SentenceCapture::Expanded(sentence)) => SelectedContext {
+            text: sentence,
+            word: Some(word.trim().to_string()),
+        },
+        Ok(SentenceCapture::SelectionAsIs(text)) => SelectedContext { text, word: None },
+        Err(error) => {
+            log::warn!("failed to extract sentence for the selected word: {error}");
+            SelectedContext { text: word, word: None }
+        }
+    });
+}
+
+fn find_sentence_for_webkit_selection(
+    element: &core_foundation::base::CFType,
+    word: &str,
+) -> Result<SentenceCapture, String> {
+    use core_foundation::array::CFArray;
+    use core_foundation::base::{CFType, TCFType};
+
+    /// 段落上下文的 UTF-16 码元上限：防御病态页面（无块级分隔的巨型文本节点），
+    /// 超限降级为仅录词，不为切一句话读取整页文本
+    const MAX_CONTEXT_UTF16_UNITS: usize = 50_000;
+
+    let selection =
+        copy_element_attribute_by_ax(element, ax_ffi::SELECTED_TEXT_MARKER_RANGE_ATTRIBUTE)?;
+    let selection_start: CFType = unsafe {
+        let marker = ax_ffi::AXTextMarkerRangeCopyStartMarker(selection.as_CFTypeRef());
+        if marker.is_null() {
+            return Err("the selection marker range has no start marker".to_string());
+        }
+        TCFType::wrap_under_create_rule(marker)
+    };
+
+    // 上下文：选区起点所在段落
+    let paragraph = copy_parameterized_attribute_by_ax(
+        element,
+        ax_ffi::PARAGRAPH_TEXT_MARKER_RANGE_PARAMETERIZED_ATTRIBUTE,
+        selection_start.as_CFTypeRef(),
+    )?;
+    let context = string_for_marker_range_by_ax(element, &paragraph)?;
+    if context.encode_utf16().count() > MAX_CONTEXT_UTF16_UNITS {
+        return Err(format!(
+            "the paragraph is too long ({} utf16 units), skipping sentence extraction",
+            context.encode_utf16().count()
+        ));
+    }
+    let paragraph_start: CFType = unsafe {
+        let marker = ax_ffi::AXTextMarkerRangeCopyStartMarker(paragraph.as_CFTypeRef());
+        if marker.is_null() {
+            return Err("the paragraph marker range has no start marker".to_string());
+        }
+        TCFType::wrap_under_create_rule(marker)
+    };
+
+    // 选区在段内的偏移：段首到选区起点的前缀范围文本长度（UTF-16 码元）
+    let markers = CFArray::from_CFTypes(&[paragraph_start, selection_start]);
+    let prefix = copy_parameterized_attribute_by_ax(
+        element,
+        ax_ffi::RANGE_FOR_UNORDERED_MARKERS_PARAMETERIZED_ATTRIBUTE,
+        markers.as_CFTypeRef(),
+    )?;
+    let sel_start_utf16 = string_for_marker_range_by_ax(element, &prefix)?
+        .encode_utf16()
+        .count() as isize;
+
+    // 偏移是本地推导的，与 Windows 同理不用“唯一出现位置”兜底（见 capture::find_anchor）；
+    // 段落是整块文本，窗口恒对齐开头，触边无意义
+    return match capture_in_context(&context, word, &[sel_start_utf16], 0, false) {
+        Some((capture, _)) => Ok(capture),
+        None => Err(format!(
+            "no validated anchor for the selected text in the paragraph \
+             (selection starts at {sel_start_utf16} utf16 units, paragraph {} utf16 units, \
+             word {} utf16 units, {} occurrence(s) in the paragraph; \
+             a selection spanning several paragraphs lands here too)",
+            context.encode_utf16().count(),
+            word.encode_utf16().count(),
+            context.match_indices(word).count()
+        )),
+    };
+}
+
 /// 读取元素所属应用的进程 id（AXUIElementGetPid），失败返回 None。
 fn get_element_pid(element: &core_foundation::base::CFType) -> Option<i32> {
     use core_foundation::base::TCFType;
@@ -394,9 +662,19 @@ fn context_from_word_and_element(
         },
         Ok(SentenceCapture::SelectionAsIs(text)) => SelectedContext { text, word: None },
         Err(error) => {
-            // 已拿到词：取句失败不致命，降级为现有 AX 成功路径的语义（录入词原文）
-            log::warn!("failed to extract sentence for the selected word: {error}");
-            SelectedContext { text: word.to_string(), word: None }
+            // 范围链路失败。PDFKit（Preview、Safari 的 PDF 查看器）不暴露选区位置，
+            // 尝试用整页文本匹配选中词来定位；仍失败则降级为现有 AX 成功路径的语义
+            // （录入词原文）——已拿到词，取句失败不致命
+            match find_sentence_in_pdf_pages(element, word) {
+                Ok(context) => context,
+                Err(pdf_error) => {
+                    log::warn!(
+                        "failed to extract sentence for the selected word: {error} \
+                         (PDF page lookup: {pdf_error})"
+                    );
+                    SelectedContext { text: word.to_string(), word: None }
+                }
+            }
         }
     };
 }
@@ -528,6 +806,413 @@ fn find_element_with_selection_in_window(
     return found;
 }
 
+/// 前台应用的 pid（NSWorkspace.frontmostApplication，不经过 AX）；本应用自己返回 None。
+///
+/// 全局快捷键不改变前台应用，故这就是取词目标。Safari 的 PDF 查看器等场景下 AX 的
+/// 系统级焦点（AXFocusedUIElement / AXFocusedApplication）都报 NoValue，只能靠它。
+fn frontmost_application_pid() -> Option<i32> {
+    let pid = objc2::rc::autoreleasepool(|_| unsafe {
+        let workspace: *mut objc2::runtime::AnyObject =
+            objc2::msg_send![objc2::class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
+            return None;
+        }
+        let app: *mut objc2::runtime::AnyObject = objc2::msg_send![workspace, frontmostApplication];
+        if app.is_null() {
+            return None;
+        }
+        let pid: i32 = objc2::msg_send![app, processIdentifier];
+        return Some(pid);
+    })?;
+    return (pid > 0 && pid as u32 != std::process::id()).then_some(pid);
+}
+
+/// 在窗口 AX 子树里找 PDFKit 页面（有界 DFS：深度、节点数都限制；Safari 的页面在
+/// 深度 6 左右）。找到第一个 AXPage 即返回其全部兄弟页面。
+fn find_pdf_pages_in_window(
+    window: &core_foundation::base::CFType,
+) -> Option<Vec<core_foundation::base::CFType>> {
+    const MAX_DEPTH: usize = 10;
+    const MAX_NODES: usize = 400;
+
+    fn dfs(
+        element: &core_foundation::base::CFType,
+        depth: usize,
+        budget: &mut usize,
+    ) -> Option<Vec<core_foundation::base::CFType>> {
+        if depth > MAX_DEPTH || *budget == 0 {
+            return None;
+        }
+        *budget -= 1;
+        let children = children_of(element);
+        let pages: Vec<_> = children.iter().filter(|c| is_ax_page(c)).cloned().collect();
+        if !pages.is_empty() {
+            return Some(pages);
+        }
+        for child in &children {
+            if let Some(found) = dfs(child, depth + 1, budget) {
+                return Some(found);
+            }
+        }
+        return None;
+    }
+    let mut budget = MAX_NODES;
+    return dfs(window, 0, &mut budget);
+}
+
+/// 模拟复制只拿到了词（AX 完全不暴露选区）时，用目标应用窗口里的 PDF 页面文本补全句子。
+///
+/// Safari 的 PDF 查看器就是这种：连焦点元素都取不到，页面元素也不报 AXSelectedText，
+/// 选区只能靠 Cmd+C 读到；但它的页面元素仍提供整页文本，词可据此定位（见
+/// find_sentence_in_pdf_pages）。目标不是 PDF 或定位不唯一时返回 None，保持仅录词。
+fn refine_with_pdf_pages(pid: i32, selection: &str) -> Option<SelectedContext> {
+    use core_foundation::base::{CFType, TCFType};
+
+    let started = std::time::Instant::now();
+    let app: CFType =
+        unsafe { TCFType::wrap_under_create_rule(ax_ffi::AXUIElementCreateApplication(pid)) };
+    let window = copy_element_attribute_by_ax(&app, ax_ffi::FOCUSED_WINDOW_ATTRIBUTE).ok()?;
+    let Some(pages) = find_pdf_pages_in_window(&window) else {
+        log::info!(
+            "no PDF pages in the front window of pid {pid} ({:?}), keeping the word only",
+            started.elapsed()
+        );
+        return None;
+    };
+    return match locate_sentence_in_pdf_pages(&pages, selection) {
+        Ok(context) => {
+            log::info!("PDF page text lookup succeeded ({:?})", started.elapsed());
+            Some(context)
+        }
+        Err(error) => {
+            log::warn!("PDF page text lookup failed: {error}");
+            None
+        }
+    };
+}
+
+/// 屏幕坐标下的矩形（与 CGRect 内存布局一致，供 AXValueGetValue 解包 AXFrame）。
+#[derive(Clone, Copy, Default, Debug)]
+#[repr(C)]
+struct AxRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+impl AxRect {
+    /// 与另一矩形的相交面积是否为正（仅相接不算）。
+    fn intersects(&self, other: &AxRect) -> bool {
+        let overlap_width = (self.x + self.width).min(other.x + other.width) - self.x.max(other.x);
+        let overlap_height =
+            (self.y + self.height).min(other.y + other.height) - self.y.max(other.y);
+        return overlap_width > 0.0 && overlap_height > 0.0;
+    }
+}
+
+/// 读取元素的屏幕外框（AXFrame）。
+fn element_frame_by_ax(element: &core_foundation::base::CFType) -> Option<AxRect> {
+    use core_foundation::base::TCFType;
+
+    let value = copy_element_attribute_by_ax(element, ax_ffi::FRAME_ATTRIBUTE).ok()?;
+    let mut rect = AxRect::default();
+    let decoded = unsafe {
+        ax_ffi::AXValueGetValue(
+            value.as_CFTypeRef(),
+            ax_ffi::AX_VALUE_CG_RECT_TYPE,
+            &mut rect as *mut AxRect as *mut std::ffi::c_void,
+        )
+    };
+    return (decoded != 0).then_some(rect);
+}
+
+/// 元素的子元素列表（各自 retain，不受数组生命周期约束）；读取失败返回空。
+fn children_of(element: &core_foundation::base::CFType) -> Vec<core_foundation::base::CFType> {
+    use core_foundation::base::{CFType, TCFType};
+
+    let Ok(children) = copy_children_array_by_ax(element.as_CFTypeRef()) else {
+        return Vec::new();
+    };
+    let count = unsafe { ax_ffi::CFArrayGetCount(children.as_CFTypeRef()) };
+    let mut result = Vec::new();
+    for index in 0..count {
+        let raw = unsafe { ax_ffi::CFArrayGetValueAtIndex(children.as_CFTypeRef(), index) };
+        if !raw.is_null() {
+            let child: CFType = unsafe { TCFType::wrap_under_get_rule(raw) };
+            result.push(child);
+        }
+    }
+    return result;
+}
+
+fn is_ax_page(element: &core_foundation::base::CFType) -> bool {
+    return copy_string_attribute_by_ax(element, ax_ffi::ROLE_ATTRIBUTE)
+        .is_ok_and(|role| role == "AXPage");
+}
+
+/// 找出 PDFKit 文档的全部页面元素（AXPage 兄弟节点）。
+///
+/// 入口元素可能是页面本身或其后代（Safari：窗口树搜索命中的页面元素）→ 沿 AXParent
+/// 上溯找到 AXPage，取其父节点下的全部 AXPage；也可能是页面的容器（Preview：焦点元素
+/// 是 AXSharedDocumentContainer）→ 向下做有界广度搜索。找不到返回 None（不是 PDFKit 文档）。
+fn find_pdf_pages(
+    element: &core_foundation::base::CFType,
+) -> Option<Vec<core_foundation::base::CFType>> {
+    let pages_of = |parent: &core_foundation::base::CFType| -> Vec<core_foundation::base::CFType> {
+        children_of(parent).into_iter().filter(is_ax_page).collect()
+    };
+
+    // 上溯：自身或祖先是 AXPage
+    let mut current = element.clone();
+    for _ in 0..12 {
+        if is_ax_page(&current) {
+            let parent = copy_element_attribute_by_ax(&current, ax_ffi::PARENT_ATTRIBUTE).ok()?;
+            let pages = pages_of(&parent);
+            return (!pages.is_empty()).then_some(pages);
+        }
+        match copy_element_attribute_by_ax(&current, ax_ffi::PARENT_ATTRIBUTE) {
+            Ok(parent) => current = parent,
+            Err(_) => break,
+        }
+    }
+
+    // 下探：有界广度优先（层数、节点数都很小，PDF 文档容器紧挨着页面）
+    const MAX_DEPTH: usize = 3;
+    const MAX_NODES: usize = 80;
+    let mut level = vec![element.clone()];
+    let mut visited = 0;
+    for _ in 0..MAX_DEPTH {
+        let mut next_level = Vec::new();
+        for node in &level {
+            visited += 1;
+            if visited > MAX_NODES {
+                return None;
+            }
+            let children = children_of(node);
+            let pages: Vec<_> = children.iter().filter(|c| is_ax_page(c)).cloned().collect();
+            if !pages.is_empty() {
+                return Some(pages);
+            }
+            next_level.extend(children);
+        }
+        level = next_level;
+    }
+    return None;
+}
+
+/// PDF 页面的可视区域：页面容器的最近 AXScrollArea 祖先（Preview），没有则取容器
+/// 自身的外框（Safari 的 PDF 插件容器恰好就是视口）。
+fn pdf_viewport(first_page: &core_foundation::base::CFType) -> Option<AxRect> {
+    let container = copy_element_attribute_by_ax(first_page, ax_ffi::PARENT_ATTRIBUTE).ok()?;
+    let mut current = container.clone();
+    for _ in 0..8 {
+        if copy_string_attribute_by_ax(&current, ax_ffi::ROLE_ATTRIBUTE)
+            .is_ok_and(|role| role == "AXScrollArea")
+        {
+            return element_frame_by_ax(&current);
+        }
+        match copy_element_attribute_by_ax(&current, ax_ffi::PARENT_ATTRIBUTE) {
+            Ok(parent) => current = parent,
+            Err(_) => break,
+        }
+    }
+    return element_frame_by_ax(&container);
+}
+
+/// 读取 PDF 页面的整页文本（UTF-16 码元序列）：AXAttributedStringForRange 取 [0, 字符数)。
+fn pdf_page_text_utf16(page: &core_foundation::base::CFType) -> Result<Vec<u16>, String> {
+    use core_foundation::base::{CFGetTypeID, CFRange, CFType, TCFType};
+    use core_foundation::string::{CFString, CFStringRef};
+
+    let count = copy_i64_attribute_by_ax(page, ax_ffi::NUMBER_OF_CHARACTERS_ATTRIBUTE)?;
+    if count <= 0 {
+        return Err("the page has no text".to_string());
+    }
+    let range = CFRange { location: 0, length: count as isize };
+    unsafe {
+        let range_value_ref = ax_ffi::AXValueCreate(
+            ax_ffi::AX_VALUE_CF_RANGE_TYPE,
+            &range as *const CFRange as *const std::ffi::c_void,
+        );
+        if range_value_ref.is_null() {
+            return Err("failed to create AXValue for CFRange".to_string());
+        }
+        let range_value: CFType = TCFType::wrap_under_create_rule(range_value_ref);
+        let attributed = copy_parameterized_attribute_by_ax(
+            page,
+            ax_ffi::ATTRIBUTED_STRING_FOR_RANGE_PARAMETERIZED_ATTRIBUTE,
+            range_value.as_CFTypeRef(),
+        )?;
+        if CFGetTypeID(attributed.as_CFTypeRef()) != ax_ffi::CFAttributedStringGetTypeID() {
+            return Err("the page text is not an attributed string".to_string());
+        }
+        // Get 规则：借用自 attributed，转成 owned CFString 后再用
+        let string_ref = ax_ffi::CFAttributedStringGetString(attributed.as_CFTypeRef());
+        if string_ref.is_null() {
+            return Err("the attributed string has no string".to_string());
+        }
+        let string: CFString = TCFType::wrap_under_get_rule(string_ref as CFStringRef);
+        return Ok(string.to_string().encode_utf16().collect());
+    }
+}
+
+/// 在页面文本中找选中文本的全部出现位置（UTF-16 起止偏移），比较时忽略空白差异
+/// （选区文本与页面文本在换行/空格上可能不同）。区分大小写；子串匹配（选区可能是
+/// 半个词）——出现位置越多越容易判为歧义，这是保守方向。
+fn find_selection_occurrences(page: &[u16], selection: &str) -> Vec<(usize, usize)> {
+    let is_space = |unit: u16| char::from_u32(unit as u32).is_some_and(char::is_whitespace);
+    let needle: Vec<u16> =
+        selection.encode_utf16().filter(|unit| !is_space(*unit)).collect();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    // 页面文本去空白后的序列及其到原偏移的映射
+    let mut compact = Vec::with_capacity(page.len());
+    let mut origin = Vec::with_capacity(page.len());
+    for (index, unit) in page.iter().enumerate() {
+        if !is_space(*unit) {
+            compact.push(*unit);
+            origin.push(index);
+        }
+    }
+    let mut result = Vec::new();
+    if compact.len() >= needle.len() {
+        for start in 0..=(compact.len() - needle.len()) {
+            if compact[start..start + needle.len()] == needle[..] {
+                result.push((origin[start], origin[start + needle.len() - 1] + 1));
+            }
+        }
+    }
+    return result;
+}
+
+/// 以页面文本中的一处出现位置为锚点取句，返回 {句子/所选原文, 页面中的所选词}。
+/// 只取出现位置前后各 CONTEXT_MARGIN 个码元的窗口，防止超长页面拖慢分句。
+fn capture_pdf_occurrence(
+    page: &[u16],
+    start: usize,
+    end: usize,
+) -> Option<SelectedContext> {
+    const CONTEXT_MARGIN: usize = 4096;
+    let window_start = start.saturating_sub(CONTEXT_MARGIN);
+    let window_end = (end + CONTEXT_MARGIN).min(page.len());
+    let context = String::from_utf16_lossy(&page[window_start..window_end]);
+    let word = String::from_utf16_lossy(&page[start..end]);
+    // 偏移来自本地匹配，不用“唯一出现位置”兜底（见 capture::find_anchor）
+    let (capture, _touched_edge) = capture_in_context(
+        &context,
+        &word,
+        &[(start - window_start) as isize],
+        window_start as isize,
+        false,
+    )?;
+    return Some(match capture {
+        SentenceCapture::Expanded(sentence) => {
+            SelectedContext { text: sentence, word: Some(word.trim().to_string()) }
+        }
+        SentenceCapture::SelectionAsIs(text) => SelectedContext { text, word: None },
+    });
+}
+
+/// PDFKit 文档（Preview、Safari 的 PDF 查看器）的选词取句。
+///
+/// PDFKit 的无障碍实现只给文档级的 AXSelectedText，不暴露选区位置（所有元素的
+/// AXSelectedTextRange 都是占位值，AXBoundsForRange 也不可用）；但每个 AXPage 能经
+/// AXAttributedStringForRange 给出整页文本。因此用“选中文本在页面文本中的出现位置”
+/// 反推选区位置，按“宁可降级也不切错句”的原则只在能唯一确定时才取句：
+/// 1. 先只看屏幕上可见的页面（选区必然在用户眼前）：恰好一处出现 → 定位成功；
+/// 2. 可见页面里没有（视口计算失败，或选区已被滚出屏幕）→ 在其余页面（有上限）里找，
+///    同样要求恰好一处；
+/// 3. 多处出现：若各处切出的句子完全相同也接受，否则判歧义——高频词会降级为仅录词。
+///
+/// 已知的残余风险：选区被滚出屏幕、而可见页面里恰好有同一个词的唯一出现——会定位到
+/// 可见页面里的那一处。
+fn find_sentence_in_pdf_pages(
+    element: &core_foundation::base::CFType,
+    word: &str,
+) -> Result<SelectedContext, String> {
+    let pages = find_pdf_pages(element).ok_or("not a PDFKit document (no AXPage found)")?;
+    return locate_sentence_in_pdf_pages(&pages, word);
+}
+
+/// find_sentence_in_pdf_pages 的定位部分：已知页面元素列表，按选中文本定位并取句。
+fn locate_sentence_in_pdf_pages(
+    pages: &[core_foundation::base::CFType],
+    word: &str,
+) -> Result<SelectedContext, String> {
+    /// 第二阶段最多扫描的不可见页数（每页一次跨进程调用，页面文本可达上万字符）
+    const MAX_HIDDEN_PAGES_SCANNED: usize = 40;
+
+    let viewport = pdf_viewport(&pages[0]);
+    let visible: Vec<bool> = pages
+        .iter()
+        .map(|page| match (&viewport, element_frame_by_ax(page)) {
+            (Some(viewport), Some(frame)) => viewport.intersects(&frame),
+            _ => false,
+        })
+        .collect();
+
+    // 各页文本按需读取一次；candidates 为 (页下标, 起, 止)
+    let mut texts: Vec<Option<Vec<u16>>> = vec![None; pages.len()];
+    let mut candidates: Vec<(usize, usize, usize)> = Vec::new();
+    let scan = |index: usize,
+                    texts: &mut Vec<Option<Vec<u16>>>,
+                    candidates: &mut Vec<(usize, usize, usize)>| {
+        match pdf_page_text_utf16(&pages[index]) {
+            Ok(text) => {
+                for (start, end) in find_selection_occurrences(&text, word) {
+                    candidates.push((index, start, end));
+                }
+                texts[index] = Some(text);
+            }
+            Err(error) => log::info!("PDF page {index}: cannot read the text: {error}"),
+        }
+    };
+
+    let visible_count = visible.iter().filter(|v| **v).count();
+    for index in (0..pages.len()).filter(|i| visible[*i]) {
+        scan(index, &mut texts, &mut candidates);
+    }
+    let mut stage = "visible pages";
+    if candidates.is_empty() {
+        stage = "other pages";
+        for index in (0..pages.len()).filter(|i| !visible[*i]).take(MAX_HIDDEN_PAGES_SCANNED) {
+            scan(index, &mut texts, &mut candidates);
+        }
+    }
+    log::info!(
+        "PDF sentence capture: {} page(s), {visible_count} visible, {} occurrence(s) of the \
+         selection found in the {stage}",
+        pages.len(),
+        candidates.len()
+    );
+
+    if candidates.is_empty() {
+        return Err(format!(
+            "the selected text ({} utf16 units) was not found in the page text",
+            word.encode_utf16().count()
+        ));
+    }
+    let mut contexts = Vec::new();
+    for (index, start, end) in &candidates {
+        let text = texts[*index].as_ref().expect("scanned page has text");
+        contexts.push(
+            capture_pdf_occurrence(text, *start, *end)
+                .ok_or("failed to cut a sentence at the located occurrence")?,
+        );
+    }
+    let first = contexts.remove(0);
+    if contexts.iter().any(|other| other.text != first.text || other.word != first.word) {
+        return Err(format!(
+            "the selected text occurs {} times with different surrounding sentences, \
+             the selection cannot be located",
+            candidates.len()
+        ));
+    }
+    return Ok(first);
+}
+
 /// 后台重试的互斥标记：0 表示无重试在途，否则为正在重试的应用 pid。
 static RETRYING_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
@@ -569,8 +1254,11 @@ fn spawn_selection_retry(pid: i32, callbacks: RetryCallbacks) {
                     Err(_) => continue,
                 };
                 if let Some((element, word)) = find_element_with_selection_in_window(&window) {
-                    log::info!("AX selection retry succeeded on attempt {attempt}");
                     let context = context_from_word_and_element(&element, &word);
+                    log::info!(
+                        "AX selection retry succeeded on attempt {attempt}: {}",
+                        describe_context(&context)
+                    );
                     RETRYING_PID.store(0, Ordering::SeqCst);
                     on_finished(Some(context));
                     return;
@@ -785,7 +1473,16 @@ fn copy_string_for_range_by_ax(
 }
 
 /// 模拟 Cmd+C 读取剪贴板的 AppleScript：
-/// 备份剪贴板 → 临时静音系统提示音 → 模拟 Cmd+C → 读取剪贴板 → 恢复剪贴板与音量。
+/// 备份剪贴板 → 临时静音系统提示音 → 模拟 Cmd+C → 轮询剪贴板变化计数 →
+/// 读取剪贴板 → 恢复剪贴板与音量。
+///
+/// 输出协议：首字符为状态——`0` 表示剪贴板在超时内没有变化（应用没理会 Cmd+C，
+/// 或没有选中内容），`1` 表示复制成功，其后紧跟所选文本。用状态码而不是空串
+/// 表示“未变”，Rust 侧才能按触发场景分流（见 get_selected_text_by_applescript）。
+///
+/// 轮询而不是固定 delay：每 15ms 查一次 changeCount，最长约 300ms——慢应用不会
+/// 因固定等待太短读到旧内容，快应用也不用白等。检测到变化后再留 30ms 收尾：
+/// 有的应用先 clearContents（计数已变）、稍后才写入数据，立即读取会读到空。
 ///
 /// 剪贴板备份/恢复是尽力而为的：剪贴板当前内容不是文本（如图片、文件）时
 /// `the clipboard` 读取失败，此时跳过备份与恢复、只做复制读取——牺牲“剪贴板
@@ -814,17 +1511,29 @@ end tell
 
 -- Copy selected text to clipboard:
 tell application "System Events" to keystroke "c" using {command down}
-delay 0.1 -- Without this, the clipboard may have stale data.
+
+-- Poll the pasteboard change count (up to ~300ms) instead of a fixed delay:
+set didChange to false
+repeat 20 times
+    if thePasteboard's changeCount() is not theCount then
+        set didChange to true
+        exit repeat
+    end if
+    delay 0.015
+end repeat
 
 tell application "System Events"
     set volume alert volume savedAlertVolume
 end tell
 
-if thePasteboard's changeCount() is theCount then
-    return ""
+if not didChange then
+    return "0"
 end if
 
-set theSelectedText to the clipboard
+-- Some apps clear the pasteboard first and write the data a moment later:
+delay 0.03
+
+set theSelectedText to the clipboard as text
 
 if clipboardSaved then
     try
@@ -832,11 +1541,16 @@ if clipboardSaved then
     end try
 end if
 
-theSelectedText
+return "1" & theSelectedText
 "#;
 
 /// 通过 AppleScript 模拟 Cmd+C 并读取剪贴板，获取当前选中的文本。
-fn get_selected_text_by_applescript() -> Result<String, String> {
+///
+/// `silent_if_unchanged`：剪贴板在模拟 Cmd+C 后未变化的语义。true（AX 能正常响应、
+/// 只是没读到选区）= 什么都没选，返回空串由调用方提示“没有选区”；false（AX 查询
+/// 本身失败）= 没有任何一路能证明目标应用里有选区，剪贴板不变更可能是取词目标
+/// 取错了、焦点在安全输入框、或应用不理会模拟按键，返回 Err 报取词失败。
+fn get_selected_text_by_applescript(silent_if_unchanged: bool) -> Result<String, String> {
     let output = std::process::Command::new("osascript")
         .arg("-e")
         .arg(APPLE_SCRIPT)
@@ -845,18 +1559,51 @@ fn get_selected_text_by_applescript() -> Result<String, String> {
     if output.status.success() {
         let content = String::from_utf8(output.stdout)
             .map_err(|e| format!("osascript output is not valid utf-8: {e}"))?;
-        return Ok(content.trim().to_string());
+        return parse_applescript_output(&content, silent_if_unchanged);
     }
     let error = String::from_utf8_lossy(&output.stderr).into_owned();
     return Err(format!("osascript failed: {error}"));
+}
+
+/// 解析 APPLE_SCRIPT 的输出协议（首字符状态码 + 所选文本）。
+fn parse_applescript_output(output: &str, silent_if_unchanged: bool) -> Result<String, String> {
+    if let Some(text) = output.strip_prefix('1') {
+        return Ok(text.trim().to_string());
+    }
+    if output.trim() == "0" {
+        if silent_if_unchanged {
+            return Ok(String::new());
+        }
+        return Err(
+            "the clipboard did not change after the simulated Cmd+C (the target app may not \
+             have been the one we queried, the focus may be in a secure input field, or the app \
+             ignores the simulated keystroke)"
+                .to_string(),
+        );
+    }
+    return Err(format!("unexpected osascript output: {output:?}"));
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         find_element_with_selection_by_ax, get_focused_ui_element_by_ax,
-        get_selected_context_by_ax, get_selected_text_by_ax, APPLE_SCRIPT,
+        get_selected_context_by_ax, get_selected_text_by_ax, parse_applescript_output,
+        APPLE_SCRIPT,
     };
+
+    /// AppleScript 输出协议：成功取文本、未变按触发语义分流、协议外输出报错
+    #[test]
+    fn applescript_output_parsing() {
+        assert_eq!(parse_applescript_output("1hello world\n", true), Ok("hello world".into()));
+        // 所选文本本身以 "0"/"1" 开头不应被误判（状态码只看首字符）
+        assert_eq!(parse_applescript_output("10 apples\n", false), Ok("0 apples".into()));
+        // 剪贴板未变：AX 正常（silent）→ 空串；AX 报错（strict）→ Err
+        assert_eq!(parse_applescript_output("0\n", true), Ok(String::new()));
+        assert!(parse_applescript_output("0\n", false).is_err());
+        assert!(parse_applescript_output("", true).is_err());
+        assert!(parse_applescript_output("garbage", true).is_err());
+    }
 
     /// 冒烟测试：FFI 调用路径不应 panic，结果取决于辅助功能权限与当前焦点元素。
     #[test]
@@ -884,6 +1631,142 @@ mod tests {
                 result.map(|found| found.map(|(_, word)| word))
             );
         }
+    }
+
+    /// 实机诊断（需环境变量 AX_TEST_PID=目标 WebKit 应用 pid，且其中已选中文字）：
+    /// 在其焦点窗口里找 AXWebArea，跑 WebKit 取句链路并打印结果。
+    #[test]
+    fn webkit_context_by_pid_diagnostic() {
+        use core_foundation::base::{CFType, TCFType};
+        let Some(pid) = std::env::var("AX_TEST_PID").ok().and_then(|v| v.parse::<i32>().ok())
+        else {
+            return;
+        };
+        unsafe {
+            let app: CFType =
+                TCFType::wrap_under_create_rule(super::ax_ffi::AXUIElementCreateApplication(pid));
+            let window =
+                super::copy_element_attribute_by_ax(&app, super::ax_ffi::FOCUSED_WINDOW_ATTRIBUTE)
+                    .expect("no focused window");
+            fn find_role(
+                e: &core_foundation::base::CFType,
+                role: &str,
+                depth: usize,
+            ) -> Option<core_foundation::base::CFType> {
+                if depth > 20 {
+                    return None;
+                }
+                let r = super::copy_string_attribute_by_ax(e, "AXRole").unwrap_or_default();
+                if r == role {
+                    return Some(e.clone());
+                }
+                let children = super::copy_children_array_by_ax(e.as_CFTypeRef()).ok()?;
+                let count = unsafe { super::ax_ffi::CFArrayGetCount(children.as_CFTypeRef()) };
+                for i in 0..count {
+                    let child: CFType = unsafe {
+                        let raw = super::ax_ffi::CFArrayGetValueAtIndex(children.as_CFTypeRef(), i);
+                        TCFType::wrap_under_get_rule(raw)
+                    };
+                    if let Some(found) = find_role(&child, role, depth + 1) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+            let web = find_role(&window, "AXWebArea", 0).expect("no AXWebArea");
+            let result = super::webkit_selected_context(&web);
+            eprintln!("webkit_selected_context(web area) -> {result:?}");
+            let text = find_role(&web, "AXStaticText", 0).expect("no AXStaticText");
+            let result = super::webkit_selected_context(&text);
+            eprintln!("webkit_selected_context(static text) -> {result:?}");
+        }
+    }
+
+    /// 选中文本在页面文本中的定位：忽略空白差异、记录全部出现位置、UTF-16 偏移
+    #[test]
+    fn selection_occurrences_in_page_text() {
+        let page: Vec<u16> = "Use abundant data. Abundant? An abun dant word, abundant".encode_utf16().collect();
+        // 区分大小写；空白差异不影响匹配（"abun dant" 命中 "abundant"）
+        let found = super::find_selection_occurrences(&page, "abundant");
+        let text = String::from_utf16_lossy(&page);
+        let slices: Vec<String> = found
+            .iter()
+            .map(|(start, end)| String::from_utf16_lossy(&page[*start..*end]))
+            .collect();
+        assert_eq!(slices, vec!["abundant", "abun dant", "abundant"], "{found:?} in {text:?}");
+        // 选区本身含换行（跨行选择）：与页面里的空格等价
+        let page: Vec<u16> = "the quick brown fox".encode_utf16().collect();
+        assert_eq!(super::find_selection_occurrences(&page, "quick\nbrown"), vec![(4, 15)]);
+        // astral 字符：偏移按 UTF-16 码元
+        let page: Vec<u16> = "say 😀 hi".encode_utf16().collect();
+        assert_eq!(super::find_selection_occurrences(&page, "😀"), vec![(4, 6)]);
+        assert!(super::find_selection_occurrences(&page, "  ").is_empty());
+        assert!(super::find_selection_occurrences(&page, "zebra").is_empty());
+    }
+
+    /// 以出现位置为锚点取句：单句扩展、窗口偏移不影响结果
+    #[test]
+    fn pdf_occurrence_capture() {
+        let page: Vec<u16> =
+            "Intro line.\nThe first thing is to prepare inputs with abundant information, such as features. Next one."
+                .encode_utf16()
+                .collect();
+        let (start, end) = super::find_selection_occurrences(&page, "abundant")[0];
+        let context = super::capture_pdf_occurrence(&page, start, end).expect("should capture");
+        assert_eq!(
+            context.text,
+            "The first thing is to prepare inputs with abundant information, such as features."
+        );
+        assert_eq!(context.word.as_deref(), Some("abundant"));
+    }
+
+    /// 实机诊断（需 AX_TEST_PID=目标应用 pid，其 PDF 窗口里已选中文字）：走“焦点应用窗口
+    /// 搜索 → 取句”链路，打印结果与耗时。
+    #[test]
+    fn pdf_context_by_pid_diagnostic() {
+        use core_foundation::base::{CFType, TCFType};
+        let Some(pid) = std::env::var("AX_TEST_PID").ok().and_then(|v| v.parse::<i32>().ok())
+        else {
+            return;
+        };
+        let started = std::time::Instant::now();
+        unsafe {
+            let app: CFType =
+                TCFType::wrap_under_create_rule(super::ax_ffi::AXUIElementCreateApplication(pid));
+            let window =
+                super::copy_element_attribute_by_ax(&app, super::ax_ffi::FOCUSED_WINDOW_ATTRIBUTE)
+                    .expect("no focused window");
+            let found = super::find_element_with_selection_in_window(&window);
+            eprintln!("window search: {:?} in {:?}", found.as_ref().map(|(_, w)| w), started.elapsed());
+            let (element, word) = found.expect("no element with a selection");
+            let result = super::context_from_word_and_element(&element, &word);
+            eprintln!("context_from_word_and_element -> {result:?} (total {:?})", started.elapsed());
+            // 应用级焦点元素入口（Preview 的正常路径：焦点元素是页面容器，需向下找页面）
+            if let Ok(focused) =
+                super::copy_element_attribute_by_ax(&app, super::ax_ffi::FOCUSED_UI_ELEMENT_ATTRIBUTE)
+            {
+                let started = std::time::Instant::now();
+                let word = super::copy_string_attribute_by_ax(&focused, super::ax_ffi::SELECTED_TEXT_ATTRIBUTE)
+                    .unwrap_or_default();
+                let result = super::context_from_word_and_element(&focused, &word);
+                eprintln!("via focused element -> {result:?} ({:?})", started.elapsed());
+            }
+        }
+    }
+
+    /// 实机诊断（需 AX_TEST_PID 与 AX_TEST_WORD）：模拟“Cmd+C 只拿到词”后的 PDF 页面文本补全。
+    #[test]
+    fn pdf_refine_by_pid_diagnostic() {
+        let (Some(pid), Ok(word)) = (
+            std::env::var("AX_TEST_PID").ok().and_then(|v| v.parse::<i32>().ok()),
+            std::env::var("AX_TEST_WORD"),
+        ) else {
+            return;
+        };
+        let started = std::time::Instant::now();
+        let result = super::refine_with_pdf_pages(pid, &word);
+        eprintln!("refine_with_pdf_pages -> {result:?} ({:?})", started.elapsed());
+        eprintln!("frontmost_application_pid -> {:?}", super::frontmost_application_pid());
     }
 
     /// APPLE_SCRIPT 应能被 osacompile 编译（仅语法检查，不执行脚本）。

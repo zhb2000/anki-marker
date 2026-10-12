@@ -30,7 +30,7 @@
 //! ② 我们只把前台还给了 frame 窗口，应用内容窗口未必拿到键盘焦点（若属此项，可在归还
 //! 后进一步把焦点落到内容子窗口）。两条都不影响非 UWP 应用。
 
-use super::capture::{capture_in_context, reconcile_with_primary, SentenceCapture};
+use super::capture::{capture_in_context, describe_context, reconcile_with_primary, SentenceCapture};
 use super::{RetryCallbacks, SelectedContext};
 
 use ::windows::core::BSTR;
@@ -125,23 +125,6 @@ pub fn get_selected_context(
             return Ok(context);
         }
     }
-}
-
-/// 结果日志的描述串：词与录入文本（各截断到 80 字符），用于实机定位"读错控件"
-/// 类问题（日志只写本机日志文件，不上传）。
-fn describe_context(context: &SelectedContext) -> String {
-    fn preview(text: &str) -> String {
-        const MAX_CHARS: usize = 80;
-        let mut chars = text.chars();
-        let preview: String = chars.by_ref().take(MAX_CHARS).collect();
-        return if chars.next().is_some() { format!("{preview}…") } else { preview };
-    }
-    return format!(
-        "word {:?}, text {:?} ({} utf16 units)",
-        context.word.as_deref().map(preview),
-        preview(&context.text),
-        context.text.encode_utf16().count()
-    );
 }
 
 /// COM 生命周期守卫：Drop 时 CoUninitialize。守卫先于所有 COM 接口构造、

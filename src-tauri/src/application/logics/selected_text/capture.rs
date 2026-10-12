@@ -6,11 +6,29 @@
 //! 异（详见 find_anchor），因此所有候选锚点都要经“该位置的 UTF-16 子串等于
 //! 所选文本”校验后才采用——宁可降级为仅录词，也不切出错误的句子。
 
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 use super::SelectedContext;
 use crate::application::logics::sentence::{
     count_intersecting_sentences, find_sentence_with_range,
 };
+
+/// 结果日志的描述串：词与录入文本（各截断到 80 字符），用于实机定位"读错控件"
+/// 类问题（日志只写本机日志文件，不上传）。
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub fn describe_context(context: &SelectedContext) -> String {
+    fn preview(text: &str) -> String {
+        const MAX_CHARS: usize = 80;
+        let mut chars = text.chars();
+        let preview: String = chars.by_ref().take(MAX_CHARS).collect();
+        return if chars.next().is_some() { format!("{preview}…") } else { preview };
+    }
+    return format!(
+        "word {:?}, text {:?} ({} utf16 units)",
+        context.word.as_deref().map(preview),
+        preview(&context.text),
+        context.text.encode_utf16().count()
+    );
+}
 
 /// 取句结果：单句时为用户所选词扩展出的整句；用户手动跨句选择时为其所选原文。
 #[derive(Debug)]
