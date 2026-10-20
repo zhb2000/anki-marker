@@ -26,6 +26,10 @@ tauri-plugin-os = "2.3"
 tauri-plugin-clipboard-manager = "2.3"
 tauri-plugin-log = "2.9"
 tauri-plugin-autostart = "2.5"
+# 单实例：再次启动应用时把参数转交首实例并唤起其主窗口。互斥键（Windows 命名互斥量、
+# Linux D-Bus 名、macOS socket）全部由 identifier 派生，故 dev 与正式版通过
+# tauri.dev.conf.json 里的独立 identifier 互不干扰（见 scripts/tauri.mjs）
+tauri-plugin-single-instance = "2"
 log = "0.4"
 sanitise-file-name = "1.0"
 unicode-segmentation = "1"

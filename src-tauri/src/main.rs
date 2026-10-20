@@ -44,6 +44,20 @@ fn main() {
         .level(log::LevelFilter::Warn);
 
     let builder = tauri::Builder::default()
+        // 单实例：必须最先注册（先于其它插件，避免它们抢先创建窗口/占用资源）。
+        // 已有实例在运行时，新进程的参数会转交给它、自身随即退出；这里的回调在
+        // 首实例侧执行，负责把窗口带回前台。判定键由 identifier 派生，开发构建
+        // 使用 tauri.dev.conf.json 中的独立 identifier（见 scripts/tauri.mjs），
+        // 因此 dev 与已安装的正式版可以同时运行、各自单实例。
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // 登录自启动（--hidden）撞上已运行实例时不抢前台；用户主动启动才唤起窗口
+            if args.iter().any(|arg| arg == "--hidden") {
+                return;
+            }
+            if let Err(error) = application::shortcut::show_and_focus_main_window(app) {
+                log::warn!("failed to show main window for the second instance: {error}");
+            }
+        }))
         .plugin(log_builder.build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
