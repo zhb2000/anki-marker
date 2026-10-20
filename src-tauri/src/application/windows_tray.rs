@@ -4,14 +4,14 @@
 //!
 //! 托盘图标跟随系统深浅时，要跟随的是**任务栏**的深浅，对应注册表
 //! `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\SystemUsesLightTheme`
-//! （设置页「个性化 › 颜色 › 选择模式 › 自定义 › 默认 Windows 模式」）。它与应用深浅
+//! （设置页“个性化 › 颜色 › 选择模式 › 自定义 › 默认 Windows 模式”）。它与应用深浅
 //! `AppsUseLightTheme`（默认应用模式）是**两个独立值**，而 Tauri/tao 的主题检测读的
 //! 是后者（tao `platform_impl/windows/dark_mode.rs` 的 `read_apps_use_light_theme`），
-//! 因此在「Windows 模式深 + 应用模式浅」这一常见组合下会判错，必须自己读注册表。
+//! 因此在“Windows 模式深 + 应用模式浅”这一常见组合下会判错，必须自己读注册表。
 //!
 //! ## 为什么用 WM_SETTINGCHANGE 而非 WinRT 的 UISettings 事件
 //!
-//! `UISettings.ColorValuesChanged` 在官方文档「WinRT APIs not supported in desktop apps」
+//! `UISettings.ColorValuesChanged` 在官方文档“WinRT APIs not supported in desktop apps”
 //! 的 Unsupported members → Events 表中明确列为桌面应用不支持（实测 Windows 10 不触发、
 //! Windows 11 触发，行为随版本变化）；且它的取值只反映**应用**深浅（实测其 Background
 //! 恒随 AppsUseLightTheme 变化），与任务栏无关。`WM_SETTINGCHANGE` 是纯 Win32 广播，
@@ -22,7 +22,7 @@
 //! `WM_SETTINGCHANGE` 经 `HWND_BROADCAST` 广播，只发给**顶级窗口**，message-only
 //! window 收不到（MSDN：message-only window "does not receive broadcast messages"）。
 //! 主窗口在后台模式下只是隐藏而未被销毁，仍是顶级窗口，故直接对其做子类化。
-//! 将来若支持「无窗口的纯托盘常驻」，需改为自建一个隐藏的顶级窗口。
+//! 将来若支持“无窗口的纯托盘常驻”，需改为自建一个隐藏的顶级窗口。
 
 use std::sync::Mutex;
 
@@ -131,7 +131,7 @@ pub fn install_taskbar_theme_listener(app: &AppHandle, on_change: ChangeHandler)
 
 /// 子类化过程：收到 `WM_SETTINGCHANGE` 即回调，由调用方重读状态并自行判断是否需要换图。
 ///
-/// 不在此处过滤：切换「Windows 模式」与「应用模式」都广播 "ImmersiveColorSet"（还可能出现
+/// 不在此处过滤：切换“Windows 模式”与“应用模式”都广播 "ImmersiveColorSet"（还可能出现
 /// "WindowsThemeElement" 等值），而显示缩放变化同样走这条广播（会影响托盘槽位尺寸）。
 /// 统一交由调用方“重读并比对”处理，既不会漏，又天然去抖。
 unsafe extern "system" fn subclass_proc(

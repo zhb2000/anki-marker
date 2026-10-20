@@ -14,7 +14,7 @@ mod application;
 static USER_CLOSED_MAIN_WINDOW: AtomicBool = AtomicBool::new(false);
 
 /// 本次启动为“静默启动”：登录自启动且配置为关闭窗口后保持后台运行，主窗口不
-/// 自动显示、应用按 background-icon 配置进入后台模式（macOS 为 Dock/菜单栏图标、
+/// 自动显示、应用按配置显示后台图标（macOS 为 Dock/菜单栏图标、
 /// Windows/Linux 为托盘图标）。自启动载体三端均支持“静默”语义：macOS 为登录项
 /// hidden 标志（应用级隐藏，见 application::autostart）；Windows/Linux 为注册表
 /// Run 值 / .desktop Exec 保留的 --hidden 启动参数。
@@ -134,7 +134,7 @@ fn main() {
             // 必须在这里就启动——记录的是用户此前所在的应用，等要用时再跟踪就晚了
             #[cfg(target_os = "windows")]
             application::logics::selected_text::windows_target::install_foreground_watcher();
-            // Windows：监听任务栏（系统「Windows 模式」）深浅变化，托盘图标跟随系统时实时换图。
+            // Windows：监听任务栏（系统“Windows 模式”）深浅变化，托盘图标跟随系统时实时换图。
             // 需在窗口创建之后挂载（config 中的窗口在 setup 之前已创建）
             #[cfg(target_os = "windows")]
             application::menubar::install_tray_theme_listener(app.handle());
@@ -147,7 +147,7 @@ fn main() {
             // - Windows/Linux：自启动条目（注册表 Run 值 / .desktop Exec）原样保留
             //   启动参数，argv 带 --hidden 即登录自启动拉起，直接从启动参数判定。
             // 检测到静默启动且配置为关闭窗口后保持后台运行时，主窗口保持隐藏并按
-            // background-icon 配置进入后台模式（保证托盘/菜单栏图标可见，否则用户将
+            // 配置显示后台图标（保证托盘/菜单栏图标可见，否则用户将
             // 无法唤起应用）；否则照常显示主窗口。
             #[cfg(target_os = "macos")]
             let start_hidden = {
@@ -163,6 +163,10 @@ fn main() {
             START_HIDDEN.store(start_hidden, Ordering::Relaxed);
             if start_hidden {
                 application::menubar::on_main_window_hidden(app.handle());
+            } else {
+                // 主窗口即将显示：托盘/菜单栏图标与窗口可见性无关，需在此就创建
+                // （Windows/Linux 始终显示托盘；macOS 按“显示菜单栏图标”开关）
+                application::menubar::on_main_window_shown(app.handle());
             }
 
             // 防启动闪屏的兜底：窗口初始隐藏（tauri.conf.json 中 visible: false），

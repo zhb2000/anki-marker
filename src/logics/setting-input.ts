@@ -30,7 +30,7 @@ import type { SettingsStore } from './settings-store';
 
 /**
  * 值为纯字符串的配置项键（只有这些键可用于文本输入绑定器）。
- * `string extends ConfigModel[K]` 用于排除字面量联合键（theme/backgroundIcon）：
+ * `string extends ConfigModel[K]` 用于排除字面量联合键（theme/trayIconStyle）：
  * 它们虽可赋给 string，但写入类型并非宽泛的 string。
  */
 export type TextSettingKey = {

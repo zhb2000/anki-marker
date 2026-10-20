@@ -1,13 +1,11 @@
 //! 托盘图标（三端）与 Dock 图标（仅 macOS）的显隐管理。
 //!
-//! 图标显隐动态跟随主窗口可见性，分两种模式：
-//! - 前台模式（主窗口可见，含启动时）：macOS 显示 Dock 图标、隐藏托盘；
-//!   Windows/Linux 隐藏托盘（任务栏即应用的“图标”，托盘仅在后台运行期间出现）；
-//! - 后台模式（主窗口被隐藏、应用保持运行，即 keep-running-on-close 拦截关闭，
-//!   或登录自启动静默拉起）：按配置项 `background-icon` 决定——macOS 依次为
-//!   dock（显示 Dock 隐藏托盘）、menu-bar（隐藏 Dock 显示托盘）、none（都隐藏）；
-//!   Windows/Linux 无 Dock 概念，仅有托盘，menu-bar（配置值 dock 亦按其处理）
-//!   显示托盘、none 隐藏。
+//! 两者的规则不同：
+//! - 托盘图标：Windows/Linux **始终显示**（无开关）；macOS 由配置项
+//!   `show-menu-bar-icon` 决定（默认显示）。两者都与主窗口是否可见无关。
+//! - Dock 图标（仅 macOS）：主窗口可见时始终显示（用户要从 Dock 找回窗口）；主窗口
+//!   隐藏（后台运行，即 keep-running-on-close 拦截关闭或登录自启动静默拉起）时由
+//!   配置项 `keep-dock-icon-in-background` 决定是否保留（默认不保留）。
 //!
 //! 托盘菜单提供“打开”“退出”“划词录入”三个入口（“划词录入”与全局快捷键等效，
 //! 为不设快捷键的用户提供鼠标操作入口；macOS 已设置快捷键时在菜单项中显示快捷键
@@ -29,22 +27,23 @@
 //! （点击事件经 AppHandle::on_tray_icon_event 处理）；macOS 左键即弹菜单；Linux
 //! 依赖的 appindicator 托盘不支持点击事件，任何点击均由系统弹出菜单。
 //!
-//! 托盘图标的样式由配置项 `tray-icon-style` 决定：Windows 为「单色跟随系统/彩色/白/黑」，
-//! Linux 为「彩色/白/黑」，macOS 不参与（其菜单栏图标为 template 图标，由系统按菜单栏
-//! 明暗与高亮自动着色）。Windows 的「跟随系统」要判断的是**任务栏**深浅，见
+//! 托盘图标的样式由配置项 `tray-icon-style` 决定：Windows 为“单色跟随系统/彩色/白/黑”，
+//! Linux 为“彩色/白/黑”，macOS 不参与（其菜单栏图标为 template 图标，由系统按菜单栏
+//! 明暗与高亮自动着色）。Windows 的“跟随系统”要判断的是**任务栏**深浅，见
 //! super::windows_tray——它与 Tauri 的 App::theme()（读应用深浅）并非同一个值。
 //!
 //! Dock 图标菜单：Tauri/tao 未提供 Dock 菜单 API，通过 ObjC runtime 在运行时向
 //! tao 的 NSApplication 代理类注入 `applicationDockMenu:` 方法实现（见
 //! install_dock_menu）；注入失败仅记录日志并优雅降级（无 Dock 菜单，其余功能不受影响）。
 //!
-//! 主窗口恢复显示（点击 Dock 图标、划词快捷键、托盘菜单/图标）时切回前台模式。
+//! 主窗口显示/隐藏（点关闭按钮被拦截为隐藏、静默启动、快捷键/Dock/托盘唤起）时
+//! 重新应用图标显隐：托盘不受窗口可见性影响，仅 macOS 的 Dock 图标随之切换。
 
 use tauri::{AppHandle, Manager};
 
 use super::config::ConfigPath;
 use super::logics;
-use super::logics::config::{BackgroundIcon, Config};
+use super::logics::config::Config;
 #[cfg(not(target_os = "macos"))]
 use super::logics::config::TrayIconStyle;
 #[cfg(not(target_os = "macos"))]
@@ -56,30 +55,25 @@ fn read_config_or_default(app: &AppHandle) -> Config {
     return logics::config::read_config(config_path.0.as_str()).unwrap_or_default();
 }
 
-/// 主窗口隐藏（点关闭按钮被拦截为隐藏，或静默启动）后调用：进入后台模式。
-/// 按配置 background-icon 决定应用图标的显隐：
-/// macOS 上 dock → 显示 Dock、隐藏托盘，menu-bar → 隐藏 Dock、显示托盘，none → 都隐藏；
-/// Windows/Linux 上仅控制托盘：menu-bar（含 dock）→ 显示托盘，none → 隐藏托盘。
+/// 主窗口隐藏（点关闭按钮被拦截为隐藏，或静默启动）后调用：
+/// 托盘图标不受影响，仅 macOS 的 Dock 图标按配置决定是否保留。
 pub fn on_main_window_hidden(app: &AppHandle) {
-    let icon = read_config_or_default(app).background_icon();
-    enter_background(app, icon);
+    apply_icons(app, false);
 }
 
-/// 主窗口显示后调用：进入前台模式——macOS 显示 Dock 图标，三端均隐藏托盘。
+/// 主窗口显示后调用：托盘图标不受影响，macOS 恢复显示 Dock 图标。
 pub fn on_main_window_shown(app: &AppHandle) {
-    enter_foreground(app);
+    apply_icons(app, true);
 }
 
-/// 配置变化（设置页保存 / 配置文件被外部编辑）后调用。
-/// 主窗口处于隐藏（后台运行）时按新配置重新应用；前台模式的显隐与配置无关，不动作。
+/// 配置变化（设置页保存 / 配置文件被外部编辑）后调用：按新配置重新应用图标显隐。
+/// 图标配置在任何窗口状态下都可能被改动（托盘与窗口可见性无关），故一律重新应用。
 pub fn on_config_changed(app: &AppHandle) {
-    let hidden = app
+    let window_visible = app
         .get_webview_window("main")
-        .map(|w| !w.is_visible().unwrap_or(true))
-        .unwrap_or(false);
-    if hidden {
-        on_main_window_hidden(app);
-    }
+        .map(|w| w.is_visible().unwrap_or(true))
+        .unwrap_or(true);
+    apply_icons(app, window_visible);
 }
 
 /// 读取配置，返回“关闭窗口时保持后台运行”；读取失败时返回 true（保持默认行为兜底）。
@@ -90,30 +84,23 @@ pub fn keep_running_on_close(app: &AppHandle) -> bool {
     return config.keep_running_on_close();
 }
 
-/// 进入后台模式：按配置的图标位置应用 Dock 图标与菜单栏托盘的显隐。
+/// 应用应用图标的显隐。
 ///
-/// macOS：dock → 显示 Dock 隐藏托盘、menu-bar → 隐藏 Dock 显示托盘、none → 都隐藏。
-/// Windows/Linux：无 Dock 概念，仅控制托盘——menu-bar（含 dock 值）显示托盘、none 隐藏。
-fn enter_background(app: &AppHandle, icon: BackgroundIcon) {
+/// 托盘：Windows/Linux 始终显示；macOS 按 show-menu-bar-icon 显示（与窗口可见性无关）。
+/// Dock（仅 macOS）：窗口可见时始终显示；窗口隐藏时按 keep-dock-icon-in-background 决定。
+fn apply_icons(app: &AppHandle, window_visible: bool) {
     #[cfg(target_os = "macos")]
     {
-        let dock_visible = matches!(icon, BackgroundIcon::Dock);
-        let tray_visible = matches!(icon, BackgroundIcon::MenuBar);
-        apply_dock_and_tray(app, dock_visible, tray_visible);
+        let config = read_config_or_default(app);
+        let dock_visible = window_visible || config.keep_dock_icon_in_background();
+        apply_dock_and_tray(app, dock_visible, config.show_menu_bar_icon());
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let tray_visible = !matches!(icon, BackgroundIcon::None);
-        update_tray(app, tray_visible);
+        // Windows/Linux 无 Dock 图标，托盘图标也无开关：始终显示
+        let _ = window_visible;
+        update_tray(app, true);
     }
-}
-
-/// 进入前台模式：macOS 显示 Dock 图标，三端均隐藏托盘。
-fn enter_foreground(app: &AppHandle) {
-    #[cfg(target_os = "macos")]
-    apply_dock_and_tray(app, true, false);
-    #[cfg(not(target_os = "macos"))]
-    update_tray(app, false);
 }
 
 /// 应用 Dock 图标显隐并同步菜单栏托盘图标（仅 macOS）。
@@ -309,7 +296,7 @@ fn update_tray(app: &AppHandle, tray_visible: bool) {
             return;
         }
     };
-    // 图标形态与位图尺寸：Windows 的「跟随系统」需读任务栏深浅，并按 DPI 选尺寸档
+    // 图标形态与位图尺寸：Windows 的“跟随系统”需读任务栏深浅，并按 DPI 选尺寸档
     #[cfg(not(target_os = "macos"))]
     let (icon_shape, icon_size) = (resolve_tray_icon_shape(app), tray_icon_pixel_size());
     // 菜单事件由 register_menu_event_handler 在应用级统一处理（托盘与 Dock 菜单共用）

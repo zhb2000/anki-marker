@@ -12,7 +12,8 @@ export interface ConfigModel {
     globalShortcut: string;
     wordToSentence: boolean;
     keepRunningOnClose: boolean;
-    backgroundIcon: 'dock' | 'menu-bar' | 'none';
+    showMenuBarIcon: boolean;
+    keepDockIconInBackground: boolean;
     trayIconStyle: 'auto' | 'color' | 'white' | 'black';
     llmEnabled: boolean;
     llmBaseUrl: string;
@@ -22,7 +23,7 @@ export interface ConfigModel {
     llmReasoningEffort: string;
 }
 
-export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'ankiExecutablePath', 'globalShortcut', 'wordToSentence', 'keepRunningOnClose', 'backgroundIcon', 'trayIconStyle', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmMaxTokens', 'llmReasoningEffort'] as const;
+export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'ankiExecutablePath', 'globalShortcut', 'wordToSentence', 'keepRunningOnClose', 'showMenuBarIcon', 'keepDockIconInBackground', 'trayIconStyle', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmMaxTokens', 'llmReasoningEffort'] as const;
 
 /**
  * 配置项的默认值（即“未设置”状态下的存储值）。
@@ -40,7 +41,8 @@ export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     globalShortcut: '',
     wordToSentence: true,
     keepRunningOnClose: true,
-    backgroundIcon: 'menu-bar',
+    showMenuBarIcon: true,
+    keepDockIconInBackground: false,
     trayIconStyle: 'auto',
     llmEnabled: false,
     llmBaseUrl: '',
@@ -104,8 +106,10 @@ export class Config implements ConfigModel {
     public wordToSentence!: boolean;
     /** 关闭窗口时是否保持应用在后台运行（仅 macOS） */
     public keepRunningOnClose!: boolean;
-    /** 后台运行期间应用图标的显示位置（仅 macOS）：dock=Dock 栏、menu-bar=菜单栏、none=不显示图标 */
-    public backgroundIcon!: 'dock' | 'menu-bar' | 'none';
+    /** 是否在屏幕顶部菜单栏显示图标（仅 macOS；Windows/Linux 始终显示托盘图标，该键被忽略） */
+    public showMenuBarIcon!: boolean;
+    /** 关闭窗口（后台运行）后是否在 Dock 栏保留图标（仅 macOS；窗口打开时 Dock 图标始终显示） */
+    public keepDockIconInBackground!: boolean;
     /**
      * 托盘图标样式（仅 Windows/Linux 生效；macOS 由系统 template 机制自动适配，该键被忽略）：
      * auto=单色跟随系统（Windows 读任务栏深浅，Linux 等同于 color）、color=彩色、

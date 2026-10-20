@@ -1,28 +1,5 @@
 use std::path::Path;
 
-/// 后台运行（关闭窗口保持运行）期间应用图标的显示位置
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum BackgroundIcon {
-    /// Dock 栏图标（仅 macOS；其他平台按菜单栏/托盘图标处理）
-    Dock,
-    /// 屏幕顶部菜单栏图标（macOS）/ 系统托盘图标（Windows/Linux）
-    MenuBar,
-    /// 不显示图标
-    None,
-}
-
-impl BackgroundIcon {
-    /// 对应 config.toml 中的字符串值
-    pub fn as_toml_str(self) -> &'static str {
-        return match self {
-            BackgroundIcon::Dock => "dock",
-            BackgroundIcon::MenuBar => "menu-bar",
-            BackgroundIcon::None => "none",
-        };
-    }
-}
-
 /// 托盘图标样式（Windows/Linux 生效）
 ///
 /// macOS 不参与：其菜单栏图标为 template 图标，由系统按菜单栏明暗与高亮自动着色，
@@ -87,7 +64,8 @@ pub struct Config {
     global_shortcut: String,
     word_to_sentence: bool,
     keep_running_on_close: bool,
-    background_icon: BackgroundIcon,
+    show_menu_bar_icon: bool,
+    keep_dock_icon_in_background: bool,
     tray_icon_style: TrayIconStyle,
     llm_enabled: bool,
     llm_base_url: String,
@@ -110,7 +88,8 @@ pub struct PartialConfig {
     global_shortcut: Option<String>,
     word_to_sentence: Option<bool>,
     keep_running_on_close: Option<bool>,
-    background_icon: Option<BackgroundIcon>,
+    show_menu_bar_icon: Option<bool>,
+    keep_dock_icon_in_background: Option<bool>,
     tray_icon_style: Option<TrayIconStyle>,
     llm_enabled: Option<bool>,
     llm_base_url: Option<String>,
@@ -136,9 +115,16 @@ impl Config {
         return self.keep_running_on_close;
     }
 
-    /// 后台运行期间应用图标的显示位置（三端生效，dock 值仅 macOS 有 Dock 语义）
-    pub fn background_icon(&self) -> BackgroundIcon {
-        return self.background_icon;
+    /// macOS：是否在屏幕顶部菜单栏显示图标（其他平台无此开关，托盘图标始终显示）
+    #[cfg(target_os = "macos")]
+    pub fn show_menu_bar_icon(&self) -> bool {
+        return self.show_menu_bar_icon;
+    }
+
+    /// macOS：关闭窗口（后台运行）后是否在 Dock 栏保留图标；窗口打开时 Dock 图标始终显示
+    #[cfg(target_os = "macos")]
+    pub fn keep_dock_icon_in_background(&self) -> bool {
+        return self.keep_dock_icon_in_background;
     }
 
     /// 托盘图标样式（仅 Windows/Linux 生效；macOS 的菜单栏图标由系统 template 机制自动
@@ -163,7 +149,8 @@ impl Default for Config {
             global_shortcut: String::new(),
             word_to_sentence: true,
             keep_running_on_close: true,
-            background_icon: BackgroundIcon::MenuBar,
+            show_menu_bar_icon: true,
+            keep_dock_icon_in_background: false,
             tray_icon_style: TrayIconStyle::Auto,
             llm_enabled: false,
             llm_base_url: String::new(),
@@ -256,12 +243,18 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             .get("keep-running-on-close")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
-        // 后台运行期间图标位置为后加的键，老配置文件中没有；缺省或非法值回退菜单栏图标
-        let background_icon = match doc.get("background-icon").and_then(|v| v.as_str()) {
-            Some("dock") => BackgroundIcon::Dock,
-            Some("none") => BackgroundIcon::None,
-            _ => BackgroundIcon::MenuBar,
-        };
+        // 菜单栏图标开关、后台保留 Dock 图标开关为后加的键。更早的配置文件中只有三选一的
+        // 枚举键 background-icon（menu-bar / dock / none），缺少新键时按其取值迁移，
+        // 保证老用户的图标显隐行为不变：dock → 关菜单栏、保留 Dock，none → 两者都关。
+        let legacy_background_icon = doc.get("background-icon").and_then(|v| v.as_str());
+        let show_menu_bar_icon = doc
+            .get("show-menu-bar-icon")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(!matches!(legacy_background_icon, Some("dock") | Some("none")));
+        let keep_dock_icon_in_background = doc
+            .get("keep-dock-icon-in-background")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(matches!(legacy_background_icon, Some("dock")));
         // 托盘图标样式为后加的键，老配置文件中没有；缺省或非法值回退跟随系统
         // （该值带平台差异：auto 在 Linux 上等同 color，macOS 一律忽略）
         let tray_icon_style = match doc.get("tray-icon-style").and_then(|v| v.as_str()) {
@@ -311,7 +304,8 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             global_shortcut,
             word_to_sentence,
             keep_running_on_close,
-            background_icon,
+            show_menu_bar_icon,
+            keep_dock_icon_in_background,
             tray_icon_style,
             llm_enabled,
             llm_base_url,
@@ -361,8 +355,15 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
         if let Some(keep_running_on_close) = modified.keep_running_on_close {
             doc["keep-running-on-close"] = toml_edit::value(keep_running_on_close);
         }
-        if let Some(background_icon) = modified.background_icon {
-            doc["background-icon"] = toml_edit::value(background_icon.as_toml_str());
+        // 枚举键已被两个开关取代：写入新键时一并删除老键，避免两套键并存造成歧义
+        if modified.show_menu_bar_icon.is_some() || modified.keep_dock_icon_in_background.is_some() {
+            doc.remove("background-icon");
+        }
+        if let Some(show_menu_bar_icon) = modified.show_menu_bar_icon {
+            doc["show-menu-bar-icon"] = toml_edit::value(show_menu_bar_icon);
+        }
+        if let Some(keep_dock_icon_in_background) = modified.keep_dock_icon_in_background {
+            doc["keep-dock-icon-in-background"] = toml_edit::value(keep_dock_icon_in_background);
         }
         if let Some(tray_icon_style) = modified.tray_icon_style {
             doc["tray-icon-style"] = toml_edit::value(tray_icon_style.as_toml_str());
@@ -411,7 +412,8 @@ mod tests {
             .expect("failed to write the temporary config file");
         let config = read_config(&path).expect("failed to parse the shipped config template");
         assert_eq!(config.tray_icon_style, TrayIconStyle::Auto);
-        assert_eq!(config.background_icon, BackgroundIcon::MenuBar);
+        assert_eq!(config.show_menu_bar_icon, true);
+        assert_eq!(config.keep_dock_icon_in_background, false);
         assert_eq!(config.theme, ThemeMode::System);
         let _ = std::fs::remove_file(&path);
     }
@@ -429,6 +431,36 @@ mod tests {
         commit_config(&path, modified).expect("failed to commit the config");
         let config = read_config(&path).expect("failed to read back the config");
         assert_eq!(config.tray_icon_style, TrayIconStyle::White);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// 老配置文件的三选一枚举键 background-icon 必须迁移到两个新开关：
+    /// 缺新键时按老值换算，写入新键后老键被清理，避免两套键并存。
+    #[test]
+    fn migrates_legacy_background_icon() {
+        let path = std::env::temp_dir().join("anki-marker-test-config-legacy-icon.toml");
+        for (legacy, show_menu_bar, keep_dock) in [
+            ("menu-bar", true, false),
+            ("dock", false, true),
+            ("none", false, false),
+        ] {
+            let content = format!("keep-running-on-close = true\nbackground-icon = \"{legacy}\"\n");
+            std::fs::write(&path, content).expect("failed to write the legacy config file");
+            let config = read_config(&path).expect("failed to read the legacy config file");
+            assert_eq!(config.show_menu_bar_icon, show_menu_bar, "legacy = {legacy}");
+            assert_eq!(
+                config.keep_dock_icon_in_background,
+                keep_dock,
+                "legacy = {legacy}"
+            );
+        }
+        std::fs::write(&path, "background-icon = \"none\"\n").expect("failed to write");
+        let modified: PartialConfig =
+            serde_json::from_str(r#"{"showMenuBarIcon":true}"#).expect("failed to parse the payload");
+        commit_config(&path, modified).expect("failed to commit the config");
+        let text = std::fs::read_to_string(&path).expect("failed to read the config file");
+        assert!(!text.contains("background-icon"), "legacy key should be dropped: {text}");
+        assert!(read_config(&path).expect("failed to read back the config").show_menu_bar_icon);
         let _ = std::fs::remove_file(&path);
     }
 }

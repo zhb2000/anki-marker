@@ -447,7 +447,7 @@ pub fn show_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
         // 从最小化状态恢复（show() 对已最小化的窗口不自动还原）
         window.unminimize().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
-        // 切回前台模式——macOS 显示 Dock、托盘隐藏；其他平台托盘隐藏
+        // 恢复 macOS 的 Dock 图标（托盘图标常驻，不受窗口显隐影响）
         super::menubar::on_main_window_shown(app);
         return Ok(());
     }
@@ -467,7 +467,7 @@ pub fn show_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
     // 前端就绪后的 show() 是幂等的
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
-    // 切回前台模式——macOS 显示 Dock、托盘隐藏；其他平台托盘隐藏
+    // 恢复 macOS 的 Dock 图标（托盘图标常驻，不受窗口显隐影响）
     super::menubar::on_main_window_shown(app);
     return Ok(());
 }

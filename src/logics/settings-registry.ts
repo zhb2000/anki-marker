@@ -61,11 +61,18 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         keywords: ['后台运行', '保持后台', '关闭窗口', '后台', '常驻', 'background'],
     },
     {
-        id: 'backgroundIcon',
+        id: 'showMenuBarIcon',
         page: 'general',
-        title: '后台运行时显示图标',
-        description: '选择窗口关闭后（后台运行期间）应用图标的显示位置',
-        keywords: ['图标', '后台图标', '显示位置', 'dock', '菜单栏', 'menu bar', '托盘'],
+        title: '显示菜单栏图标',
+        description: '在屏幕顶部菜单栏显示图标（仅 macOS）',
+        keywords: ['菜单栏', '菜单栏图标', '图标', '显示图标', 'menu bar', 'menubar'],
+    },
+    {
+        id: 'keepDockIconInBackground',
+        page: 'general',
+        title: '后台运行时保留 Dock 栏图标',
+        description: '关闭窗口后在 Dock 栏保留图标（仅 macOS）',
+        keywords: ['dock', 'dock 栏', '图标', '后台', '保留图标', 'dock icon'],
     },
     {
         id: 'trayIconStyle',

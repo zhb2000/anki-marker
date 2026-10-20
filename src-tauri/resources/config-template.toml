@@ -33,10 +33,11 @@ word-to-sentence = true
 # 托盘图标或划词快捷键唤起；也可通过托盘/菜单栏图标的“打开”菜单项打开
 keep-running-on-close = true
 
-# 后台运行（关闭窗口保持运行）期间，应用图标显示的位置
-# 可选值：menu-bar = 菜单栏/托盘图标（默认）、dock = Dock 栏（仅 macOS）、none = 不显示图标
-# 窗口打开时托盘图标不显示（macOS 的 Dock 图标除外），仅在后台运行期间按此选项显示
-background-icon = "menu-bar"
+# 是否在屏幕顶部菜单栏显示图标（仅 macOS；Windows/Linux 始终显示托盘图标，无此开关）
+show-menu-bar-icon = true
+
+# 关闭窗口（后台运行）后是否在 Dock 栏保留图标（仅 macOS；窗口打开时 Dock 图标始终显示）
+keep-dock-icon-in-background = false
 
 # 托盘图标样式（仅 Windows/Linux 生效；macOS 的菜单栏图标由系统按明暗自动着色，忽略此键）
 # 可选值：auto = 单色跟随系统（默认）、color = 彩色图标、white = 白色单色、black = 黑色单色

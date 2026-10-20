@@ -17,7 +17,7 @@
 //! （映射见 src-tauri/src/application/windows_tray.rs 的 `tray_icon_pixel_size`）。
 //!
 //! 关键事实：任务栏归 `SystemUsesLightTheme`，应用归 `AppsUseLightTheme`，
-//! 「自定义」模式下二者可独立。Tauri/tao 读的是后者，故不能用于托盘图标。
+//! “自定义”模式下二者可独立。Tauri/tao 读的是后者，故不能用于托盘图标。
 //!
 //! 运行：`cargo run`（须在 Windows 上；macOS 侧可用 `cargo xwin check
 //! --target x86_64-pc-windows-msvc` 做编译校验，但无法运行）
@@ -108,7 +108,7 @@ mod probe {
         };
     }
 
-    /// 把当前注册表值记为轮询基准，避免启动 1 秒后误报「发生变化」
+    /// 把当前注册表值记为轮询基准，避免启动 1 秒后误报“发生变化”
     fn seed_baseline() {
         let system = read_dword(HKEY_CURRENT_USER, PERSONALIZE, w!("SystemUsesLightTheme"))
             .unwrap_or(u32::MAX);
@@ -138,12 +138,12 @@ mod probe {
         );
         println!();
         println!("请依次操作（设置 → 个性化 → 颜色 → 选择模式 → 自定义）：");
-        println!("  1) 只切换「默认 Windows 模式」深 ⇄ 浅   ← 这一项才是任务栏");
-        println!("  2) 只切换「默认 应用模式」深 ⇄ 浅");
+        println!("  1) 只切换“默认 Windows 模式”深 ⇄ 浅   ← 这一项才是任务栏");
+        println!("  2) 只切换“默认 应用模式”深 ⇄ 浅");
         println!("每次切换后回到本窗口看输出。");
         println!();
         println!("判读：");
-        println!("  [事件] 行出现 = 该触发源可靠，可实现「即时跟随」");
+        println!("  [事件] 行出现 = 该触发源可靠，可实现“即时跟随”");
         println!("  只有 [轮询] 行 = 该触发源没送达，只能退化为低频轮询");
         println!("  [UISET] 行出现 = WinRT 事件居然触发了（官方文档称桌面应用不支持，请记录系统版本）");
         println!();
@@ -169,11 +169,11 @@ mod probe {
             Ok(_token) => println!("[初始化] UISettings.ColorValuesChanged 已订阅"),
             Err(e) => println!("[初始化] 订阅 ColorValuesChanged 失败：{e}"),
         }
-        // 存进 thread_local 保持存活，并在 report() 中用作「UISettings 值来源」对照
+        // 存进 thread_local 保持存活，并在 report() 中用作“UISettings 值来源”对照
         UI_SETTINGS.with(|slot| *slot.borrow_mut() = Some(settings));
     }
 
-    /// 读 UISettings 的背景色：用于判断它跟踪的是「Windows 模式」还是「应用模式」
+    /// 读 UISettings 的背景色：用于判断它跟踪的是“Windows 模式”还是“应用模式”
     fn ui_settings_background() -> Option<String> {
         UI_SETTINGS.with(|slot| {
             let borrowed = slot.borrow();

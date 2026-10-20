@@ -24,34 +24,11 @@ const themeOptions: FluentSelectOption[] = [
     { value: 'dark', label: '深色' },
 ];
 
-/** 是否为 macOS（后台图标选项与部分文案有平台差异） */
+/** 是否为 macOS（部分设置项与文案有平台差异） */
 const isMacOS = computed(() => api.os.type() === 'macos');
-
-/** 后台运行图标下拉的选项：macOS 为 Dock 栏图标/菜单栏图标/不显示图标；其他平台仅有托盘/不显示图标 */
-const backgroundIconOptions = computed<FluentSelectOption[]>(() => isMacOS.value
-    ? [
-        { value: 'menu-bar', label: '菜单栏图标' },
-          { value: 'dock', label: 'Dock 栏图标' },
-          { value: 'none', label: '不显示图标' },
-      ]
-    : [
-          { value: 'menu-bar', label: '托盘图标' },
-          { value: 'none', label: '不显示图标' },
-      ]);
 
 // 主题切换即时生效：全窗口共享同一 DOM，setThemeMode 直接切换 dark class，无需等待保存
 watch(() => state.theme, theme => setThemeMode(theme));
-
-/** 后台图标设置未启用时禁用：卡片常显（搜索跳转锚点始终有效、布局稳定），仅禁用交互 */
-const backgroundIconDisabled = computed(() => !state.keepRunningOnClose);
-
-/** 后台图标卡的说明文案：功能关闭时替换为禁用原因 */
-const backgroundIconDescription = computed(() => backgroundIconDisabled.value
-    ? '需先开启“关闭窗口后保持后台运行”'
-    : isMacOS.value
-        ? '选择窗口关闭后（后台运行期间）应用图标的显示位置'
-        : '选择窗口关闭后（后台运行期间）是否显示托盘图标'
-);
 
 /** “关闭窗口后保持后台运行”卡的说明文案：唤起入口按平台区分 */
 const keepRunningOnCloseDescription = computed(() => isMacOS.value
@@ -64,7 +41,7 @@ const isWindows = computed(() => api.os.type() === 'windows');
 
 /**
  * 托盘图标样式下拉的选项。
- * Windows 提供「单色（跟随系统）」——按系统「Windows 模式」（即任务栏）深浅自动选白/黑；
+ * Windows 提供“单色（跟随系统）”——按系统“Windows 模式”（即任务栏）深浅自动选白/黑；
  * Linux 无可靠的托盘底色检测手段（面板配色随主题/发行版而异），故不提供该项。
  */
 const trayIconStyleOptions = computed<FluentSelectOption[]>(() => isWindows.value
@@ -80,25 +57,15 @@ const trayIconStyleOptions = computed<FluentSelectOption[]>(() => isWindows.valu
         { value: 'black', label: '黑色' },
     ]);
 
-/** 托盘图标样式卡的说明文案：功能不可用时替换为禁用原因 */
-const trayIconStyleDescription = computed(() => {
-    if (backgroundIconDisabled.value) {
-        return '需先开启“关闭窗口后保持后台运行”';
-    }
-    if (state.backgroundIcon === 'none') {
-        return '需先将“后台运行时显示图标”设为托盘图标';
-    }
-    return isWindows.value
-        ? '单色可跟随系统“Windows 模式”（任务栏）的深浅自动切换；若任务栏使用了浅色主题色等特殊情况，可固定为白色或黑色'
-        : '深色面板请选白色、浅色面板请选黑色（Linux 无法自动判断面板底色）';
-});
-
-/** 托盘图标设置未启用时禁用：托盘不显示时该设置无意义（沿用后台图标卡的禁用模式） */
-const trayIconStyleDisabled = computed(() => backgroundIconDisabled.value || state.backgroundIcon === 'none');
+/** 托盘图标样式卡的说明文案（托盘图标在 Windows/Linux 上始终显示，无需可用性判断） */
+const trayIconStyleDescription = computed(() => isWindows.value
+    ? '单色可跟随系统“Windows 模式”（任务栏）的深浅自动切换；若任务栏使用了浅色主题色等特殊情况，可固定为白色或黑色'
+    : '深色面板请选白色、浅色面板请选黑色（Linux 无法自动判断面板底色）'
+);
 
 /**
  * 托盘图标样式卡的受控值。
- * Linux 无「跟随系统」，而配置模板的缺省值是 auto，此处在界面上按等价的「彩色」呈现；
+ * Linux 无“跟随系统”，而配置模板的缺省值是 auto，此处在界面上按等价的“彩色”呈现；
  * 用户不改动该控件时不回写配置（避免把模板缺省值悄悄改写）。
  */
 const trayIconStyleModel = computed<string>({
@@ -128,7 +95,7 @@ const launchAtLoginSyncing = ref(false);
  */
 const rustInRelease = ref<boolean | null>(null);
 /**
- * dev 构建下锁定修改（沿用 backgroundIconDisabled 模式：卡片常显保搜索锚点，仅禁用交互）。
+ * dev 构建下锁定修改（卡片常显保搜索锚点，仅禁用交互）。
  * 需要查看开启状态的界面效果时，可在 `.env.development.local` 配置
  * `VITE_LAUNCH_AT_LOGIN_EDITABLE=true` 解锁（见 debug.launchAtLoginEditableInDev）。
  */
@@ -240,21 +207,28 @@ async function onLaunchAtLoginChange(enabled: boolean | undefined) {
                 </template>
                 <FluentToggleSwitch v-model="state.keepRunningOnClose" />
             </FluentSettingCard>
-            <FluentSettingCard header="后台运行时显示图标" :description="backgroundIconDescription"
-                setting-id="backgroundIcon" :disabled="backgroundIconDisabled">
+            <FluentSettingCard v-if="isMacOS" header="显示菜单栏图标"
+                description="在屏幕顶部菜单栏显示图标，窗口关闭后仍可从这里唤起应用"
+                setting-id="showMenuBarIcon">
                 <template #header-extra>
-                    <ResetButton setting-key="backgroundIcon" :disabled="backgroundIconDisabled" />
+                    <ResetButton setting-key="showMenuBarIcon" />
                 </template>
-                <FluentSelect :options="backgroundIconOptions" v-model="state.backgroundIcon"
-                    :disabled="backgroundIconDisabled" />
+                <FluentToggleSwitch v-model="state.showMenuBarIcon" />
+            </FluentSettingCard>
+            <FluentSettingCard v-if="isMacOS" header="后台运行时保留 Dock 栏图标"
+                description="关闭窗口后在 Dock 栏保留图标；窗口打开时 Dock 图标始终显示"
+                setting-id="keepDockIconInBackground">
+                <template #header-extra>
+                    <ResetButton setting-key="keepDockIconInBackground" />
+                </template>
+                <FluentToggleSwitch v-model="state.keepDockIconInBackground" />
             </FluentSettingCard>
             <FluentSettingCard v-if="!isMacOS" header="托盘图标样式" :description="trayIconStyleDescription"
-                setting-id="trayIconStyle" :disabled="trayIconStyleDisabled">
+                setting-id="trayIconStyle">
                 <template #header-extra>
-                    <ResetButton setting-key="trayIconStyle" :disabled="trayIconStyleDisabled" />
+                    <ResetButton setting-key="trayIconStyle" />
                 </template>
-                <FluentSelect :options="trayIconStyleOptions" v-model="trayIconStyleModel"
-                    :disabled="trayIconStyleDisabled" />
+                <FluentSelect :options="trayIconStyleOptions" v-model="trayIconStyleModel" />
             </FluentSettingCard>
         </div>
     </div>
