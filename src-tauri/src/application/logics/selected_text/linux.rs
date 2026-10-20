@@ -35,7 +35,10 @@ use super::{RetryCallbacks, SelectedContext};
 use atspi::proxy::accessible::AccessibleProxy;
 use atspi::proxy::collection::CollectionProxy;
 use atspi::proxy::text::TextProxy;
-use atspi::{AccessibilityConnection, Interface, MatchType, ObjectMatchRule, ObjectRefOwned, SortOrder, State};
+use atspi::{
+    AccessibilityConnection, Interface, MatchType, ObjectMatchRule, ObjectRefOwned, SortOrder,
+    State,
+};
 
 pub fn get_selected_text() -> Result<String, String> {
     match tauri::async_runtime::block_on(atspi_selected_context(false)) {
@@ -82,8 +85,8 @@ pub fn get_selected_context(
 fn primary_selection_fallback() -> Result<String, String> {
     use arboard::{GetExtLinux, LinuxClipboardKind};
 
-    let mut clipboard =
-        arboard::Clipboard::new().map_err(|error| format!("failed to access the clipboard: {error}"))?;
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|error| format!("failed to access the clipboard: {error}"))?;
     return clipboard
         .get()
         .clipboard(LinuxClipboardKind::Primary)
@@ -104,10 +107,16 @@ async fn atspi_selected_context(word_to_sentence: bool) -> Result<SelectedContex
         .await
         .map_err(|error| format!("failed to read the selected text: {error}"))?;
     if word.trim().is_empty() {
-        return Ok(SelectedContext { text: word, word: None });
+        return Ok(SelectedContext {
+            text: word,
+            word: None,
+        });
     }
     if !word_to_sentence {
-        return Ok(SelectedContext { text: word, word: None });
+        return Ok(SelectedContext {
+            text: word,
+            word: None,
+        });
     }
     return Ok(match find_sentence_for_word(&selection, &word).await {
         Ok(SentenceCapture::Expanded(sentence)) => SelectedContext {
@@ -118,7 +127,10 @@ async fn atspi_selected_context(word_to_sentence: bool) -> Result<SelectedContex
         Err(error) => {
             // 已拿到词：取句失败不致命，降级为仅录入词原文
             log::warn!("failed to extract sentence for the selected word: {error}");
-            SelectedContext { text: word, word: None }
+            SelectedContext {
+                text: word,
+                word: None,
+            }
         }
     });
 }
@@ -187,7 +199,10 @@ async fn find_selection_in_window(
             .states([State::Focused], MatchType::All)
             .interfaces([Interface::Text], MatchType::All)
             .build();
-        if let Ok(matches) = collection.get_matches(rule, SortOrder::Canonical, 8, false).await {
+        if let Ok(matches) = collection
+            .get_matches(rule, SortOrder::Canonical, 8, false)
+            .await
+        {
             for object in &matches {
                 if let Some(selection) = selection_on_object(connection, object).await {
                     return Some(selection);
@@ -270,15 +285,20 @@ async fn find_sentence_for_word(
 
     // AT-SPI 偏移按字符计，换算为 UTF-16 码元偏移后再切句
     let sel_start_chars = (selection.start - window_start) as usize;
-    let sel_start_utf16 =
-        char_offset_to_utf16(&context, sel_start_chars).ok_or_else(|| {
-            format!(
-                "selection offset {sel_start_chars} is out of the context ({} characters)",
-                context.chars().count()
-            )
-        })? as isize;
+    let sel_start_utf16 = char_offset_to_utf16(&context, sel_start_chars).ok_or_else(|| {
+        format!(
+            "selection offset {sel_start_chars} is out of the context ({} characters)",
+            context.chars().count()
+        )
+    })? as isize;
     // window_loc：窗口起点的文档级偏移（0 表示已对齐文本开头），供触边判定
-    match capture_in_context(&context, word, &[sel_start_utf16], window_start as isize, true) {
+    match capture_in_context(
+        &context,
+        word,
+        &[sel_start_utf16],
+        window_start as isize,
+        true,
+    ) {
         Some((capture, touched_edge)) => {
             if touched_edge {
                 log::info!(

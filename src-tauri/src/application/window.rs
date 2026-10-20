@@ -117,9 +117,15 @@ fn start_mask_animation(window: &WebviewWindow, active: bool, dark: bool) {
                 return; // 睡眠期间被更新的动画取代
             }
             let progress = (started.elapsed().as_secs_f64() / duration.as_secs_f64()).min(1.0);
-            MASK_FACTOR.store(encode_factor(from + (to - from) * progress), Ordering::Relaxed);
+            MASK_FACTOR.store(
+                encode_factor(from + (to - from) * progress),
+                Ordering::Relaxed,
+            );
             let frame_window = window.clone();
-            if window.run_on_main_thread(move || apply_window_background(&frame_window, dark)).is_err() {
+            if window
+                .run_on_main_thread(move || apply_window_background(&frame_window, dark))
+                .is_err()
+            {
                 return; // 窗口已销毁
             }
             if progress >= 1.0 {
@@ -165,7 +171,11 @@ fn apply_window_background_with_factor(window: &WebviewWindow, dark: bool, facto
     ns_window.setBackgroundColor(Some(&color));
 
     // underPageBackgroundColor 需要 macOS 12+（drawsBackground 私有 KVC 为 macOS 10.14+）
-    if NSProcessInfo::processInfo().operatingSystemVersion().majorVersion < 12 {
+    if NSProcessInfo::processInfo()
+        .operatingSystemVersion()
+        .majorVersion
+        < 12
+    {
         return;
     }
     unsafe {

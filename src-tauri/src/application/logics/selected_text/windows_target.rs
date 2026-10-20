@@ -286,7 +286,11 @@ fn recorded_age() -> Option<Duration> {
 
 /// 已记录窗口的句柄数值（仅用于判断目标是否变化，不做过期与有效性检查）。
 fn recorded_raw() -> Option<usize> {
-    return RECORDED_TARGET.lock().ok().and_then(|guard| *guard).map(|(raw, _)| raw);
+    return RECORDED_TARGET
+        .lock()
+        .ok()
+        .and_then(|guard| *guard)
+        .map(|(raw, _)| raw);
 }
 
 /// 窗口是否属于本进程。

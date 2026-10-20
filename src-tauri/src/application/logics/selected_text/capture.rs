@@ -20,7 +20,11 @@ pub fn describe_context(context: &SelectedContext) -> String {
         const MAX_CHARS: usize = 80;
         let mut chars = text.chars();
         let preview: String = chars.by_ref().take(MAX_CHARS).collect();
-        return if chars.next().is_some() { format!("{preview}…") } else { preview };
+        return if chars.next().is_some() {
+            format!("{preview}…")
+        } else {
+            preview
+        };
     }
     return format!(
         "word {:?}, text {:?} ({} utf16 units)",
@@ -54,8 +58,12 @@ pub fn capture_in_context(
     window_loc: isize,
     allow_unique_occurrence_fallback: bool,
 ) -> Option<(SentenceCapture, bool)> {
-    let sel_start_utf16 =
-        find_anchor(context, word, anchor_candidates, allow_unique_occurrence_fallback)?;
+    let sel_start_utf16 = find_anchor(
+        context,
+        word,
+        anchor_candidates,
+        allow_unique_occurrence_fallback,
+    )?;
     let sel_end_utf16 = sel_start_utf16 + word.encode_utf16().count();
 
     // 只扩展、不丢弃：选区横跨多个句子时原样录入用户所选文本，不做分句截断。
@@ -63,7 +71,10 @@ pub fn capture_in_context(
     // UAX #29（SB4：CR/LF 后强制分句）把整句切为多行碎片，若仍取“与选区起点
     // 相交的句子”就只会录入第一行，丢弃了用户明确选择的内容
     if count_intersecting_sentences(context, sel_start_utf16, sel_end_utf16) > 1 {
-        return Some((SentenceCapture::SelectionAsIs(word.trim().to_string()), false));
+        return Some((
+            SentenceCapture::SelectionAsIs(word.trim().to_string()),
+            false,
+        ));
     }
     let (sentence, sent_start, sent_end) =
         find_sentence_with_range(context, sel_start_utf16, sel_end_utf16)?;
@@ -180,7 +191,10 @@ pub fn reconcile_with_primary(
     word: Option<String>,
     primary: Option<String>,
 ) -> SelectedContext {
-    let Some(primary) = primary.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()) else {
+    let Some(primary) = primary
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+    else {
         return SelectedContext { text, word };
     };
     return match word {
@@ -189,10 +203,14 @@ pub fn reconcile_with_primary(
                 // 词漂移但句子正确：替换为权威词（Edge PDF 文本层错位场景）
                 log::info!(
                     "capture reconciled with the clipboard: word {:?} -> {:?}",
-                    platform_word, primary
+                    platform_word,
+                    primary
                 );
             }
-            SelectedContext { text, word: Some(primary) }
+            SelectedContext {
+                text,
+                word: Some(primary),
+            }
         }
         Some(platform_word) => {
             // 句子不含权威词：平台读错了选区（撞错控件/漂移越界），降级录权威文本
@@ -202,15 +220,24 @@ pub fn reconcile_with_primary(
                  clipboard {primary:?})",
                 text
             );
-            SelectedContext { text: primary, word: None }
+            SelectedContext {
+                text: primary,
+                word: None,
+            }
         }
-        None => SelectedContext { text: primary, word: None },
+        None => SelectedContext {
+            text: primary,
+            word: None,
+        },
     };
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{capture_in_context, char_offset_to_utf16, find_anchor, reconcile_with_primary, SentenceCapture};
+    use super::{
+        capture_in_context, char_offset_to_utf16, find_anchor, reconcile_with_primary,
+        SentenceCapture,
+    };
 
     /// 锚点候选 1：提供方忠实响应请求窗口（窗口偏移有效）
     #[test]
@@ -218,7 +245,10 @@ mod tests {
         // 文档 "Hello world. This is a test."，窗口 loc=9，word "This" 在文档偏移 13
         let context = "ld. This is a te";
         // 候选 1：13 - 9 = 4，context[4..8] == "This"
-        assert_eq!(find_anchor(context, "This", &[13 - 9, 13, 0], true), Some(4));
+        assert_eq!(
+            find_anchor(context, "This", &[13 - 9, 13, 0], true),
+            Some(4)
+        );
     }
 
     /// 锚点候选 2：提供方忽略窗口起点、从文档开头返回文本（文档级偏移）
@@ -226,7 +256,10 @@ mod tests {
     fn anchor_document_offset() {
         let context = "Hello world. This is";
         // 候选 1（13-9=4）命中 "o wo" 不匹配；候选 2（13）命中 "This"
-        assert_eq!(find_anchor(context, "This", &[13 - 9, 13, 0], true), Some(13));
+        assert_eq!(
+            find_anchor(context, "This", &[13 - 9, 13, 0], true),
+            Some(13)
+        );
     }
 
     /// 锚点候选 3：提供方从选区开始返回文本
@@ -234,7 +267,10 @@ mod tests {
     fn anchor_selection_start() {
         let context = "This is a test.";
         // 候选 1（4）与候选 2（13，越界）均失败；候选 3（0）命中
-        assert_eq!(find_anchor(context, "This", &[13 - 9, 13, 0], true), Some(0));
+        assert_eq!(
+            find_anchor(context, "This", &[13 - 9, 13, 0], true),
+            Some(0)
+        );
     }
 
     /// 锚点兜底：偏移完全失真时靠唯一出现位置定位；多处出现有歧义返回 None
@@ -246,7 +282,10 @@ mod tests {
             Some("jumped over. The ".encode_utf16().count())
         );
         // 两次出现 → 歧义，不采用（上下文开头放非匹配内容，避免候选 0 先命中）
-        assert_eq!(find_anchor("a fox and fox", "fox", &[999, 9999, 0], true), None);
+        assert_eq!(
+            find_anchor("a fox and fox", "fox", &[999, 9999, 0], true),
+            None
+        );
     }
 
     /// 所选文本不在上下文中：返回 None（降级为仅录词，不切错句）
@@ -311,7 +350,7 @@ mod tests {
         assert_eq!(char_offset_to_utf16("hello", 3), Some(3));
         assert_eq!(char_offset_to_utf16("hello", 5), Some(5)); // 文本末尾
         assert_eq!(char_offset_to_utf16("hello", 6), None); // 越界
-        // "say 😀 hi"：😀 占 1 个 codepoint、2 个 UTF-16 码元
+                                                            // "say 😀 hi"：😀 占 1 个 codepoint、2 个 UTF-16 码元
         assert_eq!(char_offset_to_utf16("say 😀 hi", 4), Some(4)); // 😀 起点
         assert_eq!(char_offset_to_utf16("say 😀 hi", 5), Some(6)); // 😀 之后
         assert_eq!(char_offset_to_utf16("你好世界", 2), Some(2)); // BMP 字符两者一致
@@ -348,8 +387,11 @@ mod tests {
         assert_eq!(reconciled.word.as_deref(), Some("word"));
 
         // 无权威文本（剪贴板未变/读失败）：原样返回平台结果
-        let reconciled =
-            reconcile_with_primary("a sentence.".to_string(), Some("sentence".to_string()), None);
+        let reconciled = reconcile_with_primary(
+            "a sentence.".to_string(),
+            Some("sentence".to_string()),
+            None,
+        );
         assert_eq!(reconciled.text, "a sentence.");
         assert_eq!(reconciled.word.as_deref(), Some("sentence"));
         let reconciled = reconcile_with_primary(

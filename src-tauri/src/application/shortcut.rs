@@ -146,7 +146,10 @@ pub fn take_pending_capture_failure() -> Option<CaptureFailure> {
 /// 查询最近一次全局快捷键注册结果（含启动时前端尚未就绪而错过 emit 的情况）；无记录返回 null
 #[tauri::command(rename_all = "snake_case")]
 pub fn get_shortcut_registration() -> Option<ShortcutRegistration> {
-    return LAST_REGISTRATION.lock().ok().and_then(|guard| guard.clone());
+    return LAST_REGISTRATION
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
 }
 
 /// 读取配置文件，按其中的 `global-shortcut` 项更新全局快捷键注册，并通知前端注册结果。
@@ -360,9 +363,7 @@ fn restore_foreground_before_capture(trigger: CaptureTrigger) {
         CaptureTrigger::Menu => logics::selected_text::windows_target::ensure_foreign_foreground(),
         // 快捷键路径：前台窗口没被动过，无需归还；顺手清掉上一条托盘记录，
         // 免得陈旧记录被它的重试目标解析捡到
-        CaptureTrigger::Shortcut => {
-            logics::selected_text::windows_target::forget_recorded_target()
-        }
+        CaptureTrigger::Shortcut => logics::selected_text::windows_target::forget_recorded_target(),
     }
 }
 
@@ -406,7 +407,10 @@ fn deliver_retry_capture(
         return;
     };
     if let Ok(Some(primary)) = primary_text.lock().map(|guard| guard.clone()) {
-        let word_matches = captured.word.as_deref().is_some_and(|word| word.trim() == primary);
+        let word_matches = captured
+            .word
+            .as_deref()
+            .is_some_and(|word| word.trim() == primary);
         let text_matches = captured.text.trim() == primary;
         if !word_matches && !text_matches {
             if captured.word.is_some() && captured.text.contains(&primary) {
@@ -415,7 +419,10 @@ fn deliver_retry_capture(
                     captured.word,
                     primary
                 );
-                captured = CapturedSentence { text: captured.text, word: Some(primary) };
+                captured = CapturedSentence {
+                    text: captured.text,
+                    word: Some(primary),
+                };
             } else {
                 log::warn!(
                     "dropping the retry capture: it does not match the primary result \

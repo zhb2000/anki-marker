@@ -6,3 +6,5 @@ end_of_line = lf
 indent_style = space
 indent_size = 4
 insert_final_newline = true
+# 代码宽度提示（Rust 侧由 rustfmt 默认 max_width=100 强制执行，此处仅供其他编辑器/语言对齐）
+max_line_length = 100

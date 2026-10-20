@@ -99,7 +99,11 @@ mod tests {
     use super::{count_intersecting_sentences, find_sentence_with_range};
 
     /// find_sentence_with_range 的测试便捷包装：只取 trim 后的句子文本
-    fn find_sentence(context: &str, sel_start_utf16: usize, sel_end_utf16: usize) -> Option<String> {
+    fn find_sentence(
+        context: &str,
+        sel_start_utf16: usize,
+        sel_end_utf16: usize,
+    ) -> Option<String> {
         return find_sentence_with_range(context, sel_start_utf16, sel_end_utf16)
             .map(|(sentence, _, _)| sentence);
     }

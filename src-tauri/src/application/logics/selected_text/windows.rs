@@ -30,15 +30,18 @@
 //! ② 我们只把前台还给了 frame 窗口，应用内容窗口未必拿到键盘焦点（若属此项，可在归还
 //! 后进一步把焦点落到内容子窗口）。两条都不影响非 UWP 应用。
 
-use super::capture::{capture_in_context, describe_context, reconcile_with_primary, SentenceCapture};
+use super::capture::{
+    capture_in_context, describe_context, reconcile_with_primary, SentenceCapture,
+};
 use super::{RetryCallbacks, SelectedContext};
 
 use ::windows::core::BSTR;
 use ::windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize};
 use ::windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
 use ::windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, IUIAutomationTextPattern, IUIAutomationTextRange, TextUnit_Character,
-    UIA_TextPatternId, TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start,
+    CUIAutomation, IUIAutomation, IUIAutomationTextPattern, IUIAutomationTextRange,
+    TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start, TextUnit_Character,
+    UIA_TextPatternId,
 };
 
 pub fn get_selected_text() -> Result<String, String> {
@@ -120,8 +123,12 @@ pub fn get_selected_context(
                 log::info!("no capture target window, skipping the background UIA selection retry");
             }
             log::warn!("UIA path failed, falling back to simulated Ctrl+C: {error}");
-            let context = copy_via_ctrl_c(false).map(|text| SelectedContext { text, word: None })?;
-            log::info!("capture via simulated Ctrl+C: {}", describe_context(&context));
+            let context =
+                copy_via_ctrl_c(false).map(|text| SelectedContext { text, word: None })?;
+            log::info!(
+                "capture via simulated Ctrl+C: {}",
+                describe_context(&context)
+            );
             return Ok(context);
         }
     }
@@ -163,8 +170,8 @@ fn uia_automation() -> Result<IUIAutomation, String> {
 fn uia_selection(automation: &IUIAutomation) -> Result<IUIAutomationTextRange, String> {
     let element = unsafe { automation.GetFocusedElement() }
         .map_err(|error| format!("failed to get the focused element: {error}"))?;
-    let pattern: IUIAutomationTextPattern = unsafe { element.GetCurrentPatternAs(UIA_TextPatternId) }
-        .map_err(|error| {
+    let pattern: IUIAutomationTextPattern =
+        unsafe { element.GetCurrentPatternAs(UIA_TextPatternId) }.map_err(|error| {
             // 控件不支持某 pattern 时 UIA 返回 S_OK + 空对象，windows-rs 将空对象转错误时
             // 捡到线程上残留的错误码，报出“操作成功完成 (0x00000000)”这类误导性信息——
             // 归一化为明确的语义（典型场景：Chromium 的无障碍树尚未被 UIA 客户端激活）
@@ -211,18 +218,24 @@ fn uia_selection_in_window(
         automation.CreatePropertyCondition(UIA_IsTextPatternAvailablePropertyId, &variant_true())
     }
     .map_err(|error| format!("failed to create the TextPattern property condition: {error}"))?;
-    let candidates = unsafe { element.FindAll(TreeScope_Descendants, &condition) }
-        .map_err(|error| format!("failed to search the window for TextPattern elements: {error}"))?;
+    let candidates =
+        unsafe { element.FindAll(TreeScope_Descendants, &condition) }.map_err(|error| {
+            format!("failed to search the window for TextPattern elements: {error}")
+        })?;
     // 遍历上限：防御病态提供方返回巨量元素（正常窗口只有少数文本控件）
     let count = unsafe { candidates.Length() }.unwrap_or(0).min(64);
     for index in 0..count {
-        let Ok(candidate) = (unsafe { candidates.GetElement(index) }) else { continue };
+        let Ok(candidate) = (unsafe { candidates.GetElement(index) }) else {
+            continue;
+        };
         let Ok(pattern) = (unsafe {
             candidate.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
         }) else {
             continue;
         };
-        let Ok(range) = text_pattern_selection(&pattern) else { continue };
+        let Ok(range) = text_pattern_selection(&pattern) else {
+            continue;
+        };
         let non_empty = unsafe { range.GetText(-1) }
             .ok()
             .and_then(|text| bstr_to_string(&text).ok())
@@ -248,7 +261,9 @@ fn variant_true() -> ::windows::Win32::System::Variant::VARIANT {
                 wReserved1: 0,
                 wReserved2: 0,
                 wReserved3: 0,
-                Anonymous: VARIANT_0_0_0 { boolVal: VARIANT_BOOL(-1) },
+                Anonymous: VARIANT_0_0_0 {
+                    boolVal: VARIANT_BOOL(-1),
+                },
             }),
         },
     };
@@ -280,7 +295,10 @@ fn context_from_range(range: &IUIAutomationTextRange) -> Result<SelectedContext,
     )?;
     if word.trim().is_empty() {
         // 与 get_selected_text 的空串语义一致：由调用方回退 Ctrl+C
-        return Ok(SelectedContext { text: word, word: None });
+        return Ok(SelectedContext {
+            text: word,
+            word: None,
+        });
     }
     return Ok(match find_sentence_for_word(range, &word) {
         Ok(SentenceCapture::Expanded(sentence)) => SelectedContext {
@@ -291,7 +309,10 @@ fn context_from_range(range: &IUIAutomationTextRange) -> Result<SelectedContext,
         Err(error) => {
             // 已拿到词：取句失败不致命，降级为仅录入词原文
             log::warn!("failed to extract sentence for the selected word: {error}");
-            SelectedContext { text: word, word: None }
+            SelectedContext {
+                text: word,
+                word: None,
+            }
         }
     });
 }
@@ -311,11 +332,21 @@ fn find_sentence_for_word(
     let window = unsafe { selection.Clone() }
         .map_err(|error| format!("failed to clone the selection range: {error}"))?;
     let moved_left = unsafe {
-        window.MoveEndpointByUnit(TextPatternRangeEndpoint_Start, TextUnit_Character, -WINDOW_MARGIN)
+        window.MoveEndpointByUnit(
+            TextPatternRangeEndpoint_Start,
+            TextUnit_Character,
+            -WINDOW_MARGIN,
+        )
     }
     .map_err(|error| format!("failed to extend the context window to the left: {error}"))?;
-    unsafe { window.MoveEndpointByUnit(TextPatternRangeEndpoint_End, TextUnit_Character, WINDOW_MARGIN) }
-        .map_err(|error| format!("failed to extend the context window to the right: {error}"))?;
+    unsafe {
+        window.MoveEndpointByUnit(
+            TextPatternRangeEndpoint_End,
+            TextUnit_Character,
+            WINDOW_MARGIN,
+        )
+    }
+    .map_err(|error| format!("failed to extend the context window to the right: {error}"))?;
     let context = bstr_to_string(
         &unsafe { window.GetText(-1) }
             .map_err(|error| format!("failed to read the context window: {error}"))?,
@@ -325,13 +356,23 @@ fn find_sentence_for_word(
     let prefix = unsafe { window.Clone() }
         .map_err(|error| format!("failed to clone the context window: {error}"))?;
     unsafe {
-        prefix.MoveEndpointByRange(TextPatternRangeEndpoint_End, selection, TextPatternRangeEndpoint_Start)
+        prefix.MoveEndpointByRange(
+            TextPatternRangeEndpoint_End,
+            selection,
+            TextPatternRangeEndpoint_Start,
+        )
     }
-    .map_err(|error| format!("failed to shrink the prefix range to the selection start: {error}"))?;
+    .map_err(|error| {
+        format!("failed to shrink the prefix range to the selection start: {error}")
+    })?;
     // 硬校验：前缀终点必须恰好落在选区起点（MoveEndpointByRange 静默失灵的防线）。
     // 不过则整个取句链路作废、降级录词——宁可不取句，也不切错句子
     match unsafe {
-        prefix.CompareEndpoints(TextPatternRangeEndpoint_End, selection, TextPatternRangeEndpoint_Start)
+        prefix.CompareEndpoints(
+            TextPatternRangeEndpoint_End,
+            selection,
+            TextPatternRangeEndpoint_Start,
+        )
     } {
         Ok(0) => {}
         Ok(offset) => {
@@ -407,7 +448,10 @@ fn spawn_selection_retry(hwnd: ::windows::Win32::Foundation::HWND, callbacks: Re
     // HWND 是窗口句柄（实为数值，不含可析构资源），可安全跨线程传递
     let hwnd_raw = hwnd.0 as usize;
     std::thread::spawn(move || {
-        let RetryCallbacks { on_started, on_finished } = callbacks;
+        let RetryCallbacks {
+            on_started,
+            on_finished,
+        } = callbacks;
         on_started();
         let hwnd = ::windows::Win32::Foundation::HWND(hwnd_raw as *mut std::ffi::c_void);
         for attempt in 1..=RETRY_ATTEMPTS {
@@ -463,7 +507,8 @@ fn copy_via_ctrl_c(silent_if_unchanged: bool) -> Result<String, String> {
     if backup.is_none() {
         log::info!("no text on the clipboard to back up (or the clipboard is busy)");
     }
-    let sequence_before = unsafe { ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };
+    let sequence_before =
+        unsafe { ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };
     send_ctrl_c();
     // 轮询剪贴板序号而非固定 sleep：既快又能区分“复制成功”与“剪贴板未变”
     if !wait_clipboard_change(sequence_before) {
@@ -500,7 +545,7 @@ fn restore_clipboard_quietly(backup: Option<String>) {
 fn send_ctrl_c() {
     use ::windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-        VK_C, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VIRTUAL_KEY,
+        VIRTUAL_KEY, VK_C, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
     };
 
     let key_input = |vk: VIRTUAL_KEY, key_up: bool| INPUT {
@@ -509,7 +554,11 @@ fn send_ctrl_c() {
             ki: KEYBDINPUT {
                 wVk: vk,
                 wScan: 0,
-                dwFlags: if key_up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                dwFlags: if key_up {
+                    KEYEVENTF_KEYUP
+                } else {
+                    KEYBD_EVENT_FLAGS(0)
+                },
                 time: 0,
                 dwExtraInfo: 0,
             },
@@ -652,7 +701,10 @@ mod tests {
     #[test]
     fn uia_smoke_test() {
         let result = super::uia_selected_text();
-        eprintln!("uia_selected_text() -> {:?}", result.map(|text| text.chars().count()));
+        eprintln!(
+            "uia_selected_text() -> {:?}",
+            result.map(|text| text.chars().count())
+        );
     }
 
     /// 冒烟测试：Ctrl+C 回退链路不应 panic（无桌面环境下允许返回 Err）。
@@ -661,6 +713,9 @@ mod tests {
     #[ignore = "injects keystrokes and touches the real clipboard"]
     fn ctrl_c_fallback_smoke_test() {
         let result = super::copy_via_ctrl_c(false);
-        eprintln!("copy_via_ctrl_c() -> {:?}", result.map(|text| text.chars().count()));
+        eprintln!(
+            "copy_via_ctrl_c() -> {:?}",
+            result.map(|text| text.chars().count())
+        );
     }
 }

@@ -138,4 +138,3 @@ pub fn is_anki_running_impl() -> Result<bool, String> {
 
     return inner();
 }
-

@@ -60,7 +60,10 @@ pub fn get_selected_context(
 ) -> Result<SelectedContext, String> {
     if !word_to_sentence {
         let context = get_selected_text().map(|text| SelectedContext { text, word: None })?;
-        log::info!("capture (sentence mode off): {}", describe_context(&context));
+        log::info!(
+            "capture (sentence mode off): {}",
+            describe_context(&context)
+        );
         return Ok(context);
     }
     // AX 报错（true）与 AX 正常但选区为空（false）在回退 Cmd+C 后对“剪贴板未变”
@@ -88,7 +91,10 @@ pub fn get_selected_context(
                 log::info!("spawning background AX selection retry for pid {pid}");
                 spawn_selection_retry(pid, callbacks);
             }
-            log::warn!("AX path failed, falling back to AppleScript: {}", ax_error.message);
+            log::warn!(
+                "AX path failed, falling back to AppleScript: {}",
+                ax_error.message
+            );
             pdf_refine_pid = ax_error.retry_pid.or_else(frontmost_application_pid);
             false
         }
@@ -102,7 +108,10 @@ pub fn get_selected_context(
             }
         }
     }
-    log::info!("capture via simulated Cmd+C: {}", describe_context(&context));
+    log::info!(
+        "capture via simulated Cmd+C: {}",
+        describe_context(&context)
+    );
     return Ok(context);
 }
 
@@ -129,24 +138,24 @@ mod ax_ffi {
 
     #[link(name = "ApplicationServices", kind = "framework")]
     extern "C" {
-    /// 创建系统级辅助功能元素，用于查询全局焦点元素。
-    pub fn AXUIElementCreateSystemWide() -> CFTypeRef;
-    /// 创建指定进程 id 的应用的辅助功能元素（Create 规则）。
-    pub fn AXUIElementCreateApplication(pid: i32) -> CFTypeRef;
-    /// 读取元素所属应用的进程 id。
-    pub fn AXUIElementGetPid(element: CFTypeRef, pid: *mut i32) -> AXError;
-    /// 读取辅助功能元素的属性值（返回值已 retain，调用者负责释放）。
-    pub fn AXUIElementCopyAttributeValue(
-        element: CFTypeRef,
-        attribute: CFStringRef,
-        value: *mut CFTypeRef,
-    ) -> AXError;
-    /// 设置辅助功能元素的属性值（用于设置 AXManualAccessibility 等唤醒开关）。
-    pub fn AXUIElementSetAttributeValue(
-        element: CFTypeRef,
-        attribute: CFStringRef,
-        value: CFTypeRef,
-    ) -> AXError;
+        /// 创建系统级辅助功能元素，用于查询全局焦点元素。
+        pub fn AXUIElementCreateSystemWide() -> CFTypeRef;
+        /// 创建指定进程 id 的应用的辅助功能元素（Create 规则）。
+        pub fn AXUIElementCreateApplication(pid: i32) -> CFTypeRef;
+        /// 读取元素所属应用的进程 id。
+        pub fn AXUIElementGetPid(element: CFTypeRef, pid: *mut i32) -> AXError;
+        /// 读取辅助功能元素的属性值（返回值已 retain，调用者负责释放）。
+        pub fn AXUIElementCopyAttributeValue(
+            element: CFTypeRef,
+            attribute: CFStringRef,
+            value: *mut CFTypeRef,
+        ) -> AXError;
+        /// 设置辅助功能元素的属性值（用于设置 AXManualAccessibility 等唤醒开关）。
+        pub fn AXUIElementSetAttributeValue(
+            element: CFTypeRef,
+            attribute: CFStringRef,
+            value: CFTypeRef,
+        ) -> AXError;
         /// 读取参数化属性的值（Copy 规则，返回值已 retain，调用者负责释放）。
         pub fn AXUIElementCopyParameterizedAttributeValue(
             element: CFTypeRef,
@@ -327,10 +336,14 @@ fn copy_string_attribute_by_ax_ref(
             &mut value_ref,
         );
         if err != 0 || value_ref.is_null() {
-            return Err(format!("failed to copy attribute \"{attribute}\": AXError {err}"));
+            return Err(format!(
+                "failed to copy attribute \"{attribute}\": AXError {err}"
+            ));
         }
         if CFGetTypeID(value_ref) != CFString::type_id() {
-            return Err(format!("value of attribute \"{attribute}\" is not a string"));
+            return Err(format!(
+                "value of attribute \"{attribute}\" is not a string"
+            ));
         }
         let value: CFString = TCFType::wrap_under_create_rule(value_ref as CFStringRef);
         return Ok(value.to_string());
@@ -354,7 +367,9 @@ fn copy_element_attribute_by_ax(
             &mut value_ref,
         );
         if err != 0 || value_ref.is_null() {
-            return Err(format!("failed to copy attribute \"{attribute}\": AXError {err}"));
+            return Err(format!(
+                "failed to copy attribute \"{attribute}\": AXError {err}"
+            ));
         }
         // AXUIElementCopyAttributeValue 遵循 Copy 规则（返回已 retain 的对象）。
         return Ok(TCFType::wrap_under_create_rule(value_ref));
@@ -412,10 +427,14 @@ fn copy_i64_attribute_by_ax(
             &mut value_ref,
         );
         if err != 0 || value_ref.is_null() {
-            return Err(format!("failed to copy attribute \"{attribute}\": AXError {err}"));
+            return Err(format!(
+                "failed to copy attribute \"{attribute}\": AXError {err}"
+            ));
         }
         if CFGetTypeID(value_ref) != CFNumber::type_id() {
-            return Err(format!("value of attribute \"{attribute}\" is not a number"));
+            return Err(format!(
+                "value of attribute \"{attribute}\" is not a number"
+            ));
         }
         let value: CFNumber = TCFType::wrap_under_create_rule(value_ref as CFNumberRef);
         return value
@@ -492,7 +511,10 @@ fn get_selected_context_by_ax() -> Result<SelectedContext, AxAttemptError> {
     };
     if word.trim().is_empty() {
         // 与现有 get_selected_text 的空串语义一致：由调用方回退 AppleScript
-        return Ok(SelectedContext { text: word, word: None });
+        return Ok(SelectedContext {
+            text: word,
+            word: None,
+        });
     }
     return Ok(context_from_word_and_element(&focused, &word));
 }
@@ -516,7 +538,9 @@ fn copy_parameterized_attribute_by_ax(
             &mut value_ref,
         );
         if err != 0 || value_ref.is_null() {
-            return Err(format!("failed to copy parameterized attribute \"{attribute}\": AXError {err}"));
+            return Err(format!(
+                "failed to copy parameterized attribute \"{attribute}\": AXError {err}"
+            ));
         }
         return Ok(TCFType::wrap_under_create_rule(value_ref));
     }
@@ -550,8 +574,8 @@ fn string_for_marker_range_by_ax(
 /// 暴露（实测 Safari：任一网页元素的 AXSelectedTextMarkerRange 都指向页面级选区，
 /// 经 AXStringForTextMarkerRange 读文本）。元素没有该属性返回 None，空选区返回 Some("")。
 fn marker_selected_text(element: &core_foundation::base::CFType) -> Option<String> {
-    let range = copy_element_attribute_by_ax(element, ax_ffi::SELECTED_TEXT_MARKER_RANGE_ATTRIBUTE)
-        .ok()?;
+    let range =
+        copy_element_attribute_by_ax(element, ax_ffi::SELECTED_TEXT_MARKER_RANGE_ATTRIBUTE).ok()?;
     return Some(string_for_marker_range_by_ax(element, &range).unwrap_or_default());
 }
 
@@ -562,12 +586,13 @@ fn marker_selected_text(element: &core_foundation::base::CFType) -> Option<Strin
 /// 返回 None = 不是此类提供方（调用方走其他链路）；Some(空文本) = 是但没有选区；
 /// 取句失败降级为仅录词原文。不用提供方自带的句子范围
 /// （AXSentenceTextMarkerRangeForTextMarker），以保持各应用的分句规则一致。
-fn marker_selected_context(
-    element: &core_foundation::base::CFType,
-) -> Option<SelectedContext> {
+fn marker_selected_context(element: &core_foundation::base::CFType) -> Option<SelectedContext> {
     let word = marker_selected_text(element)?;
     if word.trim().is_empty() {
-        return Some(SelectedContext { text: word, word: None });
+        return Some(SelectedContext {
+            text: word,
+            word: None,
+        });
     }
     log::info!("found the selection via the text marker API");
     return Some(match find_sentence_for_marker_selection(element, &word) {
@@ -575,12 +600,16 @@ fn marker_selected_context(
             text: strip_text_artifacts(&sentence),
             word: Some(strip_text_artifacts(word.trim())),
         },
-        Ok((SentenceCapture::SelectionAsIs(text), _)) => {
-            SelectedContext { text: strip_text_artifacts(&text), word: None }
-        }
+        Ok((SentenceCapture::SelectionAsIs(text), _)) => SelectedContext {
+            text: strip_text_artifacts(&text),
+            word: None,
+        },
         Err(error) => {
             log::warn!("failed to extract sentence for the selected word: {error}");
-            SelectedContext { text: strip_text_artifacts(&word), word: None }
+            SelectedContext {
+                text: strip_text_artifacts(&word),
+                word: None,
+            }
         }
     });
 }
@@ -600,7 +629,11 @@ fn strip_text_artifacts(text: &str) -> String {
 fn looks_truncated(sentence: &str) -> bool {
     let starts_lowercase = sentence.chars().next().is_some_and(char::is_lowercase);
     let trimmed = sentence.trim_end_matches(|c: char| {
-        c.is_whitespace() || matches!(c, '"' | '\'' | '”' | '’' | ')' | ']' | '»' | '」' | '』' | '）')
+        c.is_whitespace()
+            || matches!(
+                c,
+                '"' | '\'' | '”' | '’' | ')' | ']' | '»' | '」' | '』' | '）'
+            )
     });
     let ends_terminal = trimmed
         .chars()
@@ -614,7 +647,10 @@ fn looks_truncated(sentence: &str) -> bool {
 /// 视觉行硬换行（Chromium 的 PDF 查看器等把文本按视觉行给出，行间是 `\r\n`）会使
 /// UAX #29 强制分句（SB4），把跨行整句切成碎片；扩大上下文取句时先抹掉换行。
 fn flatten_line_breaks(text: &str) -> String {
-    return text.chars().map(|c| if c == '\r' || c == '\n' { ' ' } else { c }).collect();
+    return text
+        .chars()
+        .map(|c| if c == '\r' || c == '\n' { ' ' } else { c })
+        .collect();
 }
 
 /// 折叠连续空白为单个空格（抹换行产生的双空格、行首行尾空白一并收拾）。
@@ -828,7 +864,11 @@ fn capture_in_marker_context(
         .encode_utf16()
         .count() as isize;
     let has_line_break = raw_context.contains('\n');
-    let context = if flatten { flatten_line_breaks(&raw_context) } else { raw_context };
+    let context = if flatten {
+        flatten_line_breaks(&raw_context)
+    } else {
+        raw_context
+    };
 
     // 偏移是本地推导的，与 Windows 同理不用“唯一出现位置”兜底（见 capture::find_anchor）。
     // window_loc 传 1：上下文起点不是文本开头，句子贴着起点同样算触边
@@ -870,7 +910,10 @@ fn context_from_word_and_element(
                     return refined;
                 }
             }
-            SelectedContext { text: sentence, word: Some(word.trim().to_string()) }
+            SelectedContext {
+                text: sentence,
+                word: Some(word.trim().to_string()),
+            }
         }
         Ok(SentenceCapture::SelectionAsIs(text)) => SelectedContext { text, word: None },
         Err(error) => {
@@ -884,7 +927,10 @@ fn context_from_word_and_element(
                         "failed to extract sentence for the selected word: {error} \
                          (PDF page lookup: {pdf_error})"
                     );
-                    SelectedContext { text: word.to_string(), word: None }
+                    SelectedContext {
+                        text: word.to_string(),
+                        word: None,
+                    }
                 }
             }
         }
@@ -904,7 +950,9 @@ fn refine_truncated_with_markers(
     copy_element_attribute_by_ax(element, ax_ffi::SELECTED_TEXT_MARKER_RANGE_ATTRIBUTE).ok()?;
     return match find_sentence_for_marker_selection(element, word) {
         Ok((SentenceCapture::Expanded(sentence), word)) if !looks_truncated(&sentence) => {
-            log::info!("the range chain's sentence looked truncated, refined via the text marker API");
+            log::info!(
+                "the range chain's sentence looked truncated, refined via the text marker API"
+            );
             Some(SelectedContext {
                 text: strip_text_artifacts(&sentence),
                 word: Some(strip_text_artifacts(word.trim())),
@@ -921,7 +969,8 @@ fn get_focused_window_by_ax() -> Result<core_foundation::base::CFType, String> {
     unsafe {
         let system_wide: CFType =
             TCFType::wrap_under_create_rule(ax_ffi::AXUIElementCreateSystemWide());
-        let app = copy_element_attribute_by_ax(&system_wide, ax_ffi::FOCUSED_APPLICATION_ATTRIBUTE)?;
+        let app =
+            copy_element_attribute_by_ax(&system_wide, ax_ffi::FOCUSED_APPLICATION_ATTRIBUTE)?;
         return copy_element_attribute_by_ax(&app, ax_ffi::FOCUSED_WINDOW_ATTRIBUTE);
     }
 }
@@ -998,7 +1047,8 @@ fn find_element_with_selection_in_window(
         stats.visited += 1;
         stats.max_depth = stats.max_depth.max(depth);
         // 自身是否持有选区
-        if let Ok(text) = copy_string_attribute_by_ax_ref(element, ax_ffi::SELECTED_TEXT_ATTRIBUTE) {
+        if let Ok(text) = copy_string_attribute_by_ax_ref(element, ax_ffi::SELECTED_TEXT_ATTRIBUTE)
+        {
             if !text.trim().is_empty() {
                 // wrap_under_get_rule：retain 借用来的元素引用，供数组释放后使用
                 let owned: CFType = unsafe { TCFType::wrap_under_get_rule(element) };
@@ -1264,7 +1314,10 @@ fn pdf_page_text_utf16(page: &core_foundation::base::CFType) -> Result<Vec<u16>,
     if count <= 0 {
         return Err("the page has no text".to_string());
     }
-    let range = CFRange { location: 0, length: count as isize };
+    let range = CFRange {
+        location: 0,
+        length: count as isize,
+    };
     unsafe {
         let range_value_ref = ax_ffi::AXValueCreate(
             ax_ffi::AX_VALUE_CF_RANGE_TYPE,
@@ -1297,8 +1350,10 @@ fn pdf_page_text_utf16(page: &core_foundation::base::CFType) -> Result<Vec<u16>,
 /// 半个词）——出现位置越多越容易判为歧义，这是保守方向。
 fn find_selection_occurrences(page: &[u16], selection: &str) -> Vec<(usize, usize)> {
     let is_space = |unit: u16| char::from_u32(unit as u32).is_some_and(char::is_whitespace);
-    let needle: Vec<u16> =
-        selection.encode_utf16().filter(|unit| !is_space(*unit)).collect();
+    let needle: Vec<u16> = selection
+        .encode_utf16()
+        .filter(|unit| !is_space(*unit))
+        .collect();
     if needle.is_empty() {
         return Vec::new();
     }
@@ -1324,11 +1379,7 @@ fn find_selection_occurrences(page: &[u16], selection: &str) -> Vec<(usize, usiz
 
 /// 以页面文本中的一处出现位置为锚点取句，返回 {句子/所选原文, 页面中的所选词}。
 /// 只取出现位置前后各 CONTEXT_MARGIN 个码元的窗口，防止超长页面拖慢分句。
-fn capture_pdf_occurrence(
-    page: &[u16],
-    start: usize,
-    end: usize,
-) -> Option<SelectedContext> {
+fn capture_pdf_occurrence(page: &[u16], start: usize, end: usize) -> Option<SelectedContext> {
     const CONTEXT_MARGIN: usize = 4096;
     let window_start = start.saturating_sub(CONTEXT_MARGIN);
     let window_end = (end + CONTEXT_MARGIN).min(page.len());
@@ -1343,9 +1394,10 @@ fn capture_pdf_occurrence(
         false,
     )?;
     return Some(match capture {
-        SentenceCapture::Expanded(sentence) => {
-            SelectedContext { text: sentence, word: Some(word.trim().to_string()) }
-        }
+        SentenceCapture::Expanded(sentence) => SelectedContext {
+            text: sentence,
+            word: Some(word.trim().to_string()),
+        },
         SentenceCapture::SelectionAsIs(text) => SelectedContext { text, word: None },
     });
 }
@@ -1392,8 +1444,8 @@ fn locate_sentence_in_pdf_pages(
     let mut texts: Vec<Option<Vec<u16>>> = vec![None; pages.len()];
     let mut candidates: Vec<(usize, usize, usize)> = Vec::new();
     let scan = |index: usize,
-                    texts: &mut Vec<Option<Vec<u16>>>,
-                    candidates: &mut Vec<(usize, usize, usize)>| {
+                texts: &mut Vec<Option<Vec<u16>>>,
+                candidates: &mut Vec<(usize, usize, usize)>| {
         match pdf_page_text_utf16(&pages[index]) {
             Ok(text) => {
                 for (start, end) in find_selection_occurrences(&text, word) {
@@ -1412,7 +1464,10 @@ fn locate_sentence_in_pdf_pages(
     let mut stage = "visible pages";
     if candidates.is_empty() {
         stage = "other pages";
-        for index in (0..pages.len()).filter(|i| !visible[*i]).take(MAX_HIDDEN_PAGES_SCANNED) {
+        for index in (0..pages.len())
+            .filter(|i| !visible[*i])
+            .take(MAX_HIDDEN_PAGES_SCANNED)
+        {
             scan(index, &mut texts, &mut candidates);
         }
     }
@@ -1438,7 +1493,10 @@ fn locate_sentence_in_pdf_pages(
         );
     }
     let first = contexts.remove(0);
-    if contexts.iter().any(|other| other.text != first.text || other.word != first.word) {
+    if contexts
+        .iter()
+        .any(|other| other.text != first.text || other.word != first.word)
+    {
         return Err(format!(
             "the selected text occurs {} times with different surrounding sentences, \
              the selection cannot be located",
@@ -1470,7 +1528,10 @@ fn spawn_selection_retry(pid: i32, callbacks: RetryCallbacks) {
         return;
     }
     std::thread::spawn(move || {
-        let RetryCallbacks { on_started, on_finished } = callbacks;
+        let RetryCallbacks {
+            on_started,
+            on_finished,
+        } = callbacks;
         on_started();
         for attempt in 1..=RETRY_ATTEMPTS {
             std::thread::sleep(std::time::Duration::from_millis(RETRY_INTERVAL_MS));
@@ -1481,13 +1542,11 @@ fn spawn_selection_retry(pid: i32, callbacks: RetryCallbacks) {
                 }
                 let app: CFType = TCFType::wrap_under_create_rule(app_ref);
                 wake_app_accessibility(&app);
-                let window = match copy_element_attribute_by_ax(
-                    &app,
-                    ax_ffi::FOCUSED_WINDOW_ATTRIBUTE,
-                ) {
-                    Ok(window) => window,
-                    Err(_) => continue,
-                };
+                let window =
+                    match copy_element_attribute_by_ax(&app, ax_ffi::FOCUSED_WINDOW_ATTRIBUTE) {
+                        Ok(window) => window,
+                        Err(_) => continue,
+                    };
                 if let Some((element, word)) = find_element_with_selection_in_window(&window) {
                     let context = context_from_word_and_element(&element, &word);
                     log::info!(
@@ -1535,7 +1594,10 @@ fn find_sentence_for_word_by_ax(
         if let Some(count) = char_count {
             length = std::cmp::min(length, std::cmp::max(0, count - loc));
         }
-        CFRange { location: loc, length }
+        CFRange {
+            location: loc,
+            length,
+        }
     };
 
     // 抓取上下文：左缘 margin 固定，右缘从 margin 起逐级（÷4）收缩直到成功——
@@ -1563,30 +1625,30 @@ fn find_sentence_for_word_by_ax(
 
     // AX 选区偏移与窗口文本的坐标系可能不一致（Obsidian 阅读模式），按优先级
     // 给共享锚点探测提供候选：窗口偏移 → 文档级偏移 → 0
-    let anchor_candidates = |window_loc: isize| -> [isize; 3] {
-        [range.location - window_loc, range.location, 0]
-    };
+    let anchor_candidates =
+        |window_loc: isize| -> [isize; 3] { [range.location - window_loc, range.location, 0] };
 
     const WINDOW_MARGIN: isize = 1024;
     let loc = std::cmp::max(0, range.location - WINDOW_MARGIN);
     let (context, achieved_right) = fetch_context(WINDOW_MARGIN, -1)?;
-    let (capture, touched_edge) = match capture_in_context(&context, word, &anchor_candidates(loc), loc, true) {
-        Some(result) => result,
-        None => {
-            // 诊断：锚点定位失败时记录坐标系关键参数，便于分析各提供方的偏移语义
-            return Err(format!(
-                "no validated anchor for the selected text in the context \
+    let (capture, touched_edge) =
+        match capture_in_context(&context, word, &anchor_candidates(loc), loc, true) {
+            Some(result) => result,
+            None => {
+                // 诊断：锚点定位失败时记录坐标系关键参数，便于分析各提供方的偏移语义
+                return Err(format!(
+                    "no validated anchor for the selected text in the context \
                  (range [{}, {}), context {} utf16 units, word {} utf16 units, \
                  {} occurrence(s) in context, char_count {:?})",
-                range.location,
-                range.location + range.length,
-                context.encode_utf16().count(),
-                word.encode_utf16().count(),
-                context.match_indices(word).count(),
-                char_count
-            ));
-        }
-    };
+                    range.location,
+                    range.location + range.length,
+                    context.encode_utf16().count(),
+                    word.encode_utf16().count(),
+                    context.match_indices(word).count(),
+                    char_count
+                ));
+            }
+        };
 
     // 触边重试：句子起点==窗口起点（且窗口未对齐文本开头）或终点==窗口终点，
     // 说明窗口可能截断了句子，用更大窗口重试（右缘只增不减）；仍触边则接受截断句。
@@ -1649,7 +1711,10 @@ fn get_selected_text_range_by_ax(
         }
         // AXUIElementCopyAttributeValue 遵循 Copy 规则（返回已 retain 的对象）。
         let range_value: CFType = TCFType::wrap_under_create_rule(range_ref);
-        let mut range = CFRange { location: 0, length: 0 };
+        let mut range = CFRange {
+            location: 0,
+            length: 0,
+        };
         let decoded = ax_ffi::AXValueGetValue(
             range_value.as_CFTypeRef(),
             ax_ffi::AX_VALUE_CF_RANGE_TYPE,
@@ -1830,9 +1895,15 @@ mod tests {
     /// AppleScript 输出协议：成功取文本、未变按触发语义分流、协议外输出报错
     #[test]
     fn applescript_output_parsing() {
-        assert_eq!(parse_applescript_output("1hello world\n", true), Ok("hello world".into()));
+        assert_eq!(
+            parse_applescript_output("1hello world\n", true),
+            Ok("hello world".into())
+        );
         // 所选文本本身以 "0"/"1" 开头不应被误判（状态码只看首字符）
-        assert_eq!(parse_applescript_output("10 apples\n", false), Ok("0 apples".into()));
+        assert_eq!(
+            parse_applescript_output("10 apples\n", false),
+            Ok("0 apples".into())
+        );
         // 剪贴板未变：AX 正常（silent）→ 空串；AX 报错（strict）→ Err
         assert_eq!(parse_applescript_output("0\n", true), Ok(String::new()));
         assert!(parse_applescript_output("0\n", false).is_err());
@@ -1873,7 +1944,9 @@ mod tests {
     #[test]
     fn marker_context_by_pid_diagnostic() {
         use core_foundation::base::{CFType, TCFType};
-        let Some(pid) = std::env::var("AX_TEST_PID").ok().and_then(|v| v.parse::<i32>().ok())
+        let Some(pid) = std::env::var("AX_TEST_PID")
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok())
         else {
             return;
         };
@@ -1920,7 +1993,9 @@ mod tests {
     /// 选中文本在页面文本中的定位：忽略空白差异、记录全部出现位置、UTF-16 偏移
     #[test]
     fn selection_occurrences_in_page_text() {
-        let page: Vec<u16> = "Use abundant data. Abundant? An abun dant word, abundant".encode_utf16().collect();
+        let page: Vec<u16> = "Use abundant data. Abundant? An abun dant word, abundant"
+            .encode_utf16()
+            .collect();
         // 区分大小写；空白差异不影响匹配（"abun dant" 命中 "abundant"）
         let found = super::find_selection_occurrences(&page, "abundant");
         let text = String::from_utf16_lossy(&page);
@@ -1928,10 +2003,17 @@ mod tests {
             .iter()
             .map(|(start, end)| String::from_utf16_lossy(&page[*start..*end]))
             .collect();
-        assert_eq!(slices, vec!["abundant", "abun dant", "abundant"], "{found:?} in {text:?}");
+        assert_eq!(
+            slices,
+            vec!["abundant", "abun dant", "abundant"],
+            "{found:?} in {text:?}"
+        );
         // 选区本身含换行（跨行选择）：与页面里的空格等价
         let page: Vec<u16> = "the quick brown fox".encode_utf16().collect();
-        assert_eq!(super::find_selection_occurrences(&page, "quick\nbrown"), vec![(4, 15)]);
+        assert_eq!(
+            super::find_selection_occurrences(&page, "quick\nbrown"),
+            vec![(4, 15)]
+        );
         // astral 字符：偏移按 UTF-16 码元
         let page: Vec<u16> = "say 😀 hi".encode_utf16().collect();
         assert_eq!(super::find_selection_occurrences(&page, "😀"), vec![(4, 6)]);
@@ -1960,7 +2042,9 @@ mod tests {
     #[test]
     fn pdf_context_by_pid_diagnostic() {
         use core_foundation::base::{CFType, TCFType};
-        let Some(pid) = std::env::var("AX_TEST_PID").ok().and_then(|v| v.parse::<i32>().ok())
+        let Some(pid) = std::env::var("AX_TEST_PID")
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok())
         else {
             return;
         };
@@ -1972,19 +2056,33 @@ mod tests {
                 super::copy_element_attribute_by_ax(&app, super::ax_ffi::FOCUSED_WINDOW_ATTRIBUTE)
                     .expect("no focused window");
             let found = super::find_element_with_selection_in_window(&window);
-            eprintln!("window search: {:?} in {:?}", found.as_ref().map(|(_, w)| w), started.elapsed());
+            eprintln!(
+                "window search: {:?} in {:?}",
+                found.as_ref().map(|(_, w)| w),
+                started.elapsed()
+            );
             let (element, word) = found.expect("no element with a selection");
             let result = super::context_from_word_and_element(&element, &word);
-            eprintln!("context_from_word_and_element -> {result:?} (total {:?})", started.elapsed());
+            eprintln!(
+                "context_from_word_and_element -> {result:?} (total {:?})",
+                started.elapsed()
+            );
             // 应用级焦点元素入口（Preview 的正常路径：焦点元素是页面容器，需向下找页面）
-            if let Ok(focused) =
-                super::copy_element_attribute_by_ax(&app, super::ax_ffi::FOCUSED_UI_ELEMENT_ATTRIBUTE)
-            {
+            if let Ok(focused) = super::copy_element_attribute_by_ax(
+                &app,
+                super::ax_ffi::FOCUSED_UI_ELEMENT_ATTRIBUTE,
+            ) {
                 let started = std::time::Instant::now();
-                let word = super::copy_string_attribute_by_ax(&focused, super::ax_ffi::SELECTED_TEXT_ATTRIBUTE)
-                    .unwrap_or_default();
+                let word = super::copy_string_attribute_by_ax(
+                    &focused,
+                    super::ax_ffi::SELECTED_TEXT_ATTRIBUTE,
+                )
+                .unwrap_or_default();
                 let result = super::context_from_word_and_element(&focused, &word);
-                eprintln!("via focused element -> {result:?} ({:?})", started.elapsed());
+                eprintln!(
+                    "via focused element -> {result:?} ({:?})",
+                    started.elapsed()
+                );
             }
         }
     }
@@ -1993,15 +2091,23 @@ mod tests {
     #[test]
     fn pdf_refine_by_pid_diagnostic() {
         let (Some(pid), Ok(word)) = (
-            std::env::var("AX_TEST_PID").ok().and_then(|v| v.parse::<i32>().ok()),
+            std::env::var("AX_TEST_PID")
+                .ok()
+                .and_then(|v| v.parse::<i32>().ok()),
             std::env::var("AX_TEST_WORD"),
         ) else {
             return;
         };
         let started = std::time::Instant::now();
         let result = super::refine_with_pdf_pages(pid, &word);
-        eprintln!("refine_with_pdf_pages -> {result:?} ({:?})", started.elapsed());
-        eprintln!("frontmost_application_pid -> {:?}", super::frontmost_application_pid());
+        eprintln!(
+            "refine_with_pdf_pages -> {result:?} ({:?})",
+            started.elapsed()
+        );
+        eprintln!(
+            "frontmost_application_pid -> {:?}",
+            super::frontmost_application_pid()
+        );
     }
 
     /// 实机诊断（需 AX_TEST_PID=目标应用 pid、AX_TEST_WORD=词，可选 AX_TEST_NTH=第几处出现）：
@@ -2011,12 +2117,17 @@ mod tests {
     fn marker_range_by_word_diagnostic() {
         use core_foundation::base::{CFType, TCFType};
         let (Some(pid), Ok(word)) = (
-            std::env::var("AX_TEST_PID").ok().and_then(|v| v.parse::<i32>().ok()),
+            std::env::var("AX_TEST_PID")
+                .ok()
+                .and_then(|v| v.parse::<i32>().ok()),
             std::env::var("AX_TEST_WORD"),
         ) else {
             return;
         };
-        let nth: usize = std::env::var("AX_TEST_NTH").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+        let nth: usize = std::env::var("AX_TEST_NTH")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1);
         let app: CFType = unsafe {
             TCFType::wrap_under_create_rule(super::ax_ffi::AXUIElementCreateApplication(pid))
         };
@@ -2039,12 +2150,14 @@ mod tests {
                 "AXLeftWordTextMarkerRangeForTextMarker",
                 next.as_CFTypeRef(),
             ) {
-                let text = super::string_for_marker_range_by_ax(&focused, &range).unwrap_or_default();
+                let text =
+                    super::string_for_marker_range_by_ax(&focused, &range).unwrap_or_default();
                 if text.trim() == word {
                     found += 1;
                     if found == nth {
                         let started = std::time::Instant::now();
-                        let result = super::find_sentence_for_marker_range(&focused, text.trim(), &range);
+                        let result =
+                            super::find_sentence_for_marker_range(&focused, text.trim(), &range);
                         eprintln!("RESULT ({:?}): {result:?}", started.elapsed());
                         return;
                     }
@@ -2062,7 +2175,10 @@ mod tests {
             super::strip_text_artifacts("per\u{2}centage param\u{AD}eters"),
             "percentage parameters"
         );
-        assert_eq!(super::strip_text_artifacts("a\tb\nc, d-e."), "a\tb\nc, d-e.");
+        assert_eq!(
+            super::strip_text_artifacts("a\tb\nc, d-e."),
+            "a\tb\nc, d-e."
+        );
     }
 
     /// 折叠空白：换行抹成的双空格合并，首尾空白去掉
@@ -2080,9 +2196,13 @@ mod tests {
         assert!(!looks_truncated("He said \"stop!\""));
         assert!(!looks_truncated("这是一句话。"));
         assert!(!looks_truncated("What is this?)"));
-        assert!(looks_truncated("prepare inputs with abundant information, such as ")); // 左右都被截
+        assert!(looks_truncated(
+            "prepare inputs with abundant information, such as "
+        )); // 左右都被截
         assert!(looks_truncated("We take a closer look at each")); // 右侧被截
-        assert!(looks_truncated("scale to improve performance in recommendation presents.")); // 左侧被截
+        assert!(looks_truncated(
+            "scale to improve performance in recommendation presents."
+        )); // 左侧被截
         assert!(looks_truncated("Introduction")); // 标题：无句末标点
     }
 
@@ -2093,14 +2213,19 @@ mod tests {
         let raw = "3.2 Input Layer. The first thing to build a model is to\r\nprepare inputs with abundant information, such as User features\r\ninclude user ID and other user information. Next one.";
         let flat = flatten_line_breaks(raw);
         assert_eq!(flat.encode_utf16().count(), raw.encode_utf16().count());
-        let offset = raw.find("abundant").map(|byte| raw[..byte].encode_utf16().count()).unwrap();
+        let offset = raw
+            .find("abundant")
+            .map(|byte| raw[..byte].encode_utf16().count())
+            .unwrap();
         // 不抹换行：句子被换行切碎，只剩 "prepare inputs ... features"
-        let (broken, _) = capture_in_context(raw, "abundant", &[offset as isize], 1, false).unwrap();
+        let (broken, _) =
+            capture_in_context(raw, "abundant", &[offset as isize], 1, false).unwrap();
         match broken {
             SentenceCapture::Expanded(s) => assert!(!s.contains("The first thing"), "{s:?}"),
             _ => panic!("expected Expanded"),
         }
-        let (capture, _) = capture_in_context(&flat, "abundant", &[offset as isize], 1, false).unwrap();
+        let (capture, _) =
+            capture_in_context(&flat, "abundant", &[offset as isize], 1, false).unwrap();
         match capture {
             SentenceCapture::Expanded(s) => assert_eq!(
                 s,

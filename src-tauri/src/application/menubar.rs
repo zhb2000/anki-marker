@@ -338,8 +338,11 @@ fn build_tray_menu(app: &AppHandle) -> Option<tauri::menu::Menu<tauri::Wry>> {
         #[cfg(target_os = "macos")]
         let shortcut = read_config_or_default(app).global_shortcut().to_string();
         #[cfg(target_os = "macos")]
-        let accelerator: Option<&str> =
-            if shortcut.is_empty() { None } else { Some(shortcut.as_str()) };
+        let accelerator: Option<&str> = if shortcut.is_empty() {
+            None
+        } else {
+            Some(shortcut.as_str())
+        };
         #[cfg(not(target_os = "macos"))]
         let accelerator: Option<&str> = None;
         match MenuItem::with_id(app, "capture", "划词录入", true, accelerator) {
@@ -413,10 +416,9 @@ pub fn register_menu_event_handler(app: &AppHandle) {
         // 点击托盘/Dock 菜单不会激活本应用，选中文本仍来自用户当前所在的应用；
         // Windows 托盘菜单会抢走前台，由捕获流程内部先归还（见 shortcut 模块）
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        "capture" => super::shortcut::on_shortcut_pressed(
-            app.clone(),
-            super::shortcut::CaptureTrigger::Menu,
-        ),
+        "capture" => {
+            super::shortcut::on_shortcut_pressed(app.clone(), super::shortcut::CaptureTrigger::Menu)
+        }
         // 打开主窗口：复用划词快捷键/Dock 点击/托盘点击的显示并聚焦逻辑
         "open" => {
             if let Err(error) = super::shortcut::show_and_focus_main_window(app) {
@@ -448,8 +450,7 @@ pub fn install_dock_menu(app: &AppHandle) {
             log::warn!("failed to get shared NSApplication, dock menu unavailable");
             return;
         }
-        let delegate: *mut objc2::runtime::AnyObject =
-            objc2::msg_send![shared_app, delegate];
+        let delegate: *mut objc2::runtime::AnyObject = objc2::msg_send![shared_app, delegate];
         if delegate.is_null() {
             log::warn!("failed to get NSApplication delegate, dock menu unavailable");
             return;
@@ -457,8 +458,7 @@ pub fn install_dock_menu(app: &AppHandle) {
         // 代理类由 tao 运行时动态创建且未实现 applicationDockMenu:，
         // class_addMethod 对已注册类添加新方法是合法的；返回 NO 说明已存在同名方法
         // （tao 未来版本可能自行实现），此时放弃注入、优雅降级
-        let delegate_class =
-            objc2::ffi::object_getClass(delegate) as *mut objc2::runtime::AnyClass;
+        let delegate_class = objc2::ffi::object_getClass(delegate) as *mut objc2::runtime::AnyClass;
         let added = objc2::ffi::class_addMethod(
             delegate_class,
             objc2::sel!(applicationDockMenu:),
@@ -540,7 +540,9 @@ fn build_dock_menu(app: &AppHandle) -> Option<muda::Menu> {
             Ok(accelerator) => Some(accelerator),
             // 与托盘菜单一致：解析失败仅不显示提示，不影响菜单项
             Err(error) => {
-                log::warn!("failed to parse global shortcut \"{shortcut}\" for the dock menu: {error}");
+                log::warn!(
+                    "failed to parse global shortcut \"{shortcut}\" for the dock menu: {error}"
+                );
                 None
             }
         }

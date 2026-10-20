@@ -40,7 +40,8 @@ pub enum ThemeMode {
     Light,
     /// 深色
     Dark,
-}impl ThemeMode {
+}
+impl ThemeMode {
     /// 对应 config.toml 中的字符串值
     pub fn as_toml_str(self) -> &'static str {
         return match self {
@@ -250,7 +251,10 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
         let show_menu_bar_icon = doc
             .get("show-menu-bar-icon")
             .and_then(|v| v.as_bool())
-            .unwrap_or(!matches!(legacy_background_icon, Some("dock") | Some("none")));
+            .unwrap_or(!matches!(
+                legacy_background_icon,
+                Some("dock") | Some("none")
+            ));
         let keep_dock_icon_in_background = doc
             .get("keep-dock-icon-in-background")
             .and_then(|v| v.as_bool())
@@ -356,7 +360,8 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
             doc["keep-running-on-close"] = toml_edit::value(keep_running_on_close);
         }
         // 枚举键已被两个开关取代：写入新键时一并删除老键，避免两套键并存造成歧义
-        if modified.show_menu_bar_icon.is_some() || modified.keep_dock_icon_in_background.is_some() {
+        if modified.show_menu_bar_icon.is_some() || modified.keep_dock_icon_in_background.is_some()
+        {
             doc.remove("background-icon");
         }
         if let Some(show_menu_bar_icon) = modified.show_menu_bar_icon {
@@ -408,8 +413,11 @@ mod tests {
     #[test]
     fn reads_shipped_config_template() {
         let path = std::env::temp_dir().join("anki-marker-test-config-template.toml");
-        std::fs::write(&path, include_str!("../../../resources/config-template.toml"))
-            .expect("failed to write the temporary config file");
+        std::fs::write(
+            &path,
+            include_str!("../../../resources/config-template.toml"),
+        )
+        .expect("failed to write the temporary config file");
         let config = read_config(&path).expect("failed to parse the shipped config template");
         assert_eq!(config.tray_icon_style, TrayIconStyle::Auto);
         assert!(config.show_menu_bar_icon);
@@ -424,10 +432,13 @@ mod tests {
     #[test]
     fn commits_and_reads_tray_icon_style() {
         let path = std::env::temp_dir().join("anki-marker-test-config-commit.toml");
-        std::fs::write(&path, include_str!("../../../resources/config-template.toml"))
-            .expect("failed to write the temporary config file");
-        let modified: PartialConfig =
-            serde_json::from_str(r#"{"trayIconStyle":"white"}"#).expect("failed to parse the payload");
+        std::fs::write(
+            &path,
+            include_str!("../../../resources/config-template.toml"),
+        )
+        .expect("failed to write the temporary config file");
+        let modified: PartialConfig = serde_json::from_str(r#"{"trayIconStyle":"white"}"#)
+            .expect("failed to parse the payload");
         commit_config(&path, modified).expect("failed to commit the config");
         let config = read_config(&path).expect("failed to read back the config");
         assert_eq!(config.tray_icon_style, TrayIconStyle::White);
@@ -447,21 +458,29 @@ mod tests {
             let content = format!("keep-running-on-close = true\nbackground-icon = \"{legacy}\"\n");
             std::fs::write(&path, content).expect("failed to write the legacy config file");
             let config = read_config(&path).expect("failed to read the legacy config file");
-            assert_eq!(config.show_menu_bar_icon, show_menu_bar, "legacy = {legacy}");
             assert_eq!(
-                config.keep_dock_icon_in_background,
-                keep_dock,
+                config.show_menu_bar_icon, show_menu_bar,
+                "legacy = {legacy}"
+            );
+            assert_eq!(
+                config.keep_dock_icon_in_background, keep_dock,
                 "legacy = {legacy}"
             );
         }
         std::fs::write(&path, "background-icon = \"none\"\n").expect("failed to write");
-        let modified: PartialConfig =
-            serde_json::from_str(r#"{"showMenuBarIcon":true}"#).expect("failed to parse the payload");
+        let modified: PartialConfig = serde_json::from_str(r#"{"showMenuBarIcon":true}"#)
+            .expect("failed to parse the payload");
         commit_config(&path, modified).expect("failed to commit the config");
         let text = std::fs::read_to_string(&path).expect("failed to read the config file");
-        assert!(!text.contains("background-icon"), "legacy key should be dropped: {text}");
-        assert!(read_config(&path).expect("failed to read back the config").show_menu_bar_icon);
+        assert!(
+            !text.contains("background-icon"),
+            "legacy key should be dropped: {text}"
+        );
+        assert!(
+            read_config(&path)
+                .expect("failed to read back the config")
+                .show_menu_bar_icon
+        );
         let _ = std::fs::remove_file(&path);
     }
 }
-
