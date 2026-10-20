@@ -412,8 +412,8 @@ mod tests {
             .expect("failed to write the temporary config file");
         let config = read_config(&path).expect("failed to parse the shipped config template");
         assert_eq!(config.tray_icon_style, TrayIconStyle::Auto);
-        assert_eq!(config.show_menu_bar_icon, true);
-        assert_eq!(config.keep_dock_icon_in_background, false);
+        assert!(config.show_menu_bar_icon);
+        assert!(!config.keep_dock_icon_in_background);
         assert_eq!(config.theme, ThemeMode::System);
         let _ = std::fs::remove_file(&path);
     }
