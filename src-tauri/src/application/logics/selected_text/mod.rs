@@ -45,7 +45,7 @@ pub fn get_selected_context(
     return linux::get_selected_context(word_to_sentence, callbacks);
 }
 
-/// 后台重试的生命周期回调，供 UI 呈现"仍在补取完整句子"的状态。
+/// 后台重试的生命周期回调，供 UI 呈现“仍在补取完整句子”的状态。
 ///
 /// 后台重试（目标应用的无障碍树异步物化时补发完整句子）对用户不可见，但补发结果会
 /// 覆盖先到的降级结果，因此需要一对成对的状态信号驱动界面上的工作指示。

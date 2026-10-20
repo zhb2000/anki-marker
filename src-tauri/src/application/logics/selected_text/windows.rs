@@ -70,7 +70,7 @@ pub fn get_selected_text() -> Result<String, String> {
 ///
 /// `callbacks`：UIA 失败回退后，若目标应用的无障碍树在后台物化
 /// （Chromium 系按需激活），后台重试取到完整句子时经 `on_finished` 补发结果；
-/// `on_started`/`on_finished` 同时供 UI 呈现"仍在补取"状态（见 RetryCallbacks
+/// `on_started`/`on_finished` 同时供 UI 呈现“仍在补取”状态（见 RetryCallbacks
 /// 的调用约定）。
 pub fn get_selected_context(
     word_to_sentence: bool,

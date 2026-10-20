@@ -12,7 +12,7 @@ use crate::application::logics::sentence::{
     count_intersecting_sentences, find_sentence_with_range,
 };
 
-/// 结果日志的描述串：词与录入文本（各截断到 80 字符），用于实机定位"读错控件"
+/// 结果日志的描述串：词与录入文本（各截断到 80 字符），用于实机定位“读错控件”
 /// 类问题（日志只写本机日志文件，不上传）。
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub fn describe_context(context: &SelectedContext) -> String {
@@ -60,8 +60,8 @@ pub fn capture_in_context(
 
     // 只扩展、不丢弃：选区横跨多个句子时原样录入用户所选文本，不做分句截断。
     // 典型场景：Chrome PDF 中手动选中跨行的完整句子——PDF 视觉行间的 \n 使
-    // UAX #29（SB4：CR/LF 后强制分句）把整句切为多行碎片，若仍取"与选区起点
-    // 相交的句子"就只会录入第一行，丢弃了用户明确选择的内容
+    // UAX #29（SB4：CR/LF 后强制分句）把整句切为多行碎片，若仍取“与选区起点
+    // 相交的句子”就只会录入第一行，丢弃了用户明确选择的内容
     if count_intersecting_sentences(context, sel_start_utf16, sel_end_utf16) > 1 {
         return Some((SentenceCapture::SelectionAsIs(word.trim().to_string()), false));
     }

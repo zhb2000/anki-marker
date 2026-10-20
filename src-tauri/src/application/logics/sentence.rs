@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn cjk_sentence() {
         let context = "第一句。第二句！第三句？";
-        // 每个 CJK 字符占 1 个 UTF-16 码元，"第二句" 起始于偏移 4
+        // 每个 CJK 字符占 1 个 UTF-16 码元，“第二句” 起始于偏移 4
         assert_eq!(find_sentence(context, 4, 7).as_deref(), Some("第二句！"));
     }
 
@@ -192,7 +192,7 @@ mod tests {
         assert_eq!(find_sentence(emoji, 1, 2), None); // 起点落在代理对中间
     }
 
-    /// 相交句子计数：选词取句判断"用户是否手动跨句选择"的依据
+    /// 相交句子计数：选词取句判断“用户是否手动跨句选择”的依据
     #[test]
     fn intersecting_sentence_count() {
         let context = "Hello world. This is a test. Goodbye.";
@@ -208,7 +208,7 @@ mod tests {
     }
 
     /// 相交句子计数：PDF 场景——视觉行硬换行使 UAX #29 把跨行整句切为多句，
-    /// 手动选中跨行整句时计数 >1，触发"原样保留所选文本"
+    /// 手动选中跨行整句时计数 >1，触发“原样保留所选文本”
     #[test]
     fn intersecting_sentence_count_pdf_lines() {
         // 模拟 Chrome PDF 的 AX 文本：句子跨 3 个视觉行，行间为 \n

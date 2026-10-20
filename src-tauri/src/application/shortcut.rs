@@ -68,7 +68,7 @@ pub fn take_pending_sentence(pending: State<PendingSentence>) -> Option<Captured
 ///
 /// 供句子面板角上的工作指示器使用：前端据此显示/收束指示环。之所以要能主动查询
 /// 而不只靠事件——重试在 `get_selected_context` 内部就已启动，早于本应用窗口的
-/// 显示与聚焦，窗口被重建时前端尚未挂上监听，"开始"事件会丢失。
+/// 显示与聚焦，窗口被重建时前端尚未挂上监听，“开始”事件会丢失。
 #[derive(Debug)]
 pub struct CaptureSettling(pub Mutex<bool>);
 
@@ -79,7 +79,7 @@ impl CaptureSettling {
 }
 
 /// 查询是否正在后台补取完整句子。由前端在页面就绪时调用（与 take_pending_sentence
-/// 同属"补齐前端就绪前错过的事件"的手段）。
+/// 同属“补齐前端就绪前错过的事件”的手段）。
 #[tauri::command(rename_all = "snake_case")]
 pub fn is_capture_settling(settling: State<CaptureSettling>) -> bool {
     return settling.0.lock().map(|guard| *guard).unwrap_or(false);
@@ -116,10 +116,10 @@ static LAST_REGISTRATION: Mutex<Option<ShortcutRegistration>> = Mutex::new(None)
 
 /// 划词没有录入内容的原因（emit 给前端，用于给出对应的提示文案）。
 ///
-/// 两种原因对用户是不同的事：`Empty` 是"目标应用里没有可取用的选区"（真的没选中，
+/// 两种原因对用户是不同的事：`Empty` 是“目标应用里没有可取用的选区”（真的没选中，
 /// 或应用不向无障碍接口暴露选区），`Failed` 是取词过程报错。以前 `Empty` 是静默的
-/// （避免误按快捷键时被打扰），但托盘菜单路径下静默会让用户无法区分"没选中"
-/// "应用不支持"与"取词目标取错了"，故两种都反馈。
+/// （避免误按快捷键时被打扰），但托盘菜单路径下静默会让用户无法区分“没选中”
+/// “应用不支持”与“取词目标取错了”，故两种都反馈。
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CaptureFailure {
@@ -233,7 +233,7 @@ pub fn is_accessibility_trusted() -> bool {
 /// 申请辅助功能权限：直接打开系统设置的辅助功能面板。
 ///
 /// 不使用 `application_is_trusted_with_prompt`（系统弹窗）：现代 macOS 上该弹窗
-/// 没有"允许"按钮、文案不可定制，点击后仍需跳转设置面板手动勾选，只是多一层
+/// 没有“允许”按钮、文案不可定制，点击后仍需跳转设置面板手动勾选，只是多一层
 /// 中间跳转；而本应用设置页已有自己的引导界面，故直接深链打开设置面板。
 /// 用户授权后切回本应用时，由前端窗口焦点监听自动刷新权限状态。
 #[tauri::command(rename_all = "snake_case")]
@@ -303,8 +303,8 @@ pub fn on_shortcut_pressed(app: AppHandle, trigger: CaptureTrigger) {
             Some(captured) => captured,
             None => {
                 // 目标应用里没有可取用的选区：真的没选中，或应用不向无障碍接口暴露选区。
-                // 与取词报错同样给反馈——静默时用户分不清"没选中""应用不支持"与
-                // "取词目标取错了"（托盘菜单路径下尤其明显）
+                // 与取词报错同样给反馈——静默时用户分不清“没选中”“应用不支持”与
+                // “取词目标取错了”（托盘菜单路径下尤其明显）
                 log::info!("no text captured: the target app returned an empty selection");
                 report_capture_failure(&app, CaptureFailure::Empty);
                 return;
@@ -369,7 +369,7 @@ fn restore_foreground_before_capture(trigger: CaptureTrigger) {
 #[cfg(not(target_os = "windows"))]
 fn restore_foreground_before_capture(_trigger: CaptureTrigger) {}
 
-/// 构造后台重试的生命周期回调：驱动"仍在补取"指示状态，并落地补发的完整句子。
+/// 构造后台重试的生命周期回调：驱动“仍在补取”指示状态，并落地补发的完整句子。
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn retry_callbacks(
     app: AppHandle,
@@ -382,7 +382,7 @@ fn retry_callbacks(
             if let Some(context) = outcome {
                 deliver_retry_capture(&app, &primary_text, context);
             }
-            // 无论补发成功、被守卫丢弃还是超时放弃，都要结束"仍在补取"状态
+            // 无论补发成功、被守卫丢弃还是超时放弃，都要结束“仍在补取”状态
             set_capture_settling(&app, false);
         }),
     };
@@ -390,7 +390,7 @@ fn retry_callbacks(
 
 /// 后台重试补发结果的落地。
 ///
-/// 重试守卫：重试路径在目标窗口内搜索"持有选区的元素"（Windows）或按 pid 重建
+/// 重试守卫：重试路径在目标窗口内搜索“持有选区的元素”（Windows）或按 pid 重建
 /// 应用元素（macOS），可能撞错控件（残留选区、浏览器 UI 等）——与主路径结果
 /// （模拟复制读到的才是用户真实选区）不一致时丢弃，避免用错误内容覆盖用户
 /// 已经看到的正确结果。

@@ -99,7 +99,7 @@ fn start_mask_animation(window: &WebviewWindow, active: bool, dark: bool) {
     let generation = MASK_ANIM_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
     let window = window.clone();
     std::thread::spawn(move || {
-        // 绝对时间节拍：每帧钉在 start + n × 帧间隔 的时刻上（sleep 到点而非"干完活再睡"），
+        // 绝对时间节拍：每帧钉在 start + n × 帧间隔 的时刻上（sleep 到点而非“干完活再睡”），
         // 帧耗时（IPC 派发等）不累积进节拍，动画总时长与 DOM 过渡严格一致；
         // 超过 end 的帧收拢到 end，保证终止帧精确落在动画时长上
         let started = Instant::now();
@@ -188,7 +188,7 @@ unsafe fn sync_webview_background(view: &AnyObject, color: &NSColor, depth: u32)
     let is_web_view: Bool = msg_send![view, isKindOfClass: WKWebView::class()];
     if is_web_view.as_bool() {
         let web_view = &*(view as *const AnyObject as *const WKWebView);
-        // 关闭 WKWebView 的"白色清底"行为（私有 KVC，wry transparent 特性同款做法，
+        // 关闭 WKWebView 的“白色清底”行为（私有 KVC，wry transparent 特性同款做法，
         // 见 https://stackoverflow.com/questions/27655930）：
         // zoom/resize 动画期间网页尚未按新尺寸合成时，下层 NSWindow 的主题底色
         // 直接透出，不再露出 WKWebView 默认的白色。

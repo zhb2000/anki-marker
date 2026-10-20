@@ -24,7 +24,7 @@ export type AppUpdateScenario =
     | 'real'
     /** 有新版本：红点、新版本链接与更新说明对话框 */
     | 'new-version'
-    /** 无新版本：提示"当前应用已是最新版本" */
+    /** 无新版本：提示“当前应用已是最新版本” */
     | 'no-update'
     /** 请求失败：设置页弹出错误提示，启动时静默失败 */
     | 'request-error';
@@ -33,9 +33,9 @@ export type AppUpdateScenario =
 export type TemplateVersionScenario =
     /** 正常从 Anki 获取笔记模板版本 */
     | 'real'
-    /** 模板版本过低：显示红点、新版本链接与"更新模板"按钮 */
+    /** 模板版本过低：显示红点、新版本链接与“更新模板”按钮 */
     | 'low-version'
-    /** 获取失败：显示"获取失败" */
+    /** 获取失败：显示“获取失败” */
     | 'request-error';
 
 const APP_UPDATE_SCENARIOS = ['real', 'new-version', 'no-update', 'request-error'] as const;

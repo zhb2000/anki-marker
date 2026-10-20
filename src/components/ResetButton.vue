@@ -6,7 +6,7 @@ import { useSettingsStore } from '../logics/settings-store';
 import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 
 /**
- * 单项设置的重置按钮：仅在所在设置项偏离默认值时显示（出现本身即"已修改"指示），
+ * 单项设置的重置按钮：仅在所在设置项偏离默认值时显示（出现本身即“已修改”指示），
  * tooltip 中展示将要恢复的默认值。与设置仓库耦合，仅用于设置页。
  */
 const props = withDefaults(defineProps<{

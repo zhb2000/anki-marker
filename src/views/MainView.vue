@@ -460,7 +460,7 @@ function regenerateAiPick() {
 // #region 全局快捷键划词录入
 /**
  * 后台仍在补取完整句子（Rust 侧重试在途）：句子面板角上的指示环据此显示/收束。
- * 补取结果会覆盖先到的降级结果（仅词），指示环只是让"还会变"这件事有个连续、安静的信号。
+ * 补取结果会覆盖先到的降级结果（仅词），指示环只是让“还会变”这件事有个连续、安静的信号。
  */
 const captureSettling = ref(false);
 
@@ -569,7 +569,7 @@ function showCaptureFailureDialog(failure: CaptureFailure) {
 /** 监听划词句子事件，并取走可能在主窗口重建期间暂存的句子 */
 async function initSentenceCapture() {
     // 后台补取状态：先挂监听、再主动查一次。重试在窗口显示之前就已启动，窗口被重建时
-    // "开始"事件必然丢失，只能靠 is_capture_settling 查回；若挂监听后已收到过事件，
+    // “开始”事件必然丢失，只能靠 is_capture_settling 查回；若挂监听后已收到过事件，
     // 则以事件为准（避免被这次查询返回的稍旧值回退）
     let settlingEventReceived = false;
     try {
