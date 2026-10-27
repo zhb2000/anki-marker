@@ -24,6 +24,13 @@ pub struct CapturedSentence {
     text: String,
     /// 取句模式命中的单词（供前端预选），非取句路径为 None
     word: Option<String>,
+    /// 单词在 text 中的 UTF-16 起始偏移：句子内同一单词出现多次时，前端据此预选
+    /// 真正被选中的那一处。与 text 切片校验不符、或偏移在链路中被后处理破坏时为 None，
+    /// 前端回退到按字符串匹配
+    word_offset: Option<usize>,
+    /// 是否为“后台补取”的迟到结果：前端据此在用户已改动（编辑句子、输入查询、
+    /// 手动标记）时丢弃它，避免覆盖用户的改动
+    retry: bool,
 }
 
 /// 暂存的划词捕获结果。
@@ -43,8 +50,12 @@ impl PendingSentence {
 impl CapturedSentence {
     /// 从选词取句结果构造事件载荷；录入文本为空（未选中任何内容）时返回 None。
     /// 单词 trim 后为空则视为无命中（word 置 None）。
+    ///
+    /// `retry` 标记迟到的补取结果（见字段说明）。偏移随 text 的 trim 换算，并用
+    /// “该位置的切片等于 word”自校验——链路任何一步破坏了偏移，都在这里归零。
     fn from_selected_context(
         context: logics::selected_text::SelectedContext,
+        retry: bool,
     ) -> Option<CapturedSentence> {
         let text = context.text.trim().to_string();
         if text.is_empty() {
@@ -54,7 +65,37 @@ impl CapturedSentence {
             .word
             .map(|word| word.trim().to_string())
             .filter(|word| !word.is_empty());
-        return Some(CapturedSentence { text, word });
+        // 守门：录入文本必须包含所选词（切句链路已守一次，这里防后处理改写文本——
+        // 宁可按降级语义只录词，也不把一句不含所选词的错句交给前端）
+        let (text, word) = match word {
+            Some(word) if !text.contains(&word) => {
+                log::warn!(
+                    "captured text does not contain the selected word, degrading to word-only \
+                     (word {word:?}, text {:.80?})",
+                    text
+                );
+                (word, None)
+            }
+            word => (text, word),
+        };
+        let word_offset = word.as_deref().and_then(|word| {
+            let trimmed = context.text.len() - context.text.trim_start().len();
+            let offset = context
+                .word_offset?
+                .checked_sub(context.text[..trimmed].encode_utf16().count())?;
+            let matches = text
+                .encode_utf16()
+                .skip(offset)
+                .take(word.encode_utf16().count())
+                .eq(word.encode_utf16());
+            return matches.then_some(offset);
+        });
+        return Some(CapturedSentence {
+            text,
+            word,
+            word_offset,
+            retry,
+        });
     }
 }
 
@@ -302,7 +343,7 @@ pub fn on_shortcut_pressed(app: AppHandle, trigger: CaptureTrigger) {
                 return;
             }
         };
-        let captured = match CapturedSentence::from_selected_context(context) {
+        let captured = match CapturedSentence::from_selected_context(context, false) {
             Some(captured) => captured,
             None => {
                 // 目标应用里没有可取用的选区：真的没选中，或应用不向无障碍接口暴露选区。
@@ -403,7 +444,7 @@ fn deliver_retry_capture(
     primary_text: &Mutex<Option<String>>,
     context: logics::selected_text::SelectedContext,
 ) {
-    let Some(mut captured) = CapturedSentence::from_selected_context(context) else {
+    let Some(mut captured) = CapturedSentence::from_selected_context(context, true) else {
         return;
     };
     if let Ok(Some(primary)) = primary_text.lock().map(|guard| guard.clone()) {
@@ -422,6 +463,8 @@ fn deliver_retry_capture(
                 captured = CapturedSentence {
                     text: captured.text,
                     word: Some(primary),
+                    word_offset: None,
+                    retry: true,
                 };
             } else {
                 log::warn!(
@@ -477,4 +520,65 @@ pub fn show_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
     // 恢复 macOS 的 Dock 图标（托盘图标常驻，不受窗口显隐影响）
     super::menubar::on_main_window_shown(app);
     return Ok(());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CapturedSentence;
+    use crate::application::logics::selected_text::SelectedContext;
+
+    /// 文本完整保留、偏移随 trim 换算。
+    /// 回归：文本曾被截成“所选词之前的句子前缀”（选中 design 只录入 We）
+    #[test]
+    fn payload_keeps_the_whole_text() {
+        let captured = CapturedSentence::from_selected_context(
+            SelectedContext {
+                text: "  We design a Transformer-based encoder-decoder model.".to_string(),
+                word: Some("design".to_string()),
+                word_offset: Some(5),
+            },
+            false,
+        )
+        .expect("payload");
+        assert_eq!(
+            captured.text,
+            "We design a Transformer-based encoder-decoder model."
+        );
+        assert_eq!(captured.word.as_deref(), Some("design"));
+        assert_eq!(captured.word_offset, Some(3)); // 减去两个前导空格
+        assert!(!captured.retry);
+    }
+
+    /// 偏移与文本不符（链路中某一步改写过文本）：只作废偏移，文本与词照常交付
+    #[test]
+    fn payload_drops_unverified_offset() {
+        let captured = CapturedSentence::from_selected_context(
+            SelectedContext {
+                text: "We design models.".to_string(),
+                word: Some("design".to_string()),
+                word_offset: Some(7),
+            },
+            true,
+        )
+        .expect("payload");
+        assert_eq!(captured.word_offset, None);
+        assert!(captured.retry);
+    }
+
+    /// 守门：文本不含所选词时降级为仅录词，不把错句交给前端
+    #[test]
+    fn payload_degrades_when_text_lacks_the_word() {
+        let captured = CapturedSentence::from_selected_context(
+            SelectedContext {
+                text: "We".to_string(),
+                word: Some("design".to_string()),
+                word_offset: Some(3),
+            },
+            false,
+        )
+        .expect("payload");
+        assert_eq!(captured.text, "design");
+        assert_eq!(captured.word, None);
+        assert_eq!(captured.word_offset, None);
+    }
 }

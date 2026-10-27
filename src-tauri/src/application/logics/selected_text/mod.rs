@@ -63,6 +63,12 @@ pub struct RetryCallbacks {
 pub struct SelectedContext {
     pub text: String,
     pub word: Option<String>,
+    /// 单词在 text 中的 UTF-16 码元起始偏移（前端按 JS 字符串下标使用，供精确预选）。
+    ///
+    /// 只有“偏移在整条链路中未被破坏”的路径才带值：任何改写 text 的后处理
+    /// （折叠空白、去伪影、用剪贴板权威词替换词）都必须同步换算偏移或置为 None。
+    /// 前端也不盲信：使用前以“该位置的切片等于 word”校验，不符则回退按字符串匹配。
+    pub word_offset: Option<usize>,
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]

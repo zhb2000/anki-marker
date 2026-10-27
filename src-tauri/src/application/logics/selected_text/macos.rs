@@ -59,7 +59,11 @@ pub fn get_selected_context(
     callbacks: RetryCallbacks,
 ) -> Result<SelectedContext, String> {
     if !word_to_sentence {
-        let context = get_selected_text().map(|text| SelectedContext { text, word: None })?;
+        let context = get_selected_text().map(|text| SelectedContext {
+            text,
+            word: None,
+            word_offset: None,
+        })?;
         log::info!(
             "capture (sentence mode off): {}",
             describe_context(&context)
@@ -99,8 +103,12 @@ pub fn get_selected_context(
             false
         }
     };
-    let mut context = get_selected_text_by_applescript(silent_if_unchanged)
-        .map(|text| SelectedContext { text, word: None })?;
+    let mut context =
+        get_selected_text_by_applescript(silent_if_unchanged).map(|text| SelectedContext {
+            text,
+            word: None,
+            word_offset: None,
+        })?;
     if let Some(pid) = pdf_refine_pid {
         if !context.text.trim().is_empty() {
             if let Some(refined) = refine_with_pdf_pages(pid, &context.text) {
@@ -514,6 +522,7 @@ fn get_selected_context_by_ax() -> Result<SelectedContext, AxAttemptError> {
         return Ok(SelectedContext {
             text: word,
             word: None,
+            word_offset: None,
         });
     }
     return Ok(context_from_word_and_element(&focused, &word));
@@ -592,23 +601,36 @@ fn marker_selected_context(element: &core_foundation::base::CFType) -> Option<Se
         return Some(SelectedContext {
             text: word,
             word: None,
+            word_offset: None,
         });
     }
     log::info!("found the selection via the text marker API");
     return Some(match find_sentence_for_marker_selection(element, &word) {
-        Ok((SentenceCapture::Expanded(sentence), word)) => SelectedContext {
-            text: strip_text_artifacts(&sentence),
-            word: Some(strip_text_artifacts(word.trim())),
-        },
+        Ok((
+            SentenceCapture::Expanded {
+                sentence,
+                word_offset,
+            },
+            capture_word,
+        )) => {
+            let (text, word_offset) = strip_text_artifacts_with_offset(&sentence, word_offset);
+            SelectedContext {
+                text,
+                word: Some(strip_text_artifacts(capture_word.trim())),
+                word_offset,
+            }
+        }
         Ok((SentenceCapture::SelectionAsIs(text), _)) => SelectedContext {
             text: strip_text_artifacts(&text),
             word: None,
+            word_offset: None,
         },
         Err(error) => {
             log::warn!("failed to extract sentence for the selected word: {error}");
             SelectedContext {
                 text: strip_text_artifacts(&word),
                 word: None,
+                word_offset: None,
             }
         }
     });
@@ -622,6 +644,38 @@ fn strip_text_artifacts(text: &str) -> String {
         .chars()
         .filter(|c| *c != '\u{AD}' && !(c.is_control() && !c.is_whitespace()))
         .collect();
+}
+
+/// `strip_text_artifacts` 的偏移保真版本：去伪影的同时把 UTF-16 偏移换算到新文本，
+/// **文本内容本身只会被删去伪影**。偏移落在被删字符处时映射到其前一个保留字符之后；
+/// 偏移落在代理对中间或越界时返回 None，交由前端回退到按字符串匹配。
+fn strip_text_artifacts_with_offset(text: &str, offset: Option<usize>) -> (String, Option<usize>) {
+    let kept = |c: char| c != '\u{AD}' && !(c.is_control() && !c.is_whitespace());
+    let Some(offset) = offset else {
+        return (strip_text_artifacts(text), None);
+    };
+    let mut output = String::with_capacity(text.len());
+    let mut source_utf16 = 0usize;
+    let mut output_utf16 = 0usize;
+    let mut mapped: Option<usize> = None;
+    for c in text.chars() {
+        if mapped.is_none() && source_utf16 == offset {
+            mapped = Some(output_utf16);
+        }
+        source_utf16 += c.len_utf16();
+        // 已越过偏移却仍未记下映射：偏移落在这个字符内部（代理对中间），不可映射
+        if mapped.is_none() && source_utf16 > offset {
+            return (strip_text_artifacts(text), None);
+        }
+        if kept(c) {
+            output.push(c);
+            output_utf16 += c.len_utf16();
+        }
+    }
+    if mapped.is_none() && source_utf16 == offset {
+        mapped = Some(output_utf16);
+    }
+    return (output, mapped);
 }
 
 /// 句子是否看起来被上下文截断：以小写字母开头（句子不会以小写开头，说明左侧被截），
@@ -718,7 +772,7 @@ fn find_sentence_for_marker_range(
     // 或上下文里有硬换行（视觉行换行会让 UAX #29 在段落内部强制分句，句子不必触边）。
     // 网页里整块的段落既不含换行、句子也不贴边，不会进入第二轮
     match &first {
-        Ok((SentenceCapture::Expanded(sentence), has_line_break, touched_edge))
+        Ok((SentenceCapture::Expanded { sentence, .. }, has_line_break, touched_edge))
             if looks_truncated(sentence) && (*touched_edge || *has_line_break) => {}
         Ok((capture, _, _)) => return Ok((clone_capture(capture), word.to_string())),
         Err(_) => {}
@@ -771,15 +825,17 @@ fn find_sentence_for_marker_range(
         {
             Ok((capture, _, touched_edge)) => {
                 let truncated = touched_edge
-                    && matches!(&capture, SentenceCapture::Expanded(s) if looks_truncated(s));
+                    && matches!(&capture, SentenceCapture::Expanded { sentence, .. } if looks_truncated(sentence));
                 log::info!(
                     "expanded the context by {lines} line(s) on each side, sentence still \
                      looks truncated: {truncated}"
                 );
                 let capture = match capture {
-                    SentenceCapture::Expanded(text) => {
-                        SentenceCapture::Expanded(collapse_whitespace(&text))
-                    }
+                    // 折叠空白会改写句子，原偏移作废（前端回退到按字符串匹配）
+                    SentenceCapture::Expanded { sentence, .. } => SentenceCapture::Expanded {
+                        sentence: collapse_whitespace(&sentence),
+                        word_offset: None,
+                    },
                     SentenceCapture::SelectionAsIs(text) => {
                         SentenceCapture::SelectionAsIs(collapse_whitespace(&text))
                     }
@@ -804,7 +860,13 @@ fn find_sentence_for_marker_range(
 
 fn clone_capture(capture: &SentenceCapture) -> SentenceCapture {
     return match capture {
-        SentenceCapture::Expanded(text) => SentenceCapture::Expanded(text.clone()),
+        SentenceCapture::Expanded {
+            sentence,
+            word_offset,
+        } => SentenceCapture::Expanded {
+            sentence: sentence.clone(),
+            word_offset: *word_offset,
+        },
         SentenceCapture::SelectionAsIs(text) => SentenceCapture::SelectionAsIs(text.clone()),
     };
 }
@@ -900,7 +962,10 @@ fn context_from_word_and_element(
     word: &str,
 ) -> SelectedContext {
     let context = match find_sentence_for_word_by_ax(element, word) {
-        Ok(SentenceCapture::Expanded(sentence)) => {
+        Ok(SentenceCapture::Expanded {
+            sentence,
+            word_offset,
+        }) => {
             // 范围链路的上下文可能带视觉行硬换行（Chrome 的 PDF 查看器：同时提供
             // AXSelectedText 与 marker 范围，但 AXStringForRange 的文本按行给出），
             // UAX #29 在换行处强制分句，句子被切成碎片。看起来被截断、且元素支持
@@ -913,9 +978,14 @@ fn context_from_word_and_element(
             SelectedContext {
                 text: sentence,
                 word: Some(word.trim().to_string()),
+                word_offset,
             }
         }
-        Ok(SentenceCapture::SelectionAsIs(text)) => SelectedContext { text, word: None },
+        Ok(SentenceCapture::SelectionAsIs(text)) => SelectedContext {
+            text,
+            word: None,
+            word_offset: None,
+        },
         Err(error) => {
             // 范围链路失败。PDFKit（Preview、Safari 的 PDF 查看器）不暴露选区位置，
             // 尝试用整页文本匹配选中词来定位；仍失败则降级为现有 AX 成功路径的语义
@@ -930,14 +1000,17 @@ fn context_from_word_and_element(
                     SelectedContext {
                         text: word.to_string(),
                         word: None,
+                        word_offset: None,
                     }
                 }
             }
         }
     };
+    let (text, word_offset) = strip_text_artifacts_with_offset(&context.text, context.word_offset);
     return SelectedContext {
-        text: strip_text_artifacts(&context.text),
+        text,
         word: context.word.map(|word| strip_text_artifacts(&word)),
+        word_offset,
     };
 }
 
@@ -949,13 +1022,21 @@ fn refine_truncated_with_markers(
 ) -> Option<SelectedContext> {
     copy_element_attribute_by_ax(element, ax_ffi::SELECTED_TEXT_MARKER_RANGE_ATTRIBUTE).ok()?;
     return match find_sentence_for_marker_selection(element, word) {
-        Ok((SentenceCapture::Expanded(sentence), word)) if !looks_truncated(&sentence) => {
+        Ok((
+            SentenceCapture::Expanded {
+                sentence,
+                word_offset,
+            },
+            capture_word,
+        )) if !looks_truncated(&sentence) => {
             log::info!(
                 "the range chain's sentence looked truncated, refined via the text marker API"
             );
+            let (text, word_offset) = strip_text_artifacts_with_offset(&sentence, word_offset);
             Some(SelectedContext {
-                text: strip_text_artifacts(&sentence),
-                word: Some(strip_text_artifacts(word.trim())),
+                text,
+                word: Some(strip_text_artifacts(capture_word.trim())),
+                word_offset,
             })
         }
         _ => None,
@@ -1394,11 +1475,19 @@ fn capture_pdf_occurrence(page: &[u16], start: usize, end: usize) -> Option<Sele
         false,
     )?;
     return Some(match capture {
-        SentenceCapture::Expanded(sentence) => SelectedContext {
+        SentenceCapture::Expanded {
+            sentence,
+            word_offset,
+        } => SelectedContext {
             text: sentence,
             word: Some(word.trim().to_string()),
+            word_offset,
         },
-        SentenceCapture::SelectionAsIs(text) => SelectedContext { text, word: None },
+        SentenceCapture::SelectionAsIs(text) => SelectedContext {
+            text,
+            word: None,
+            word_offset: None,
+        },
     });
 }
 
@@ -1889,8 +1978,57 @@ mod tests {
     use super::{
         find_element_with_selection_by_ax, get_focused_ui_element_by_ax,
         get_selected_context_by_ax, get_selected_text_by_ax, parse_applescript_output,
-        APPLE_SCRIPT,
+        strip_text_artifacts_with_offset, APPLE_SCRIPT,
     };
+
+    /// 去伪影的偏移保真版本：**文本完整保留**（只删伪影），偏移随之前移；
+    /// 偏移缺失时原样去伪影，落在代理对中间时偏移作废。
+    /// 回归：早期实现在到达偏移处 break，把句子的后半段截掉了（选中 design 只录入 We）
+    #[test]
+    fn strip_artifacts_keeps_the_whole_text() {
+        let sentence = "We design a Transformer-based encoder-decoder model.";
+        assert_eq!(
+            strip_text_artifacts_with_offset(sentence, Some(3)),
+            (sentence.to_string(), Some(3))
+        );
+        assert_eq!(
+            strip_text_artifacts_with_offset(sentence, None),
+            (sentence.to_string(), None)
+        );
+        // 偏移在词尾（句子末尾）也完整保留文本
+        let tail = sentence.encode_utf16().count();
+        assert_eq!(
+            strip_text_artifacts_with_offset(sentence, Some(tail)),
+            (sentence.to_string(), Some(tail))
+        );
+    }
+
+    /// 去伪影时偏移跟随：词前的软连字符被删掉后，偏移要前移一位
+    #[test]
+    fn strip_artifacts_maps_offset_past_removed_chars() {
+        let text = "per\u{AD}centage improves.";
+        // "per" + 软连字符 + "centage " = 12 个 UTF-16 码元；去掉软连字符后落在 11
+        let offset = "per\u{AD}centage ".encode_utf16().count();
+        assert_eq!(offset, 12);
+        assert_eq!(
+            strip_text_artifacts_with_offset(text, Some(offset)),
+            ("percentage improves.".to_string(), Some(11))
+        );
+    }
+
+    /// 偏移落在代理对中间：映射作废，但文本仍完整返回
+    #[test]
+    fn strip_artifacts_rejects_offset_inside_surrogate_pair() {
+        let text = "say 😀 hi";
+        assert_eq!(
+            strip_text_artifacts_with_offset(text, Some(5)),
+            (text.to_string(), None)
+        );
+        assert_eq!(
+            strip_text_artifacts_with_offset(text, Some(4)),
+            (text.to_string(), Some(4))
+        );
+    }
 
     /// AppleScript 输出协议：成功取文本、未变按触发语义分流、协议外输出报错
     #[test]
@@ -2221,14 +2359,16 @@ mod tests {
         let (broken, _) =
             capture_in_context(raw, "abundant", &[offset as isize], 1, false).unwrap();
         match broken {
-            SentenceCapture::Expanded(s) => assert!(!s.contains("The first thing"), "{s:?}"),
+            SentenceCapture::Expanded { sentence, .. } => {
+                assert!(!sentence.contains("The first thing"), "{sentence:?}")
+            }
             _ => panic!("expected Expanded"),
         }
         let (capture, _) =
             capture_in_context(&flat, "abundant", &[offset as isize], 1, false).unwrap();
         match capture {
-            SentenceCapture::Expanded(s) => assert_eq!(
-                s,
+            SentenceCapture::Expanded { sentence, .. } => assert_eq!(
+                sentence,
                 "The first thing to build a model is to  prepare inputs with abundant information, such as User features  include user ID and other user information."
             ),
             _ => panic!("expected Expanded"),

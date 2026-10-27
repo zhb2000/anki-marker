@@ -49,7 +49,7 @@ pub fn get_selected_text() -> Result<String, String> {
         Ok(text) if !text.trim().is_empty() => {
             // UIA 拿到文本：仍经剪贴板调和（选区漂移/撞错控件的修正；
             // 调和失败即剪贴板未变时原样返回 UIA 结果）
-            return Ok(reconcile_with_primary(text, None, copy_via_ctrl_c(true).ok()).text);
+            return Ok(reconcile_with_primary(text, None, None, copy_via_ctrl_c(true).ok()).text);
         }
         Ok(_) => {
             // UIA “成功”但为空：无法区分“真没选”与“应用不暴露选区”（如 VSCode），
@@ -80,12 +80,20 @@ pub fn get_selected_context(
     callbacks: RetryCallbacks,
 ) -> Result<SelectedContext, String> {
     if !word_to_sentence {
-        return get_selected_text().map(|text| SelectedContext { text, word: None });
+        return get_selected_text().map(|text| SelectedContext {
+            text,
+            word: None,
+            word_offset: None,
+        });
     }
     match uia_selected_context() {
         Ok(context) if !context.text.trim().is_empty() => {
-            let reconciled =
-                reconcile_with_primary(context.text, context.word, copy_via_ctrl_c(true).ok());
+            let reconciled = reconcile_with_primary(
+                context.text,
+                context.word,
+                context.word_offset,
+                copy_via_ctrl_c(true).ok(),
+            );
             log::info!("capture via UIA: {}", describe_context(&reconciled));
             return Ok(reconciled);
         }
@@ -97,7 +105,11 @@ pub fn get_selected_context(
                 "UIA path returned empty selected text (no selection or the app does not \
                  expose its selection via UIA), falling back to simulated Ctrl+C"
             );
-            return copy_via_ctrl_c(true).map(|text| SelectedContext { text, word: None });
+            return copy_via_ctrl_c(true).map(|text| SelectedContext {
+                text,
+                word: None,
+                word_offset: None,
+            });
         }
         Err(error) => {
             // UIA 失败：立即回退 Ctrl+C 保证录入不阻塞（严格模式：剪贴板不变 =
@@ -123,8 +135,11 @@ pub fn get_selected_context(
                 log::info!("no capture target window, skipping the background UIA selection retry");
             }
             log::warn!("UIA path failed, falling back to simulated Ctrl+C: {error}");
-            let context =
-                copy_via_ctrl_c(false).map(|text| SelectedContext { text, word: None })?;
+            let context = copy_via_ctrl_c(false).map(|text| SelectedContext {
+                text,
+                word: None,
+                word_offset: None,
+            })?;
             log::info!(
                 "capture via simulated Ctrl+C: {}",
                 describe_context(&context)
@@ -298,20 +313,30 @@ fn context_from_range(range: &IUIAutomationTextRange) -> Result<SelectedContext,
         return Ok(SelectedContext {
             text: word,
             word: None,
+            word_offset: None,
         });
     }
     return Ok(match find_sentence_for_word(range, &word) {
-        Ok(SentenceCapture::Expanded(sentence)) => SelectedContext {
+        Ok(SentenceCapture::Expanded {
+            sentence,
+            word_offset,
+        }) => SelectedContext {
             text: sentence,
             word: Some(word.trim().to_string()),
+            word_offset,
         },
-        Ok(SentenceCapture::SelectionAsIs(text)) => SelectedContext { text, word: None },
+        Ok(SentenceCapture::SelectionAsIs(text)) => SelectedContext {
+            text,
+            word: None,
+            word_offset: None,
+        },
         Err(error) => {
             // 已拿到词：取句失败不致命，降级为仅录入词原文
             log::warn!("failed to extract sentence for the selected word: {error}");
             SelectedContext {
                 text: word,
                 word: None,
+                word_offset: None,
             }
         }
     });

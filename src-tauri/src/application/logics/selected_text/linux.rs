@@ -64,7 +64,11 @@ pub fn get_selected_context(
     _callbacks: RetryCallbacks,
 ) -> Result<SelectedContext, String> {
     if !word_to_sentence {
-        return get_selected_text().map(|text| SelectedContext { text, word: None });
+        return get_selected_text().map(|text| SelectedContext {
+            text,
+            word: None,
+            word_offset: None,
+        });
     }
     match tauri::async_runtime::block_on(atspi_selected_context(true)) {
         Ok(context) if !context.text.trim().is_empty() => return Ok(context),
@@ -78,7 +82,11 @@ pub fn get_selected_context(
             log::warn!("AT-SPI path failed, falling back to the PRIMARY selection: {error}");
         }
     }
-    return primary_selection_fallback().map(|text| SelectedContext { text, word: None });
+    return primary_selection_fallback().map(|text| SelectedContext {
+        text,
+        word: None,
+        word_offset: None,
+    });
 }
 
 /// 回退：读 PRIMARY 选区（Linux 上选中文本天然进入 PRIMARY，只读不改剪贴板）。
@@ -110,26 +118,37 @@ async fn atspi_selected_context(word_to_sentence: bool) -> Result<SelectedContex
         return Ok(SelectedContext {
             text: word,
             word: None,
+            word_offset: None,
         });
     }
     if !word_to_sentence {
         return Ok(SelectedContext {
             text: word,
             word: None,
+            word_offset: None,
         });
     }
     return Ok(match find_sentence_for_word(&selection, &word).await {
-        Ok(SentenceCapture::Expanded(sentence)) => SelectedContext {
+        Ok(SentenceCapture::Expanded {
+            sentence,
+            word_offset,
+        }) => SelectedContext {
             text: sentence,
             word: Some(word.trim().to_string()),
+            word_offset,
         },
-        Ok(SentenceCapture::SelectionAsIs(text)) => SelectedContext { text, word: None },
+        Ok(SentenceCapture::SelectionAsIs(text)) => SelectedContext {
+            text,
+            word: None,
+            word_offset: None,
+        },
         Err(error) => {
             // 已拿到词：取句失败不致命，降级为仅录入词原文
             log::warn!("failed to extract sentence for the selected word: {error}");
             SelectedContext {
                 text: word,
                 word: None,
+                word_offset: None,
             }
         }
     });

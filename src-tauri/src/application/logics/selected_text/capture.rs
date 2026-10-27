@@ -37,8 +37,14 @@ pub fn describe_context(context: &SelectedContext) -> String {
 /// 取句结果：单句时为用户所选词扩展出的整句；用户手动跨句选择时为其所选原文。
 #[derive(Debug)]
 pub enum SentenceCapture {
-    /// 选区落在单个句子内，已扩展为整句（前端可预选命中的单词）
-    Expanded(String),
+    /// 选区落在单个句子内，已扩展为整句（前端可预选命中的单词）。
+    /// `word_offset` 为所选词在该句中的 UTF-16 起始偏移（相对 trim 后的句子）：
+    /// 同一单词在句中多次出现时，前端据此标记真正被选中的那一处——按字符串
+    /// 匹配只能取第一处，会标错位置。
+    Expanded {
+        sentence: String,
+        word_offset: Option<usize>,
+    },
     /// 选区横跨多个句子：只扩展、不丢弃——原样录入用户所选文本（不做单词预选）
     SelectionAsIs(String),
 }
@@ -101,7 +107,28 @@ pub fn capture_in_context(
         return None;
     }
     let touched_edge = (sent_start == 0 && window_loc > 0) || sent_end == context.len();
-    return Some((SentenceCapture::Expanded(sentence), touched_edge));
+    // 所选词在句子中的 UTF-16 偏移：句子的字节区间已知，减去句子 trim 掉的前缀，
+    // 再加上词自身 trim 掉的前导空白（锚点定位的是原始 word）。任一步下溢即置 None，
+    // 由前端回退到按字符串匹配。
+    let raw_sentence = &context[sent_start..sent_end];
+    let lead_trim = raw_sentence.len() - raw_sentence.trim_start().len();
+    let word_lead = word.len() - word.trim_start().len();
+    let word_offset = context[..sent_start]
+        .encode_utf16()
+        .count()
+        .checked_add(raw_sentence[..lead_trim].encode_utf16().count())
+        .and_then(|sentence_start| {
+            sel_start_utf16
+                .checked_add(word[..word_lead].encode_utf16().count())
+                .and_then(|start| start.checked_sub(sentence_start))
+        });
+    return Some((
+        SentenceCapture::Expanded {
+            sentence,
+            word_offset,
+        },
+        touched_edge,
+    ));
 }
 
 /// 在上下文中定位所选文本的 UTF-16 起点（锚点探测，校验门控）。
@@ -189,17 +216,23 @@ pub fn char_offset_to_utf16(s: &str, char_offset: usize) -> Option<usize> {
 pub fn reconcile_with_primary(
     text: String,
     word: Option<String>,
+    word_offset: Option<usize>,
     primary: Option<String>,
 ) -> SelectedContext {
     let Some(primary) = primary
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty())
     else {
-        return SelectedContext { text, word };
+        return SelectedContext {
+            text,
+            word,
+            word_offset,
+        };
     };
     return match word {
         Some(platform_word) if text.contains(&primary) => {
-            if platform_word.trim() != primary {
+            let replaced = platform_word.trim() != primary;
+            if replaced {
                 // 词漂移但句子正确：替换为权威词（Edge PDF 文本层错位场景）
                 log::info!(
                     "capture reconciled with the clipboard: word {:?} -> {:?}",
@@ -210,6 +243,8 @@ pub fn reconcile_with_primary(
             SelectedContext {
                 text,
                 word: Some(primary),
+                // 词被替换时原偏移指向的是漂移前的词，作废；词未变则偏移继续有效
+                word_offset: if replaced { None } else { word_offset },
             }
         }
         Some(platform_word) => {
@@ -223,11 +258,13 @@ pub fn reconcile_with_primary(
             SelectedContext {
                 text: primary,
                 word: None,
+                word_offset: None,
             }
         }
         None => SelectedContext {
             text: primary,
             word: None,
+            word_offset: None,
         },
     };
 }
@@ -320,13 +357,56 @@ mod tests {
             capture_in_context(context, "fox", &[5000 - 4000, 5000, 0], 4000, true)
                 .expect("should capture");
         match capture {
-            SentenceCapture::Expanded(sentence) => {
+            SentenceCapture::Expanded {
+                sentence,
+                word_offset,
+            } => {
                 assert_eq!(sentence, "The target word is fox.");
+                // "fox" 在句中的 UTF-16 偏移（"The target word is " 共 19 个码元）
+                assert_eq!(word_offset, Some(19));
             }
             _ => panic!("expected Expanded"),
         }
         // 句子终点==上下文终点 → 触边（调用方会扩大窗口重试一次）
         assert!(touched_edge);
+    }
+
+    /// 偏移区分句中重复出现的同一单词：选中第二次出现时偏移指向第二次（字符串匹配只能取第一处）
+    #[test]
+    fn word_offset_picks_the_selected_occurrence() {
+        let context = "The encoder runs. The encoder stops.";
+        let second = context.rfind("encoder").expect("two occurrences");
+        let sel_utf16 = context[..second].encode_utf16().count();
+        let (capture, _) = capture_in_context(context, "encoder", &[sel_utf16 as isize], 0, false)
+            .expect("should capture");
+        match capture {
+            SentenceCapture::Expanded {
+                sentence,
+                word_offset,
+            } => {
+                assert_eq!(sentence, "The encoder stops.");
+                assert_eq!(word_offset, Some(4));
+            }
+            _ => panic!("expected Expanded"),
+        }
+    }
+
+    /// 偏移以 trim 后的句子为基准：句子带前导空白时仍指向词的实际位置
+    #[test]
+    fn word_offset_survives_trim() {
+        let context = "  Hello world.  ";
+        let (capture, _) =
+            capture_in_context(context, "world", &[8], 0, true).expect("should capture");
+        match capture {
+            SentenceCapture::Expanded {
+                sentence,
+                word_offset,
+            } => {
+                assert_eq!(sentence, "Hello world.");
+                assert_eq!(word_offset, Some(6));
+            }
+            _ => panic!("expected Expanded"),
+        }
     }
 
     /// 跨句选择保留原文（只扩展、不丢弃），且不触发触边重试
@@ -363,15 +443,19 @@ mod tests {
         let reconciled = reconcile_with_primary(
             "without loss of reconstruction quality.".to_string(),
             Some("onstruction qu".to_string()),
+            Some(5),
             Some("reconstruction".to_string()),
         );
         assert_eq!(reconciled.text, "without loss of reconstruction quality.");
         assert_eq!(reconciled.word.as_deref(), Some("reconstruction"));
+        // 词被权威词替换：原偏移指向漂移前的词，作废
+        assert_eq!(reconciled.word_offset, None);
 
         // 句子不含权威词（撞错控件/漂移越界）：降级为仅录入权威文本
         let reconciled = reconcile_with_primary(
             "LiGameAcademy/.github".to_string(),
             Some("ademy".to_string()),
+            Some(0),
             Some("reconstruction".to_string()),
         );
         assert_eq!(reconciled.text, "reconstruction");
@@ -381,21 +465,26 @@ mod tests {
         let reconciled = reconcile_with_primary(
             "the word is here.".to_string(),
             Some("word".to_string()),
+            Some(9),
             Some("word".to_string()),
         );
         assert_eq!(reconciled.text, "the word is here.");
         assert_eq!(reconciled.word.as_deref(), Some("word"));
+        // 词与句子都未变：偏移继续有效
+        assert_eq!(reconciled.word_offset, Some(9));
 
         // 无权威文本（剪贴板未变/读失败）：原样返回平台结果
         let reconciled = reconcile_with_primary(
             "a sentence.".to_string(),
             Some("sentence".to_string()),
+            Some(2),
             None,
         );
         assert_eq!(reconciled.text, "a sentence.");
         assert_eq!(reconciled.word.as_deref(), Some("sentence"));
         let reconciled = reconcile_with_primary(
             "onstruction qu".to_string(),
+            None,
             None,
             Some("  ".to_string()), // 空白视为无权威
         );
@@ -404,6 +493,7 @@ mod tests {
         // 未取句（降级/原样录入）：以权威文本为准
         let reconciled = reconcile_with_primary(
             "onstruction qu".to_string(),
+            None,
             None,
             Some("reconstruction".to_string()),
         );

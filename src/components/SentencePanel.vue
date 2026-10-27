@@ -18,10 +18,11 @@ const props = defineProps({
 const emit = defineEmits<{
     /** 将第 index 个词元的标记状态置为 value（tokens 的唯一写入方在父组件） */
     mark: [index: number, value: boolean];
-    /** 拖刷手势开始：父组件应抑制逐词触发的搜索 */
-    'paint-start': [];
-    /** 拖刷手势结束：父组件应按最终标记状态统一提交一次搜索 */
-    'paint-end': [];
+    /**
+     * 用户标记手势结束（单击松手、拖刷松手、Shift 区间松开）：父组件此时把当前标记
+     * 作为一次用户输入（快送）写入查询。程序化标记不会触发本事件
+     */
+    commit: [];
 }>();
 
 /** 拖刷手势进行中 */
@@ -87,23 +88,30 @@ function removeWindowListeners(): void {
     window.removeEventListener('blur', onWindowBlur);
 }
 
-function endPainting(): void {
+/**
+ * 结束拖刷手势。commit 区分收尾原因：用户松开或窗口失焦属于手势完成，应上行 commit
+ * 让父组件快送查询；分词被整体替换时标记不是用户写的，只收尾不上行，否则程序化标记
+ * 会被当成用户查询。
+ */
+function endPainting(commit: boolean): void {
     if (!painting.value) {
         return;
     }
     painting.value = false;
     dragStarted.value = false;
     removeWindowListeners();
-    emit('paint-end');
+    if (commit) {
+        emit('commit');
+    }
 }
 
 function onWindowMouseup(): void {
-    endPainting();
+    endPainting(true);
 }
 
 function onWindowBlur(): void {
-    // 拖刷中切走窗口导致 mouseup 丢失时收尾，避免手势卡在抑制搜索的状态
-    endPainting();
+    // 拖刷中切走窗口导致 mouseup 丢失时收尾：标记已随手势落下，按手势完成快送一次查询
+    endPainting(true);
 }
 
 /**
@@ -118,8 +126,8 @@ function onPress(index: number, event: MouseEvent): void {
     }
     event.preventDefault();
     if (painting.value) {
-        // 上一个手势未正常结束（如在窗口外释放）时先收尾
-        endPainting();
+        // 上一个手势未正常结束时先收尾：新手势会重新按下，其结果在松手时统一快送
+        endPainting(false);
     }
     if (event.shiftKey) {
         const value = !props.tokens[index].marked;
@@ -129,6 +137,8 @@ function onPress(index: number, event: MouseEvent): void {
             emit('mark', index, value);
         }
         lastPressIndex = index;
+        // Shift 区间标记不看鼠标松开，标记落下即完成一次手势
+        emit('commit');
         return;
     }
     paintValue = !props.tokens[index].marked;
@@ -139,7 +149,6 @@ function onPress(index: number, event: MouseEvent): void {
     lastPressIndex = index;
     painting.value = true;
     addWindowListeners();
-    emit('paint-start');
 }
 
 /**
@@ -159,9 +168,12 @@ function onEnter(index: number): void {
     }
 }
 
-/** 父组件整体替换分词（划词录入、粘贴等）时收尾进行中的手势：区间基线快照与词元索引已失效 */
+/**
+ * 父组件整体替换分词（划词录入、粘贴等）时收尾进行中的手势：区间基线快照与词元索引已失效。
+ * 这类标记来自程序替换而非用户手势，只收尾不上行 commit，避免把新词的标记当成用户查询
+ */
 watch(() => props.tokens, () => {
-    endPainting();
+    endPainting(false);
 });
 
 onBeforeUnmount(removeWindowListeners);
