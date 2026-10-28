@@ -73,9 +73,34 @@ const searchText = ref('');
  */
 let userTouched = false;
 
+/**
+ * 本次 searchText 变化的发起方。手打时查询词是暂定值——词典跟随输入更新，AI 优选等停手；
+ * 显式写入（标记快送、划词捕获）表示用户已经确认了这个词，立即连 AI 一起查
+ */
+let queryOrigin: 'typing' | 'explicit' = 'typing';
+
+/**
+ * 以“显式”语义写入搜索框（标记快送、划词捕获）：值真变了就走 watcher 立即查询 + AI；
+ * 值没变时 watcher 不会触发，但语境可能已变（如又划到同一个词），直接按当前语境重跑一次
+ */
+function setQueryExplicitly(text: string): void {
+    if (searchText.value === text) {
+        void submitSearch();
+        return;
+    }
+    queryOrigin = 'explicit';
+    searchText.value = text;
+}
+
 /** 记一次用户改动（输入查询、编辑句子）：迟到的补取结果不再覆盖工作区 */
 function onUserEdit(): void {
     userTouched = true;
+}
+
+/** 编辑句子框的输入：既算用户改动，也标记本次编辑会话确实改过句子 */
+function onSentenceEdit(): void {
+    userTouched = true;
+    editSentenceDirty = true;
 }
 /** 每本字典中的搜索结果 */
 const wordItems = reactive({
@@ -115,10 +140,10 @@ const selectedPronunciation = ref<'en' | 'us'>('us');
  */
 function onMarksCommitted(): void {
     userTouched = true;
-    searchText.value = tokens.value
+    setQueryExplicitly(tokens.value
         .filter(token => token.marked)
         .map(token => token.token)
-        .join(' ');
+        .join(' '));
 }
 
 /** SentencePanel 上报的标记写入：tokens 的写入收敛于此（整体替换与编辑重建除外）。标记不触发查询，查询只在手势结束时快送一次 */
@@ -141,13 +166,21 @@ watch(selectedDict, async newSelected => {
     }
 });
 
-/** 搜索框中的文字改变时，搜索新单词 */
+/** 搜索框中的文字改变时：手打走“节流词典 + 防抖 AI”，显式写入立即连 AI 一起查 */
 watch(searchText, () => {
+    if (queryOrigin === 'explicit') {
+        queryOrigin = 'typing';
+        // 显式动作优先：取消手打期间待发的 AI 防抖，避免它在新查询发起途中插队
+        debouncedAiPick.cancel();
+        void submitSearch();
+        return;
+    }
     if (selectedDict.value === 'youdao') {
         throttledYoudaoSearch();
     } else {
         throttledSearch();
     }
+    debouncedAiPick(searchText.value);
 });
 
 /** 保存所选的字典 */
@@ -160,10 +193,27 @@ watch(selectedPronunciation, newPronunciation => {
     preference.set('selectedPronunciation', newPronunciation);
 });
 
-/** 输入框内容改变时调用节流版搜索函数，避免过于频繁地搜索 */
-const throttledSearch = utils.throttle(submitSearch, 200);
+/** 手打触发 AI 优选的停顿时长：业内 300–500ms 是“感知即时”的甜点，LLM 更贵故取上限 */
+const AI_PICK_TYPING_DEBOUNCE_MS = 500;
+/** 手打触发 AI 优选的最短查询长度：单个字符没有优选意义（显式动作不受此限） */
+const AI_PICK_MIN_TYPED_LENGTH = 2;
 
-const throttledYoudaoSearch = utils.throttle(submitSearch, 400);
+/** 手打时只查词典（便宜、可随输入更新），节流避免过于频繁的请求 */
+const throttledSearch = utils.throttle(searchDictionary, 200);
+
+const throttledYoudaoSearch = utils.throttle(searchDictionary, 400);
+
+/**
+ * 手打时的 AI 优选防抖：停手 `AI_PICK_TYPING_DEBOUNCE_MS` 才发起。
+ * AI 是昂贵且慢的调用，而输入过程中的半截词结果必然作废——“只有最后一次输入有意义”
+ * 正是 debounce 的语义（throttle 会让中间每一次都发）。显式动作不走这条路径，见 setQueryExplicitly。
+ */
+const debouncedAiPick = utils.debounce((word: string) => {
+    if (word.trim().length < AI_PICK_MIN_TYPED_LENGTH) {
+        return;
+    }
+    void maybeStartAiPick(word);
+}, AI_PICK_TYPING_DEBOUNCE_MS);
 
 /**
  * 搜索单词，并用搜索结果更新 wordItems。
@@ -253,6 +303,11 @@ const editPlaceholder = computed(() => {
  * 为基准重建，尽量保留已标记单词。整体替换句子（划词录入、粘贴）会作废草稿。
  */
 let editBaselineTokens: { token: string; marked: boolean; }[] | null = null;
+/**
+ * 本次编辑会话中句子是否被改动过：确认编辑时据此决定要不要按新语境重取释义。
+ * 用“改过”而不是“前后文本不同”——改完又改回去时文本相同，但旧释义已被清空，仍应恢复
+ */
+let editSentenceDirty = false;
 
 /**
  * 程序化整体替换句子（划词录入、粘贴、dev 测试句等）：
@@ -261,6 +316,7 @@ let editBaselineTokens: { token: string; marked: boolean; }[] | null = null;
  */
 function replaceSentence(text: string): void {
     editBaselineTokens = null;
+    editSentenceDirty = false;
     if (sentence.value !== text) {
         sentence.value = text;
     }
@@ -273,7 +329,7 @@ async function pasteToEdit() {
         // 粘贴属于整体替换句子：分词同步重建为全新状态，不保留旧的标记，编辑草稿一并作废；
         // 旧句子的查询随之作废（查询不由标记派生，需显式清空）
         replaceSentence(text.trim());
-        searchText.value = '';
+        setQueryExplicitly('');
         userTouched = true;
         if (showEdit.value) {
             await changeEditStatus();
@@ -284,8 +340,9 @@ async function pasteToEdit() {
 async function changeEditStatus() {
     showEdit.value = !showEdit.value;
     if (showEdit.value) {
-        // 进入编辑模式：快照当前分词作为基线，编辑期间不再重建分词
+        // 进入编辑模式：快照当前分词作为基线，编辑期间不再重建分词；清空“本次编辑是否改过句子”
         editBaselineTokens = tokens.value.map(({ token, marked }) => ({ token, marked }));
+        editSentenceDirty = false;
         await nextTick();
         editTextArea.value?.focus();
     } else {
@@ -294,7 +351,14 @@ async function changeEditStatus() {
         if (editBaselineTokens != null) {
             tokens.value = utils.string.rebuildTokensPreservingMarks(editBaselineTokens, sentence.value);
             editBaselineTokens = null;
+            // 句子改过 = 语境变了：按同一个查询词重新取释义。查询由用户书写，编辑句子不改写它，
+            // 但 AI 优选的缓存 key 含句子，会据此重新请求（同句同词命中结果缓存，不重复拉取）。
+            // 没改动过则什么都不做，避免白白消耗一次 LLM 请求
+            if (editSentenceDirty && searchText.value.trim().length > 0) {
+                void submitSearch();
+            }
         }
+        editSentenceDirty = false;
     }
 }
 
@@ -351,6 +415,8 @@ const aiPickItem = computed(() => {
  * 保证候选与界面条目索引对齐、切 tab 即时）并发起 AI 优选；否则中止遗留请求并重置为 idle。
  */
 async function maybeStartAiPick(word: string) {
+    // 显式发起（或本次防抖已到期）时取消待发的防抖，避免停手计时到期再发一次
+    debouncedAiPick.cancel();
     const trimmed = word.trim();
     const llmConfig: LlmRequestConfig = {
         baseUrl: config.llmBaseUrl,
@@ -420,7 +486,12 @@ async function maybeStartAiPick(word: string) {
     }
 }
 
-/** 提交一次有效搜索：更新当前词典的搜索结果，并按需触发 AI 优选 */
+/** 只查当前词典，不触发 AI 优选：手打路径专用（AI 由 debouncedAiPick 另行发起） */
+async function searchDictionary(): Promise<void> {
+    await searchAndUpdate(searchText.value, selectedDict.value);
+}
+
+/** 提交一次有效搜索：更新当前词典的搜索结果并立即触发 AI 优选（回车、查询按钮等显式动作） */
 async function submitSearch() {
     await searchAndUpdate(searchText.value, selectedDict.value);
     void maybeStartAiPick(searchText.value);
@@ -511,14 +582,14 @@ async function applyCapturedSentence(payload: CapturedSentencePayload) {
         // 捕获词是查询的权威来源，直接写入搜索框；分词面板的预选只是位置提示，
         // 分词粒度与选区不一致时（如选中的是 encoder-decoder 里的 encoder）
         // 标记会落在整个复合词元上，与查询不等价是允许的
-        searchText.value = word;
+        setQueryExplicitly(word);
         // 偏移以载荷原文为基准：文本被 trim 改短时偏移不再可信
         const wordOffset = trimmed.length === payload.text.length ? payload.wordOffset : null;
         // replaceSentence 已同步重建分词，可直接标记命中的单词
         markCapturedWord(word, wordOffset, trimmed);
     } else {
         // 未命中单词（如手动跨句选择）：句子已整体替换，旧查询一并清空
-        searchText.value = '';
+        setQueryExplicitly('');
     }
     userTouched = false;
 }
@@ -954,7 +1025,7 @@ onBeforeMount(async () => {
         <div class="sentence-container">
             <SentencePanel :tokens="tokens" v-if="!showEdit" @mark="onMarkToken" @commit="onMarksCommitted" />
             <textarea class="fluent-textarea" v-model.trim="sentence" v-if="showEdit" ref="editTextArea"
-                :placeholder="editPlaceholder" @input="onUserEdit" @keydown="handleEditTextAreaKeydown"></textarea>
+                :placeholder="editPlaceholder" @input="onSentenceEdit" @keydown="handleEditTextAreaKeydown"></textarea>
             <SentenceCaptureRing :active="captureSettling" v-if="!showEdit" />
         </div>
         <div class="words-container">
