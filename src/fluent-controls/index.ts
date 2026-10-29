@@ -1,7 +1,8 @@
 export { useHover } from './useHover';
 export { generateUniqueId } from './generateUniqueId';
 export { HoverWrapper } from './HoverWrapper';
-export { dialog, showMessage, showConfirm, setDialogOpenListener } from './ContentDialog';
+export { dialog, showMessage, showConfirm } from './ContentDialog';
+export { setDialogDepthListener } from './dialogLayer';
 export type {
     ContentDialogKind,
     ContentDialogMessageOptions,

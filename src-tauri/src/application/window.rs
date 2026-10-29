@@ -19,9 +19,21 @@ use {
 #[cfg(target_os = "macos")]
 const MASK_ALPHA: f64 = 0x4D as f64 / 255.0;
 
-/// 遮罩态的目标混合因子：底色按 (1 − MASK_ALPHA) 压暗（smoke 为纯黑半透明，预混即等比变暗）
+/// 单层遮罩的混合因子：底色按 (1 − MASK_ALPHA) 压暗（smoke 为纯黑半透明，预混即等比变暗）
 #[cfg(target_os = "macos")]
 const MASKED_FACTOR: f64 = 1.0 - MASK_ALPHA;
+
+/// 叠层遮罩的深度上限：每层再乘一次单层因子，超过四层已接近全黑，再深没有视觉意义
+#[cfg(target_os = "macos")]
+const MAX_MASK_DEPTH: u32 = 4;
+
+/// `depth` 层对话框叠起来时的目标混合因子。
+/// 页面上的每层 FluentDialogShell 各渲染一层 smoke 遮罩，叠加后页面亮度为 (1 − alpha)^n，
+/// 标题栏用同一公式，两层确认框叠在一层更新说明上时才会继续变深，不露馅。
+#[cfg(target_os = "macos")]
+fn mask_factor_for_depth(depth: u32) -> f64 {
+    return MASKED_FACTOR.powi(depth.min(MAX_MASK_DEPTH) as i32);
+}
 
 /// 动画时长对齐 DOM 遮罩过渡（FluentDialogShell.vue 的 .fluent-dialog-enter/leave-active）：
 /// 遮罩（smoke）本体淡入与淡出均为 0.167s linear（0.25s 是容器缩放动画的时长，与本处无关）
@@ -73,15 +85,18 @@ pub fn set_window_background(window: WebviewWindow, dark: bool) {
 ///
 /// DOM 遮罩只覆盖 webview，透明标题栏露出的原生顶栏不受其影响；backgroundColor
 /// 不是 animator 可动画属性，这里用动画线程逐帧插值混合因子并派发到主线程重设，
-/// 与 DOM 遮罩的进/出场过渡对齐。前端在对话框开/关时调用
-/// （见 src/fluent-controls/ContentDialog.ts 的 setDialogOpenListener 接线）；
+/// 与 DOM 遮罩的进/出场过渡对齐。
+///
+/// `depth` 为当前打开的对话框层数（0 表示没有对话框）：页面上的每层对话框各叠一层
+/// 遮罩，标题栏按同一公式逐层加深，嵌套确认框出现时不会停在单层深度。
+/// 前端经 src/fluent-controls/dialogLayer.ts 的弹窗栈给出层数（见 logics/globals.ts 接线）；
 /// 非 macOS 平台为 no-op。
 #[tauri::command]
-pub fn set_dialog_mask(window: WebviewWindow, active: bool, dark: bool) {
+pub fn set_dialog_mask(window: WebviewWindow, depth: u32, dark: bool) {
     #[cfg(target_os = "macos")]
-    start_mask_animation(&window, active, dark);
+    start_mask_animation(&window, depth, dark);
     #[cfg(not(target_os = "macos"))]
-    let _ = (window, active, dark);
+    let _ = (window, depth, dark);
 }
 
 /// 启动遮罩因子动画：独立线程按帧间隔步进（AppKit 调用经 run_on_main_thread
@@ -89,9 +104,9 @@ pub fn set_dialog_mask(window: WebviewWindow, active: bool, dark: bool) {
 /// 读到的是最新因子。主题在动画中途切换时旧线程会以旧 dark 值播完剩余帧，
 /// 随后前端主题切换流程会以新主题色 + 当前因子重新着色，最终一致。
 #[cfg(target_os = "macos")]
-fn start_mask_animation(window: &WebviewWindow, active: bool, dark: bool) {
+fn start_mask_animation(window: &WebviewWindow, depth: u32, dark: bool) {
     let from = decode_factor(MASK_FACTOR.load(Ordering::Relaxed));
-    let to = if active { MASKED_FACTOR } else { 1.0 };
+    let to = mask_factor_for_depth(depth);
     if (to - from).abs() < 1e-9 {
         return; // 已处于目标态（重复触发），无需动画
     }
@@ -142,7 +157,6 @@ fn start_mask_animation(window: &WebviewWindow, active: bool, dark: bool) {
         }
     });
 }
-
 /// 按当前遮罩因子着色（因子由动画线程维护，未动画时为 0.0 或目标值）
 #[cfg(target_os = "macos")]
 fn apply_window_background(window: &WebviewWindow, dark: bool) {
@@ -220,5 +234,23 @@ unsafe fn sync_webview_background(view: &AnyObject, color: &NSColor, depth: u32)
     for index in 0..count {
         let subview: Retained<AnyObject> = msg_send![&subviews, objectAtIndex: index];
         sync_webview_background(&subview, color, depth - 1);
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::{mask_factor_for_depth, MAX_MASK_DEPTH};
+
+    /// 每多一层对话框，标题栏按单层遮罩因子再压一次（与 DOM 叠加遮罩一致）；深度有上限
+    #[test]
+    fn mask_factor_scales_with_depth() {
+        assert!((mask_factor_for_depth(0) - 1.0).abs() < 1e-9);
+        let one = mask_factor_for_depth(1);
+        assert!((one - 178.0 / 255.0).abs() < 1e-9);
+        assert!((mask_factor_for_depth(2) - one * one).abs() < 1e-12);
+        assert_eq!(
+            mask_factor_for_depth(9),
+            mask_factor_for_depth(MAX_MASK_DEPTH)
+        );
     }
 }

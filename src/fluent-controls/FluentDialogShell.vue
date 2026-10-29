@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onBeforeUnmount, watch } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import FluentButton from './FluentButton.vue';
+import { enterDialog, isTopDialog, leaveDialog, type DialogLayer } from './dialogLayer';
 
 /**
  * WinUI ContentDialog 风格的弹窗外壳（遮罩 + 容器 + 标题 + 底部命令区）。
@@ -33,6 +34,10 @@ const props = defineProps<{
     open: boolean;
     title: string;
     commands?: FluentDialogCommand[];
+    /** 覆盖容器宽度（CSS 长度，如 80%）；不传则用 ContentDialog 的标准宽度 */
+    width?: string;
+    /** 覆盖容器最大高度（CSS 长度，如 80vh）；不传则用 ContentDialog 的标准上限 */
+    maxHeight?: string;
 }>();
 
 const emit = defineEmits<{
@@ -42,29 +47,45 @@ const emit = defineEmits<{
     command: [key: string];
 }>();
 
+/** 本弹窗在弹窗栈中的身份与层级；未打开时为 null */
+const layer = ref<DialogLayer | null>(null);
+
 function onKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') {
-        emit('close');
+    // 只有最上层响应 Esc：嵌套时一次按键不该关掉两层
+    if (event.key !== 'Escape' || layer.value == null || !isTopDialog(layer.value.id)) {
+        return;
+    }
+    emit('close');
+}
+
+function leave(): void {
+    window.removeEventListener('keydown', onKeydown);
+    if (layer.value != null) {
+        leaveDialog(layer.value.id);
+        layer.value = null;
     }
 }
 
 watch(() => props.open, open => {
     if (open) {
+        layer.value = enterDialog();
         window.addEventListener('keydown', onKeydown);
     } else {
-        window.removeEventListener('keydown', onKeydown);
+        leave();
     }
-});
+}, { immediate: true });
 
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
+onBeforeUnmount(leave);
 </script>
 
 <template>
     <Teleport to="body">
         <Transition name="fluent-dialog">
             <!-- mousedown.self：仅点击遮罩空白处关闭，弹窗内部的点击不受影响 -->
-            <div v-if="open" class="fluent-dialog-backdrop" @mousedown.self="emit('close')">
-                <div class="fluent-dialog" role="dialog" aria-modal="true" :aria-label="title">
+            <div v-if="open" class="fluent-dialog-backdrop" :style="{ zIndex: layer?.zIndex }"
+                @mousedown.self="emit('close')">
+                <div class="fluent-dialog" role="dialog" aria-modal="true" :aria-label="title"
+                    :style="{ width, maxHeight }">
                     <div class="dialog-content">
                         <div class="dialog-title"><slot name="title-icon"></slot>{{ title }}</div>
                         <div class="dialog-body">
@@ -92,7 +113,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 .fluent-dialog-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 1000;
+    /* 层级由模板上的 :style="{ zIndex }" 给出（打开时分配，保证后打开在上） */
     display: grid;
     place-items: center;
     background-color: var(--dialog-smoke-color);

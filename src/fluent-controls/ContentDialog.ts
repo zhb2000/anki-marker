@@ -54,19 +54,6 @@ const hostState = reactive<ContentDialogHostState>({ open: false, request: null 
 const queue: ContentDialogRequest[] = [];
 let hostContainer: HTMLElement | null = null;
 
-/** 对话框开/关回调：展示开始时为 true，结算（关闭）时为 false */
-type DialogOpenListener = (open: boolean) => void;
-let dialogOpenListener: DialogOpenListener | null = null;
-
-/**
- * 注册对话框开/关回调（重复注册覆盖前一个，传 null 注销）。
- * fluent-controls 不依赖 Tauri 等宿主环境，需要随对话框开/关联动的副作用
- * （如 macOS 标题栏随遮罩变色）由宿主经此钩子接入。
- */
-export function setDialogOpenListener(listener: DialogOpenListener | null): void {
-    dialogOpenListener = listener;
-}
-
 /** 首次使用时创建宿主容器并挂载（此后复用同一实例） */
 function ensureHost(): void {
     if (hostContainer != null) {
@@ -88,7 +75,6 @@ function dequeue(): void {
     }
     hostState.request = next;
     hostState.open = true;
-    dialogOpenListener?.(true);
 }
 
 /**
@@ -101,7 +87,6 @@ function settle(key: string | null): void {
         return;
     }
     hostState.open = false;
-    dialogOpenListener?.(false);
     current.resolve(key);
     window.setTimeout(() => {
         hostState.request = null;

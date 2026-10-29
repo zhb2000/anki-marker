@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onActivated, onBeforeMount, ref } from 'vue';
-import { ElDialog, ElMessage, ElPopconfirm } from 'element-plus';
+import { ElMessage } from 'element-plus';
 import MarkdownIt from 'markdown-it';
 import 'github-markdown-css';
 import '../../assets/markdown-dark.css';
@@ -8,7 +8,14 @@ import '../../assets/markdown-dark.css';
 import * as globals from '../../logics/globals';
 import * as cfg from '../../logics/config';
 import * as anki from '../../logics/anki';
-import { FluentButton, FluentHyperlink, FluentSettingCard, dialog } from '../../fluent-controls';
+import {
+    FluentButton,
+    FluentDialogShell,
+    FluentHyperlink,
+    FluentSettingCard,
+    dialog,
+    type FluentDialogCommand,
+} from '../../fluent-controls';
 import OpenFilledSvg from '../../assets/OpenFilled.svg';
 import GitHubSvg from '../../assets/github.svg';
 import { useHighlight } from './useHighlight';
@@ -34,6 +41,26 @@ const renderedAppReleaseNote = computed(() => markdownIt.render(
     `# ${globals.latestAppName.value ?? ''}\n` +
     `${globals.latestAppBody.value ?? ''}`
 ));
+/** 更新说明弹窗的命令区：有更新时给出下载入口（默认按钮），否则只有关闭 */
+const appReleaseCommands = computed<FluentDialogCommand[]>(() => {
+    if (globals.appUpdateAvailable.value) {
+        return [
+            { key: 'download', label: '下载更新', accent: true },
+            { key: 'close', label: '关闭' },
+        ];
+    }
+    return [{ key: 'close', label: '关闭', accent: true }];
+});
+
+/** 更新说明弹窗的命令：下载走浏览器打开更新页，其余（关闭）收起弹窗 */
+function onAppReleaseCommand(key: string): void {
+    if (key === 'download') {
+        void cfg.openInBrowser(globals.latestAppHtmlURL.value);
+        return;
+    }
+    appReleaseNoteDialogVisible.value = false;
+}
+
 /** 是否正在检查应用更新 */
 const checkingAppUpdate = ref(false);
 
@@ -99,6 +126,37 @@ import TEMPLATE_RELEASE_NOTE from '../../assets/model-template-release-note.md?r
 /** 渲染后的笔记模板更新说明 */
 const renderedTemplateReleaseNote = markdownIt.render(TEMPLATE_RELEASE_NOTE);
 
+/** 模板更新说明弹窗的命令区 */
+const templateReleaseCommands: FluentDialogCommand[] = [
+    { key: 'update', label: '更新模板', accent: true },
+    { key: 'close', label: '关闭' },
+];
+
+/**
+ * 更新笔记模板前的确认：卡片与更新说明弹窗共用同一入口（原来是一处 ElPopconfirm、
+ * 一处弹窗内确认，风格与文案都不统一；统一走命令式 ContentDialog，嵌套时由
+ * dialogLayer 的计数保证标题栏遮罩不中途恢复）
+ */
+async function confirmUpdateTemplate(): Promise<void> {
+    const ok = await dialog.confirm('是否更新笔记模板？', {
+        title: '更新笔记模板',
+        okLabel: '更新',
+        cancelLabel: '取消',
+    });
+    if (ok) {
+        await handleUpdateTemplateClick();
+    }
+}
+
+/** 模板更新说明弹窗的命令：更新走确认流程，其余（关闭）收起弹窗 */
+async function onTemplateReleaseCommand(key: string): Promise<void> {
+    if (key !== 'update') {
+        templateReleaseNoteDialogVisible.value = false;
+        return;
+    }
+    await confirmUpdateTemplate();
+}
+
 async function handleUpdateTemplateClick() {
     try {
         await ankiService.updateMarkerModel(effectiveModelName.value);
@@ -162,14 +220,10 @@ onActivated(async () => {
                     @click="handleLaunchAnkiClick" accent>
                     启动 Anki
                 </FluentButton>
-                <ElPopconfirm title="是否更新笔记模板？" confirmButtonText="更新" cancelButtonText="取消" :width="180"
-                    @confirm="handleUpdateTemplateClick" v-if="globals.templateUpdateAvailable.value">
-                    <template #reference>
-                        <FluentButton :accent="true" class="small-button">
-                            更新模板
-                        </FluentButton>
-                    </template>
-                </ElPopconfirm>
+                <FluentButton :accent="true" class="small-button"
+                    v-if="globals.templateUpdateAvailable.value" @click="confirmUpdateTemplate">
+                    更新模板
+                </FluentButton>
                 <FluentHyperlink v-if="globals.templateUpdateAvailable.value"
                     style="padding: 2px 2px; cursor: default;" title="查看模板更新说明"
                     @click="templateReleaseNoteDialogVisible = true">
@@ -196,67 +250,30 @@ onActivated(async () => {
             </FluentSettingCard>
         </div>
 
-        <ElDialog v-model="appReleaseNoteDialogVisible"
-            :title="`Anki 划词助手 ${globals.latestAppVersion.value} 更新说明`" width="80%" center
-            class="release-note-dialog">
-            <div style="padding: 0px 16px 0px 16px;" class="markdown-body" v-html="renderedAppReleaseNote"></div>
-            <template #footer>
-                <div style="display: flex; align-items: center; justify-content: center;">
-                    <FluentButton :accent="true" class="small-button"
-                        v-if="globals.appUpdateAvailable.value"
-                        @click="cfg.openInBrowser(globals.latestAppHtmlURL.value)"
-                        :title="globals.latestAppHtmlURL.value">
-                        <span style="display: flex; align-items: center;">
-                            <OpenFilledSvg style="width: 16px; height: 16px; margin-right: 4px;" />
-                            <span style="padding-bottom: 2px;">下载更新</span>
-                        </span>
-                    </FluentButton>
-                    <FluentButton @click="appReleaseNoteDialogVisible = false" class="small-button">
-                        关闭
-                    </FluentButton>
-                </div>
-            </template>
-        </ElDialog>
-        <ElDialog v-model="templateReleaseNoteDialogVisible"
-            :title="`划词助手单词笔记模板 ${anki.CARD_TEMPLATE_VERSION} 更新说明`" width="80%" center
-            class="release-note-dialog">
-            <div style="padding: 0px 16px 0px 16px;" class="markdown-body" v-html="renderedTemplateReleaseNote">
-            </div>
-            <template #footer>
-                <div style="display: flex; align-items: center; justify-content: center;">
-                    <ElPopconfirm title="是否更新笔记模板？" confirmButtonText="更新" cancelButtonText="取消" :width="180"
-                        @confirm="handleUpdateTemplateClick">
-                        <template #reference>
-                            <FluentButton :accent="true" class="small-button">
-                                更新模板
-                            </FluentButton>
-                        </template>
-                    </ElPopconfirm>
-                    <FluentButton @click="templateReleaseNoteDialogVisible = false" class="small-button">
-                        关闭
-                    </FluentButton>
-                </div>
-            </template>
-        </ElDialog>
+        <FluentDialogShell :open="appReleaseNoteDialogVisible"
+            :title="`Anki 划词助手 ${globals.latestAppVersion.value} 更新说明`"
+            width="80%" max-height="80vh" :commands="appReleaseCommands"
+            @close="appReleaseNoteDialogVisible = false" @command="onAppReleaseCommand">
+            <div class="markdown-body release-note" v-html="renderedAppReleaseNote"></div>
+        </FluentDialogShell>
+        <FluentDialogShell :open="templateReleaseNoteDialogVisible"
+            :title="`划词助手单词笔记模板 ${anki.CARD_TEMPLATE_VERSION} 更新说明`"
+            width="80%" max-height="80vh" :commands="templateReleaseCommands"
+            @close="templateReleaseNoteDialogVisible = false" @command="onTemplateReleaseCommand">
+            <div class="markdown-body release-note" v-html="renderedTemplateReleaseNote"></div>
+        </FluentDialogShell>
     </div>
 </template>
 
-<style>
-/* 更新说明对话框的样式：ElDialog 渲染到 body 下，scoped 无法命中，必须保留为非 scoped 全局样式 */
-.release-note-dialog .el-dialog__body {
-    height: calc(80vh - 150px);
-    overflow: auto;
+<style scoped>
+/* 更新说明正文：可选中复制；底色透出对话框内容区（暗色下 github-markdown-css 的
+   背景变量已是 transparent，浅色显式覆盖以免出现一块与容器不同的白底） */
+.release-note {
+    background-color: transparent;
     user-select: text;
     cursor: text;
 }
 
-.release-note-dialog {
-    user-select: none;
-    cursor: default;
-}
-</style>
-
-<style scoped>
 .group-title {
     margin: 24px 0 6px 2px;
     padding: 0;

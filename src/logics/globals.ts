@@ -2,7 +2,7 @@ import { reactive, ref, watch, computed } from 'vue';
 import * as api from '../tauri-api';
 import { fetch } from '@tauri-apps/plugin-http';
 import * as semver from 'semver';
-import { dialog, setDialogOpenListener } from '../fluent-controls';
+import { dialog, setDialogDepthListener } from '../fluent-controls';
 
 import { Config, effectiveTextSetting } from './config';
 import * as anki from './anki';
@@ -416,10 +416,11 @@ export async function initAtAppStart() {
     }
     // 设置 element-plus 主题色
     setElementTheme();
-    // 对话框开/关时同步 macOS 标题栏遮罩（见 window.rs set_dialog_mask；
-    // 非 macOS / 非 Tauri 环境命令为 no-op 或调用失败，静默忽略）
-    setDialogOpenListener(open => {
-        void utils.invoke('set_dialog_mask', { active: open, dark: isDark.value }).catch(() => { /* 忽略 */ });
+    // 弹窗层数变化时同步 macOS 标题栏遮罩（见 window.rs set_dialog_mask；
+    // 非 macOS / 非 Tauri 环境命令为 no-op 或调用失败，静默忽略）。
+    // 传层数而不是布尔：页面上的每层弹窗各叠一层 smoke 遮罩，标题栏要按同样层数加深
+    setDialogDepthListener(depth => {
+        void utils.invoke('set_dialog_mask', { depth, dark: isDark.value }).catch(() => { /* 忽略 */ });
     });
     // 获取应用版本
     await initAppVersion();
