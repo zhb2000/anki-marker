@@ -12,7 +12,6 @@ import { typeAssertion } from './typing';
 import * as preference from './preference';
 import * as debug from './debug';
 import { initShortcutStatus } from './shortcut-status';
-import { setElementTheme } from './element-theme';
 import { setThemeMode, isDark } from './theme';
 
 // #region Config
@@ -414,8 +413,6 @@ export async function initAtAppStart() {
         utils.disableWebviewContextMenu();
         utils.disableWebviewKeyboardShortcuts();
     }
-    // 设置 element-plus 主题色
-    setElementTheme();
     // 弹窗层数变化时同步 macOS 标题栏遮罩（见 window.rs set_dialog_mask；
     // 非 macOS / 非 Tauri 环境命令为 no-op 或调用失败，静默忽略）。
     // 传层数而不是布尔：页面上的每层弹窗各叠一层 smoke 遮罩，标题栏要按同样层数加深

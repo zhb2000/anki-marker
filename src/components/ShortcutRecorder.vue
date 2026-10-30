@@ -142,6 +142,6 @@ const display = computed(() => {
 }
 
 .shortcut-recorder.recording {
-    color: var(--accent);
+    color: var(--accent-text);
 }
 </style>

@@ -1,5 +1,35 @@
+/*
+ * 主题色板：三层结构，改配色时按层找。
+ *
+ * 第一层 主题原语（:root / html.dark 的前半段）
+ *   随明暗切换的原始色，取自 WinUI 3 的 Common_themeresources_any.xaml
+ *   （浅色对应其 Light 字典，深色对应 Default 字典；WinUI 颜色是 #AARRGGBB，
+ *   此处已换成 CSS 的 #RRGGBBAA）。这一层只收录、不推导，出问题时能直接回源码核对。
+ *
+ * 第二层 派生层（两个主题共用的一个 :root 块）
+ *   只依赖原语的公式。强调色家族（hover / pressed / 描边）全部由 --accent 算出：
+ *   WinUI 的 AccentFillColorSecondary/Tertiary 就是“同一个强调色 90% / 80% 不透明度”，
+ *   叠加到哪个表面就随哪个表面变化，因此不需要对每个主题各写一套数值。
+ *
+ * 第三层 语义覆盖（html.dark 的后半段）
+ *   仅当两个主题的策略不同时才写，例如同一语义浅色用黑叠加、深色用白叠加。
+ */
 :root {
+    /* ───── 强调色 ───── */
+    /* Windows 11 浅色基准强调色 */
     --accent: #0067c0;
+    /* 强调色用作文字/图标时的颜色。WinUI 浅色用 SystemAccentColorDark2，
+       这里保持现有的 --accent（在窗口底色上 5.1:1，AA 正文达标），深色见 html.dark */
+    --accent-text: var(--accent);
+    /* 强调色底上的文字。WinUI 浅色字典: TextOnAccentFillColorPrimary/Secondary */
+    --control-accent-text-color: white;
+    --control-accent-text-color-active: #c2daef;
+    --control-accent-text-color-disabled: var(--control-accent-text-color-active);
+    /* 禁用态填充沿用按下态（保持既有观感；WinUI 的 AccentFillColorDisabled 是中性叠加，
+       如需完全对齐可改成 #00000037） */
+    --control-accent-background-disabled: var(--control-accent-background-active);
+
+    /* ───── 中性控件 ───── */
     --control-background: #fbfbfb;
     --control-background-hover: #f6f6f6;
     --control-background-active: #f5f5f5;
@@ -7,39 +37,44 @@
     --control-text-color: black;
     --control-text-color-active: #5d5d5d;
     --control-text-color-disabled: #9d9d9d;
-    --control-accent-background-hover: #1975c5;
-    --control-accent-background-active: #3183ca;
-    --control-accent-background-disabled: var(--control-accent-background-active);
-    --control-accent-text-color: white;
-    --control-accent-text-color-active: #c2daef;
-    --control-accent-text-color-disabled: var(--control-accent-text-color-active);
+
+    /* ───── 边框 ───── */
     --border-width: 1.4px;
     --border-radius: 5px;
     --border-color: #e5e5e5;
     --border-bottom-color: #cccccc;
-    --border-accent-color: #1473c5;
-    --border-accent-bottom-color: #003e73;
+    /* 强调色控件底部描边: ControlStrokeColorOnAccentSecondary 浅色值（黑 40%），
+       叠加在强调色填充上即“强调色压暗”；深色为黑 14%，见 html.dark */
+    --border-accent-bottom-color: #00000066;
+
+    /* ───── 字体 ───── */
     --font-size: 16px;
     --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    /* window */
+
+    /* ───── 窗口 ───── */
     --window-background: #f3f3f3;
-    /* text input */
+
+    /* ───── 文本输入 ───── */
     --input-text-background-focus: white;
     --input-text-border-bottom-width-focus: 2px;
     --placeholder-color: #5f5f5f;
     --placeholder-color-focus: #8d8d8d;
-    /* radio button */
+
+    /* ───── 单选按钮 ───── */
     --radio-border-color: #838383;
     --radio-background: #ededed;
     --radio-background-hover: #e5e5e5;
     --radio-background-active: #dcdcdc;
-    /* scrollbar */
+
+    /* ───── 滚动条 ───── */
     --scrollbar-width: 15px;
     --scrollbar-thumb-background: #8a8a8a;
     --scrollbar-thumb-background-hover: #636363;
-    /* page transition */
+
+    /* ───── 页面切换 ───── */
     --page-transition-shadow: -16px 0 16px 0px rgba(0, 0, 0, 0.1);
-    /* icon button */
+
+    /* ───── 图标按钮 ───── */
     --icon-button-background: #D4D7D7;
     --processing-background: #e4e4e4;
     /* 环境型工作指示（当前用于句子面板角上的补取指示环）：中性、可见但不抢注意力。
@@ -50,14 +85,18 @@
     --hyperlink-hover-background: rgba(0, 0, 0, 0.1);
     --icon-button-filter-hover: brightness(90%);
     --icon-button-filter-active: brightness(80%);
+
+    /* ───── 状态色 ───── */
     /* status text: WinUI SystemFillColorSuccess light token;
        warning uses a dark amber for readability on light backgrounds */
     --success-text-color: #0f7b0f;
     --warning-text-color: #9a6700;
     /* 关注红点等警示标记: WinUI SystemFillColorCritical light token */
     --critical-fill-color: #c42b1c;
-    /* flyout: 下拉选择器等弹出面板。背景/边框/圆角对应 WinUI AcrylicBackgroundFillColorDefault
-       的纯色回退、SurfaceStrokeColorFlyout 与 OverlayCornerRadius(8px)；列表项底色对应
+
+    /* ───── Flyout（下拉选择器等弹出面板） ───── */
+    /* 背景/边框/圆角对应 WinUI AcrylicBackgroundFillColorDefault 的纯色回退、
+       SurfaceStrokeColorFlyout 与 OverlayCornerRadius(8px)；列表项底色对应
        SubtleFillColorSecondary(hover) / SubtleFillColorTertiary(pressed/selected) */
     --flyout-background: #f9f9f9;
     --flyout-border-color: #00000029;
@@ -66,7 +105,9 @@
     --flyout-item-background-hover: #00000009;
     --flyout-item-background-active: #00000006;
     --flyout-item-background-selected: #00000006;
-    /* dialog: WinUI ContentDialog_themeresources.xaml + Common 颜色字典浅色值。
+
+    /* ───── 对话框 ───── */
+    /* WinUI ContentDialog_themeresources.xaml + Common 颜色字典浅色值。
        容器底 = SolidBackgroundFillColorBase(#F3F3F3)，内容区叠加 = LayerFillColorAlt(不透明白)，
        描边 = SurfaceStrokeColorDefault(#75757566)，内容/命令区分隔线 = CardStrokeColorDefault，
        遮罩 = SmokeFillColorDefault(#0000004D) */
@@ -76,26 +117,26 @@
     --dialog-separator-color: #0000000f;
     --dialog-smoke-color: #0000004d;
     --dialog-shadow: 0 32px 64px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.1);
-    /* 侧边栏导航项: 基于 WinUI NavigationViewItem 的 Subtle 系列 token，
+
+    /* ───── 侧边栏导航项 ───── */
+    /* 基于 WinUI NavigationViewItem 的 Subtle 系列 token，
        在原生值（Secondary/Tertiary = 3.5%/2.4% 黑）基础上加深一档，
        保证与窗口底色可辨 */
     --nav-item-background-hover: #0000000a;
     --nav-item-background-pressed: #0000000f;
     --nav-item-background-selected: #00000014;
-    /* 开关: WinUI ToggleSwitch_themeresources.xaml 浅色字典。
+
+    /* ───── 开关 ───── */
+    /* WinUI ToggleSwitch_themeresources.xaml 浅色字典。
        off 轨道 = ControlAltFillColorSecondary，描边 = ControlStrongStrokeColorDefault；
        off 旋钮 = TextFillColorSecondary；on 旋钮 = TextOnAccentFillColorPrimary；
-       on 轨道描边禁用色 = AccentFillColorDisabled；旋钮环 = CircleElevationBorderBrush 近似
-       （WinUI 颜色为 #AARRGGBB，此处已转换为 CSS 的 #RRGGBBAA） */
+       on 轨道描边禁用色 = AccentFillColorDisabled；旋钮环 = CircleElevationBorderBrush 近似 */
     --switch-fill-off: #00000006;
     --switch-fill-off-hover: #0000000f;
     --switch-fill-off-active: #00000018;
     --switch-fill-off-disabled: transparent;
     --switch-stroke-off: #00000072;
     --switch-stroke-off-disabled: #00000037;
-    --switch-fill-on: var(--accent);
-    --switch-fill-on-hover: var(--control-accent-background-hover);
-    --switch-fill-on-active: var(--control-accent-background-active);
     --switch-fill-on-disabled: #00000037;
     --switch-stroke-on-disabled: #00000037;
     --switch-knob-off: #0000009e;
@@ -103,8 +144,29 @@
     --switch-knob-on: #ffffff;
     --switch-knob-on-disabled: #ffffff;
     --switch-knob-ring: #0000001a;
-    /* 键盘焦点外框: WinUI FocusStrokeColorOuter */
+
+    /* ───── 键盘焦点外框 ───── */
+    /* WinUI FocusStrokeColorOuter。焦点框是黑白高对比，不跟随强调色 */
     --focus-stroke: #00000089;
+}
+
+/*
+ * 派生层：只依赖 --accent，明暗共用。改强调色（或将来接入系统强调色）时，
+ * 这里所有变体会自动跟随，无需再逐主题维护。
+ */
+:root {
+    /* WinUI AccentFillColorSecondary / Tertiary = 强调色 @90% / @80% 不透明度。
+       做成半透明而非固定色值后，最终颜色会随所叠表面（窗口底、卡片底）变化，
+       与 WinUI 的合成行为一致 */
+    --control-accent-background-hover: color-mix(in srgb, var(--accent) 90%, transparent);
+    --control-accent-background-active: color-mix(in srgb, var(--accent) 80%, transparent);
+    /* WinUI ControlStrokeColorOnAccentDefault(#14FFFFFF)：强调色填充上的白 8% 描边，
+       深浅两主题同值，叠加后即“强调色提亮一档” */
+    --border-accent-color: #ffffff14;
+    /* 开关开启态复用强调色家族 */
+    --switch-fill-on: var(--accent);
+    --switch-fill-on-hover: var(--control-accent-background-hover);
+    --switch-fill-on-active: var(--control-accent-background-active);
 }
 
 /* Dark theme overrides, based on WinUI 3 / Windows 11 Fluent Design dark color tokens.
@@ -113,9 +175,23 @@
    SolidBackgroundFillColorBase = #202020). */
 html.dark {
     color-scheme: dark;
-    /* accent: Windows 11 base accent #0078D4; keeps white accent text at 4.5:1
-       and stays visible (3.6:1) on the dark window background */
+    /* ───── 强调色 ───── */
+    /* Windows 11 基准强调色 #0078D4；白字在其上仍达 4.5:1，
+       并在 #202020 窗口底上可辨（3.6:1，作为填充足够） */
     --accent: #0078d4;
+    /* 强调色当文字用必须单独提亮：WinUI 深色 AccentTextFillColorPrimary = SystemAccentColorLight3。
+       #0078D4 直接作正文链接只有 3.6:1，提亮到 #99EBFF 后为 12.2:1 */
+    --accent-text: #99ebff;
+    /* 强调色底上的文字：深色字典的 TextOnAccentFillColorSecondary/Disabled。
+       （Primary 在 WinUI 深色字典里是黑色，因为其强调色填充本身是浅蓝；
+       本项目深色强调色仍是深蓝、用白字，故沿用浅色字典的白字阶梯） */
+    --control-accent-text-color: #ffffff;
+    --control-accent-text-color-active: #ffffffb3;
+    --control-accent-text-color-disabled: #ffffff87;
+    /* 禁用态填充：WinUI AccentFillColorDisabled 深色值 */
+    --control-accent-background-disabled: #ffffff28;
+
+    /* ───── 中性控件 ───── */
     --control-background: #ffffff0f;
     --control-background-hover: #ffffff15;
     --control-background-active: #ffffff08;
@@ -123,33 +199,35 @@ html.dark {
     --control-text-color: #ffffff;
     --control-text-color-active: #ffffffc5;
     --control-text-color-disabled: #ffffff5d;
-    --control-accent-background-hover: #1a86d8;
-    --control-accent-background-active: #3393dd;
-    --control-accent-background-disabled: #ffffff28;
-    --control-accent-text-color: #ffffff;
-    --control-accent-text-color-active: #ffffffb3;
-    --control-accent-text-color-disabled: #ffffff87;
+
+    /* ───── 边框 ───── */
     --border-color: #ffffff18;
     --border-bottom-color: #ffffff12;
-    --border-accent-color: #ffffff14;
+    /* ControlStrokeColorOnAccentSecondary 深色值（黑 14%） */
     --border-accent-bottom-color: #00000023;
-    /* window */
+
+    /* ───── 窗口 ───── */
     --window-background: #202020;
-    /* text input */
+
+    /* ───── 文本输入 ───── */
     --input-text-background-focus: #1e1e1eb3;
     --placeholder-color: #ffffffc5;
     --placeholder-color-focus: #ffffff87;
-    /* radio button */
+
+    /* ───── 单选按钮 ───── */
     --radio-border-color: #ffffff8b;
     --radio-background: #ffffff0f;
     --radio-background-hover: #ffffff15;
     --radio-background-active: #ffffff08;
-    /* scrollbar */
+
+    /* ───── 滚动条 ───── */
     --scrollbar-thumb-background: #ffffff54;
     --scrollbar-thumb-background-hover: #ffffff73;
-    /* page transition */
+
+    /* ───── 页面切换 ───── */
     --page-transition-shadow: -16px 0 16px 0px rgba(0, 0, 0, 0.5);
-    /* icon button */
+
+    /* ───── 图标按钮 ───── */
     --icon-button-background: #ffffff14;
     --processing-background: #ffffff14;
     /* 环境型工作指示，语义见浅色块同名 token */
@@ -157,21 +235,26 @@ html.dark {
     --hyperlink-hover-background: #ffffff14;
     --icon-button-filter-hover: brightness(140%);
     --icon-button-filter-active: brightness(80%);
+
+    /* ───── 状态色 ───── */
     /* status text: WinUI SystemFillColorSuccess dark token;
        warning uses a bright amber for readability on dark backgrounds */
     --success-text-color: #6ccb5f;
     --warning-text-color: #d4a72c;
     /* 关注红点等警示标记: WinUI SystemFillColorCritical dark token */
     --critical-fill-color: #ff99a4;
-    /* flyout: 暗色下 AcrylicBackgroundFillColorDefault 的纯色回退约为 #2c2c2c */
+
+    /* ───── Flyout ───── */
+    /* 暗色下 AcrylicBackgroundFillColorDefault 的纯色回退约为 #2c2c2c */
     --flyout-background: #2c2c2c;
     --flyout-border-color: #00000033;
-    --flyout-border-radius: 8px;
     --flyout-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 2px rgba(0, 0, 0, 0.2);
     --flyout-item-background-hover: #ffffff0f;
     --flyout-item-background-active: #ffffff0a;
     --flyout-item-background-selected: #ffffff0a;
-    /* dialog: 深色字典。容器底 = SolidBackgroundFillColorBase(#202020)，
+
+    /* ───── 对话框 ───── */
+    /* 深色字典。容器底 = SolidBackgroundFillColorBase(#202020)，
        内容区叠加 = LayerFillColorAlt(5% 白，叠加后约 #2D2D2D) */
     --dialog-background: #202020;
     --dialog-content-background: #ffffff0d;
@@ -179,20 +262,21 @@ html.dark {
     --dialog-separator-color: #00000019;
     --dialog-smoke-color: #0000004d;
     --dialog-shadow: 0 32px 64px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
-    /* 侧边栏导航项: 同浅色，在原生 Subtle 值（6%/4% 白）基础上加深一档 */
+
+    /* ───── 侧边栏导航项 ───── */
+    /* 同浅色，在原生 Subtle 值（6%/4% 白）基础上加深一档 */
     --nav-item-background-hover: #ffffff12;
     --nav-item-background-pressed: #ffffff1a;
     --nav-item-background-selected: #ffffff1f;
-    /* 开关: WinUI ToggleSwitch_themeresources.xaml 深色字典 */
+
+    /* ───── 开关 ───── */
+    /* WinUI ToggleSwitch_themeresources.xaml 深色字典 */
     --switch-fill-off: #00000019;
     --switch-fill-off-hover: #ffffff0b;
     --switch-fill-off-active: #ffffff12;
     --switch-fill-off-disabled: transparent;
     --switch-stroke-off: #ffffff8b;
     --switch-stroke-off-disabled: #ffffff28;
-    --switch-fill-on: var(--accent);
-    --switch-fill-on-hover: var(--control-accent-background-hover);
-    --switch-fill-on-active: var(--control-accent-background-active);
     --switch-fill-on-disabled: #ffffff28;
     --switch-stroke-on-disabled: #ffffff28;
     --switch-knob-off: #ffffffc5;
@@ -200,5 +284,21 @@ html.dark {
     --switch-knob-on: #000000;
     --switch-knob-on-disabled: #ffffff87;
     --switch-knob-ring: #ffffff1f;
+
+    /* ───── 键盘焦点外框 ───── */
+    /* WinUI FocusStrokeColorOuter */
     --focus-stroke: #ffffff;
+}
+
+/*
+ * element-plus 兼容层。
+ * 项目现在只剩 ElMessage（toast）与 ElBadge（更新红点）两个组件仍来自 element-plus，
+ * 它们的配色沿用 element-plus 默认（深色走 theme-chalk/dark/css-vars.css），
+ * 这里只把主色接回项目强调色，避免出现第二套主题色。
+ */
+:root,
+html.dark {
+    /* 深色要单独写一条：element-plus 的 dark/css-vars.css 用 html.dark 覆盖同一个变量，
+       :root 的选择器优先级压不住它 */
+    --el-color-primary: var(--accent);
 }

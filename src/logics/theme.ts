@@ -3,6 +3,7 @@
  *
  * - 暗色样式全部由 `<html>` 元素上的 `dark` class 驱动
  *   （fluent-styles.css 的 html.dark 变量块、element-plus 的 dark/css-vars 等）
+ *   强调色家族由 fluent-styles.css 的派生层算好，主题切换只需切 class，无需 JS 参与
  * - 主题模式持久化在 localStorage（首帧由 index.html 内联脚本读取，保证窗口显示前 dark class 已定）；
  *   配置文件加载完成后会用 config.theme 校正此缓存（见 globals.initAtAppStart），两者漂移时以配置文件为准
  * - 双通道检测系统主题（仅当前模式为 system 时生效）：
@@ -14,7 +15,6 @@
 import { ref, type Ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { setElementTheme } from './element-theme';
 import * as utils from './utils';
 
 /** 主题模式：跟随系统 / 浅色 / 深色 */
@@ -29,15 +29,13 @@ export const isDark: Ref<boolean> = ref(false);
 /** 当前主题模式（模块内维护，外部通过 getThemeMode / setThemeMode 读写） */
 let currentMode: ThemeMode = 'system';
 
-/** 应用主题：切换 dark class，并刷新依赖 CSS 变量的 element-plus 色阶 */
+/** 应用主题：切换 dark class 并同步窗口底色 */
 function applyTheme(dark: boolean): void {
     if (isDark.value === dark && document.documentElement.classList.contains('dark') === dark) {
         return; // 幂等：主题未实际变化时不重复应用
     }
     isDark.value = dark;
     document.documentElement.classList.toggle('dark', dark);
-    // dark class 切换后 --accent 等 CSS 变量的计算值可能变化，需重新生成 element-plus 色阶
-    setElementTheme();
     syncWindowBackground();
 }
 
