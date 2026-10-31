@@ -14,7 +14,7 @@ import { isLlmReady, parseMaxTokens, type LlmRequestConfig } from '../logics/llm
 import { useSettingsStore } from '../logics/settings-store';
 import AiPickCard from '../components/AiPickCard.vue';
 import {
-    FluentButton, FluentSelect, FluentInput, FluentRadio, FluentStatusText, dialog,
+    FluentButton, FluentSelect, FluentInput, FluentTextarea, FluentRadio, FluentStatusText, dialog,
 } from '../fluent-controls';
 import type { StatusNotice } from '../fluent-controls/status';
 import { useTransientNotice } from '../fluent-controls/useTransientNotice';
@@ -348,8 +348,8 @@ async function searchAndUpdate(
 const sentence = ref('');
 /** 是否显示文本框 */
 const showEdit = ref(false);
-/** 文本框控件 */
-const editTextArea = ref<HTMLTextAreaElement | null>(null);
+/** 文本框控件（聚焦经组件暴露的 focus 方法转发到内部 textarea） */
+const editTextArea = ref<{ focus: () => void } | null>(null);
 const isMacOS = computed(() => api.os.type() === 'macos');
 
 /** 根据平台显示不同的快捷键提示 */
@@ -1185,8 +1185,8 @@ onBeforeMount(async () => {
         </div>
         <div class="sentence-container">
             <SentencePanel :tokens="tokens" v-if="!showEdit" @mark="onMarkToken" @commit="onMarksCommitted" />
-            <textarea class="fluent-textarea" v-model.trim="sentence" v-if="showEdit" ref="editTextArea"
-                :placeholder="editPlaceholder" @input="onSentenceEdit" @keydown="handleEditTextAreaKeydown"></textarea>
+            <FluentTextarea class="sentence-editor" v-model.trim="sentence" v-if="showEdit" ref="editTextArea"
+                :placeholder="editPlaceholder" @input="onSentenceEdit" @keydown="handleEditTextAreaKeydown" />
             <SentenceCaptureRing :active="captureSettling" v-if="!showEdit" />
         </div>
         <div class="words-container">
@@ -1339,31 +1339,9 @@ onBeforeMount(async () => {
     flex-grow: 1;
 }
 
-.fluent-textarea {
-    resize: none;
-    overflow-wrap: break-word;
+.sentence-editor {
     width: 100%;
     height: 100%;
-    padding: 8px 12px;
-    font-family: var(--font-family);
-    font-size: var(--font-size);
-    background-color: var(--control-background);
-    outline: none;
-    border-style: solid;
-    border-color: var(--border-color);
-    border-bottom-color: var(--border-bottom-color);
-    border-width: var(--border-width);
-    border-radius: var(--border-radius);
-}
-
-.fluent-textarea:hover {
-    background-color: var(--control-background-hover);
-}
-
-.fluent-textarea:focus {
-    background-color: var(--input-text-background-focus);
-    border-bottom-width: var(--input-text-border-bottom-width-focus);
-    border-bottom-color: var(--accent);
 }
 
 .youdao-title {

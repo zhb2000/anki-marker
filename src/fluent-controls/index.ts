@@ -18,6 +18,7 @@ export type { FluentDialogCommand } from './FluentDialogShell.vue';
 export { default as FluentSelect } from './FluentSelect.vue';
 export type { FluentSelectOption } from './FluentSelect.vue';
 export { default as FluentInput } from './FluentInput.vue';
+export { default as FluentTextarea } from './FluentTextarea.vue';
 export { default as FluentPasswordInput } from './FluentPasswordInput.vue';
 export { default as FluentRadio } from './FluentRadio.vue';
 export { default as FluentToggleSwitch } from './FluentToggleSwitch.vue';
