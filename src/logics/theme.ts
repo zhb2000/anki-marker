@@ -42,9 +42,9 @@ function applyTheme(dark: boolean): void {
 /**
  * 同步 NSWindow 背景色（仅 macOS 生效，其他平台为 no-op）。
  *
- * macOS 透明标题栏（tauri.conf.json 中 titleBarStyle: Transparent）下，原生顶栏
- * 不绘制背景，露出的是 NSWindow 背景色（默认白色）。需让它与前端
- * --window-background 保持一致，顶栏颜色才能与界面无缝衔接。
+ * macOS 覆盖式标题栏（tauri.conf.json 中 titleBarStyle: Overlay）下，原生标题栏
+ * 不绘制背景，窗口底色用于缩放动画期间未被网页覆盖的区域；需让它与前端
+ * --window-background 保持一致，避免缩放/全屏切换时露出白底。
  * 非 Tauri 环境（浏览器调试）调用失败，静默忽略。
  */
 function syncWindowBackground(): void {

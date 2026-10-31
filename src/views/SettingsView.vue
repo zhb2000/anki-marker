@@ -220,6 +220,8 @@ onActivated(() => {
     flex-direction: column;
     background-color: var(--window-background);
     height: 100vh;
+    /* macOS 覆盖式标题栏：顶部让出原生标题栏高度，标题栏内容与红绿灯错开 */
+    padding-top: var(--titlebar-inset);
     user-select: none;
 }
 

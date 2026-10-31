@@ -2,6 +2,8 @@
 import { ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
+import MacTitleBar from './components/MacTitleBar.vue';
+
 const currentRoute = useRoute();
 const transitionName = ref<string | undefined>(undefined);
 
@@ -14,6 +16,8 @@ watch(() => currentRoute.matched[0]?.path ?? currentRoute.path, (newTopPath) => 
 </script>
 
 <template>
+    <!-- 覆盖式标题栏的拖动条：仅 macOS 渲染，固定在窗口顶部，不随页面切换 -->
+    <MacTitleBar />
     <RouterView v-slot="{ Component, route }">
         <Transition :name="transitionName">
             <KeepAlive>

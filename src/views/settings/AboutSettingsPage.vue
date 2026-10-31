@@ -148,7 +148,7 @@ const templateReleaseCommands: FluentDialogCommand[] = [
 /**
  * 更新笔记模板前的确认：卡片与更新说明弹窗共用同一入口（原来是一处 ElPopconfirm、
  * 一处弹窗内确认，风格与文案都不统一；统一走命令式 ContentDialog，嵌套时由
- * dialogLayer 的计数保证标题栏遮罩不中途恢复）
+ * dialogLayer 保证后打开的弹窗压在上层）
  */
 async function confirmUpdateTemplate(): Promise<void> {
     const ok = await dialog.confirm('是否更新笔记模板？', {

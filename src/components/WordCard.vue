@@ -26,7 +26,7 @@ const props = defineProps({
 const emit = defineEmits<{
     'add-btn-click': [index: number];
     'edit-btn-click': [index: number];
-    /** 就地反馈里的操作（如失败后的「重试」） */
+    /** 就地反馈里的操作（如失败后的“重试”） */
     'notice-action': [index: number];
 }>();
 

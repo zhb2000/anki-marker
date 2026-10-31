@@ -2,7 +2,7 @@ import { reactive, ref, watch, computed } from 'vue';
 import * as api from '../tauri-api';
 import { fetch } from '@tauri-apps/plugin-http';
 import * as semver from 'semver';
-import { dialog, setDialogDepthListener } from '../fluent-controls';
+import { dialog } from '../fluent-controls';
 
 import { Config, effectiveTextSetting } from './config';
 import * as anki from './anki';
@@ -12,7 +12,7 @@ import { typeAssertion } from './typing';
 import * as preference from './preference';
 import * as debug from './debug';
 import { initShortcutStatus } from './shortcut-status';
-import { setThemeMode, isDark } from './theme';
+import { setThemeMode } from './theme';
 
 // #region Config
 let config: Config;
@@ -79,7 +79,7 @@ const ANKI_CONNECT_PLUGIN_HINT =
 let ensureAnkiConnectInFlight: { promise: Promise<void>; controller: AbortController; } | null = null;
 /**
  * 正在等待这次共享执行的调用方。
- * 最后一个等待者取消（例如用户点了卡片的「停止」）时中断共享执行：
+ * 最后一个等待者取消（例如用户点了卡片的“停止”）时中断共享执行：
  * 否则它会在后台继续轮询、甚至在用户关掉 Anki 后把它重新拉起来。
  */
 const ankiConnectWaiters = new Set<object>();
@@ -553,12 +553,6 @@ export async function initAtAppStart() {
         utils.disableWebviewContextMenu();
         utils.disableWebviewKeyboardShortcuts();
     }
-    // 弹窗层数变化时同步 macOS 标题栏遮罩（见 window.rs set_dialog_mask；
-    // 非 macOS / 非 Tauri 环境命令为 no-op 或调用失败，静默忽略）。
-    // 传层数而不是布尔：页面上的每层弹窗各叠一层 smoke 遮罩，标题栏要按同样层数加深
-    setDialogDepthListener(depth => {
-        void utils.invoke('set_dialog_mask', { depth, dark: isDark.value }).catch(() => { /* 忽略 */ });
-    });
     // 获取应用版本
     await initAppVersion();
     // 加载配置文件

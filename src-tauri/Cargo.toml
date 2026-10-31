@@ -54,8 +54,11 @@ objc2-app-kit = { version = "0.3", features = [
     "NSColor",
     "NSWindow",
     "NSApplication",
+    "NSEvent",
     "objc2-core-foundation",
 ] }
+# 标题栏双击的原生事件监听（addLocalMonitorForEventsMatchingMask:handler: 的 block）
+block2 = "0.6"
 # WKWebView 页面背后底色（underPageBackgroundColor，macOS 12+ 公开 API），
 # 避免 zoom 动画期间 WKWebView 自身底层露出白色
 objc2-web-kit = { version = "0.3", features = [
@@ -63,7 +66,7 @@ objc2-web-kit = { version = "0.3", features = [
     "WKWebView",
     "objc2-app-kit",
 ] }
-objc2-foundation = { version = "0.3", features = ["std", "NSProcessInfo"] }
+objc2-foundation = { version = "0.3", features = ["std", "NSProcessInfo", "NSUserDefaults"] }
 
 # 托盘图标跟随系统主题（Windows）：读 HKCU\...\Themes\Personalize\SystemUsesLightTheme
 # 判断任务栏深浅，并用 SetWindowSubclass 监听 WM_SETTINGCHANGE 实时换图。

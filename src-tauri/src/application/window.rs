@@ -1,77 +1,153 @@
-//! 主窗口外观辅助。
+//! 主窗口外观与 macOS 标题栏行为。
+//!
+//! 窗口使用 `titleBarStyle: "Overlay"`（见 tauri.conf.json）：原生标题栏透明、内容视图
+//! 铺满整个窗口，红绿灯浮在网页之上。这样弹窗遮罩（DOM 中 position: fixed 的 smoke）
+//! 能自然覆盖到标题栏区域，不再需要从 Rust 侧逐帧模拟标题栏配色。
+//!
+//! 代价是窗口的拖动与双击手势需要自己接管（隐藏标题后 AppKit 不再处理标题栏双击）：
+//! - 拖动：前端在顶部标题栏高度的命中条上调用 start_dragging（见 components/MacTitleBar.vue）；
+//! - 双击：Rust 侧装一个原生事件监听，按系统偏好执行缩放/最小化/无操作。
 
 use tauri::WebviewWindow;
 
 #[cfg(target_os = "macos")]
 use {
+    block2::RcBlock,
     objc2::rc::Retained,
     objc2::runtime::{AnyObject, Bool},
     objc2::{msg_send, ClassType},
-    objc2_app_kit::{NSColor, NSWindow},
-    objc2_foundation::{ns_string, NSNumber, NSProcessInfo},
+    objc2_app_kit::{NSColor, NSEvent, NSEventMask, NSEventType, NSWindow, NSWindowButton},
+    objc2_foundation::{ns_string, NSNumber, NSPoint, NSProcessInfo, NSUserDefaults},
     objc2_web_kit::WKWebView,
-    std::sync::atomic::{AtomicU64, Ordering},
-    std::time::{Duration, Instant},
+    std::ptr::NonNull,
+    std::sync::Mutex,
 };
 
-/// 对话框遮罩（FluentDialogShell 的 smoke 背板 #0000004D）的 alpha。
-/// 与 src/fluent-controls/FluentDialogShell.vue 的 --dialog-smoke-color 同步，修改那边时这里也要同步。
+/// 双击标题栏时第二次按下的位置（窗口坐标），用于判断按下后是否移动过：
+/// 与 AppKit 的行为一致，双击后拖动鼠标应取消缩放。
 #[cfg(target_os = "macos")]
-const MASK_ALPHA: f64 = 0x4D as f64 / 255.0;
+static DOUBLE_CLICK_ORIGIN: Mutex<Option<(f64, f64)>> = Mutex::new(None);
 
-/// 单层遮罩的混合因子：底色按 (1 − MASK_ALPHA) 压暗（smoke 为纯黑半透明，预混即等比变暗）
+/// 安装标题栏双击监听（macOS）。
+///
+/// 窗口是 Overlay 标题栏 + hiddenTitle，AppKit 会跳过标题栏的默认双击手势
+/// （见 https://stackoverflow.com/questions/52150960），因此这里接管：
+/// 双击落在标题栏矩形内、且不在红绿灯按钮上时，按系统偏好执行对应动作。
+/// 事件被吞掉（返回 null），避免同一次双击再被网页或 AppKit 处理一次。
+///
+/// 用本地事件监听而不是网页里的 dblclick，是为了覆盖网页收不到事件的区域
+/// （原生标题栏视图在上层）以及窗口未激活时的第一次点击。
 #[cfg(target_os = "macos")]
-const MASKED_FACTOR: f64 = 1.0 - MASK_ALPHA;
+pub fn install_titlebar_monitor(window: &WebviewWindow) {
+    let Ok(ns_window) = window.ns_window() else {
+        return;
+    };
+    let ns_window = ns_window as usize;
 
-/// 叠层遮罩的深度上限：每层再乘一次单层因子，超过四层已接近全黑，再深没有视觉意义
-#[cfg(target_os = "macos")]
-const MAX_MASK_DEPTH: u32 = 4;
+    let handler = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+        let raw = event.as_ptr();
+        let event = unsafe { event.as_ref() };
+        // 只处理主窗口；调试窗口等其它窗口保持系统行为
+        let own_window = unsafe { &*(ns_window as *const NSWindow) };
+        if event.windowNumber() != own_window.windowNumber() || event.clickCount() < 2 {
+            return raw;
+        }
+        let window = own_window;
+        let point = event.locationInWindow();
 
-/// `depth` 层对话框叠起来时的目标混合因子。
-/// 页面上的每层 FluentDialogShell 各渲染一层 smoke 遮罩，叠加后页面亮度为 (1 − alpha)^n，
-/// 标题栏用同一公式，两层确认框叠在一层更新说明上时才会继续变深，不露馅。
-#[cfg(target_os = "macos")]
-fn mask_factor_for_depth(depth: u32) -> f64 {
-    return MASKED_FACTOR.powi(depth.min(MAX_MASK_DEPTH) as i32);
+        match event.r#type() {
+            NSEventType::LeftMouseDown => {
+                // 第二次按下落在标题栏内才接管；红绿灯自己响应双击，放行
+                if !is_in_titlebar(window, point) || is_over_window_button(window, point) {
+                    return raw;
+                }
+                *DOUBLE_CLICK_ORIGIN.lock().unwrap() = Some((point.x, point.y));
+                std::ptr::null_mut() // 吞掉第二次按下，避免又触发一次拖拽
+            }
+            NSEventType::LeftMouseUp => {
+                // 只认“上一次按下已被接管”的抬起，避免误伤其它双击
+                let origin = DOUBLE_CLICK_ORIGIN.lock().unwrap().take();
+                let Some((x, y)) = origin else {
+                    return raw;
+                };
+                // 双击后移动了鼠标：取消，与原生标题栏一致
+                if (point.x - x).abs() <= 2.0 && (point.y - y).abs() <= 2.0 {
+                    perform_double_click_action(window);
+                }
+                std::ptr::null_mut()
+            }
+            _ => raw,
+        }
+    });
+
+    // 监听对象释放即失效；窗口与进程同生命周期，直接泄漏住
+    let monitor = unsafe {
+        NSEvent::addLocalMonitorForEventsMatchingMask_handler(
+            NSEventMask::LeftMouseDown | NSEventMask::LeftMouseUp,
+            &handler,
+        )
+    };
+    if let Some(monitor) = monitor {
+        std::mem::forget(monitor);
+    }
+    // 监听对象与 block 一起泄漏住：即便 AppKit 未额外持有 block，也不会悬垂
+    std::mem::forget(handler);
 }
 
-/// 动画时长对齐 DOM 遮罩过渡（FluentDialogShell.vue 的 .fluent-dialog-enter/leave-active）：
-/// 遮罩（smoke）本体淡入与淡出均为 0.167s linear（0.25s 是容器缩放动画的时长，与本处无关）
+/// 点是否落在标题栏区域内（窗口坐标，原点在左下角）。
+/// 全屏时 contentLayoutRect 与窗口内容区重合，此处自然返回 false。
 #[cfg(target_os = "macos")]
-const MASK_ANIM_DURATION: Duration = Duration::from_millis(167);
-/// 帧间隔 ≈ 120fps：步进插值的量化台阶减半，与 vsync 驱动的 DOM 遮罩过渡更接近
-#[cfg(target_os = "macos")]
-const MASK_ANIM_FRAME_INTERVAL: Duration = Duration::from_millis(8);
-
-/// 当前底色亮度系数（MASKED_FACTOR ~ 1.0：1.0 为原色，MASKED_FACTOR 为遮罩态，
-/// 以百万分之一为单位存整数）。
-/// set_dialog_mask 的动画线程写、set_window_background 读：主题切换若发生在
-/// 展示/动画期间，按当前系数着色，标题栏不会跳出未混合的原色。
-#[cfg(target_os = "macos")]
-static MASK_FACTOR: AtomicU64 = AtomicU64::new(1_000_000);
-/// 动画代际号：每次触发新动画自增，旧线程发现代际不符即自行退出（快速开关时取消旧动画）
-#[cfg(target_os = "macos")]
-static MASK_ANIM_GENERATION: AtomicU64 = AtomicU64::new(0);
-
-#[cfg(target_os = "macos")]
-fn encode_factor(factor: f64) -> u64 {
-    (factor * 1_000_000.0).round() as u64
+fn is_in_titlebar(window: &NSWindow, point: NSPoint) -> bool {
+    let layout = window.contentLayoutRect();
+    let top = window.frame().size.height;
+    point.y >= layout.origin.y + layout.size.height && point.y <= top
 }
 
+/// 点是否落在红绿灯按钮上：这些按钮自己响应双击（例如双击绿色按钮进入全屏），
+/// 不能被标题栏监听截走。
 #[cfg(target_os = "macos")]
-fn decode_factor(raw: u64) -> f64 {
-    raw as f64 / 1_000_000.0
+fn is_over_window_button(window: &NSWindow, point: NSPoint) -> bool {
+    for kind in [
+        NSWindowButton::CloseButton,
+        NSWindowButton::MiniaturizeButton,
+        NSWindowButton::ZoomButton,
+    ] {
+        let Some(button) = window.standardWindowButton(kind) else {
+            continue;
+        };
+        // objc2-core-foundation 未导出 CGRectContainsPoint，直接比较边界
+        let rect = button.convertRect_toView(button.bounds(), None);
+        if point.x >= rect.origin.x
+            && point.x <= rect.origin.x + rect.size.width
+            && point.y >= rect.origin.y
+            && point.y <= rect.origin.y + rect.size.height
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// 按系统偏好“双击窗口标题栏时”执行：缩放（默认）/ 最小化 / 无操作。
+#[cfg(target_os = "macos")]
+fn perform_double_click_action(window: &NSWindow) {
+    let action = NSUserDefaults::standardUserDefaults()
+        .stringForKey(ns_string!("AppleActionOnDoubleClick"))
+        .map(|value| value.to_string());
+    match action.as_deref() {
+        Some("Minimize") => window.performMiniaturize(None),
+        Some("None") => {}
+        _ => window.performZoom(None),
+    }
 }
 
 /// 把主窗口的背景色同步为应用主题底色（macOS）。
 ///
-/// 两层背景都需要设置：
-/// 1. NSWindow 背景色：透明标题栏（tauri.conf.json 中 titleBarStyle: Transparent）
-///    露出的顶栏颜色，以及 zoom/resize 动画期间未被网页覆盖的窗口区域；
-/// 2. WKWebView 底层背景：zoom 动画期间网页尚未按新尺寸合成时，WKWebView 自身
-///    会用默认白色清底（双击标题栏最大化时的白闪即来源于此）。处理方式：
-///    关闭 drawsBackground（私有 KVC，wry transparent 特性同款）让下层窗口底色透出，
-///    并设置 underPageBackgroundColor（macOS 12+ 公开 API）同步页面背后底色。
+/// 内容视图虽然铺满窗口，但窗口缩放动画期间网页尚未按新尺寸合成时，会露出
+/// WKWebView / NSWindow 的底色。两层都要设置：
+/// 1. NSWindow 背景色：窗口缩放等未被网页覆盖处；
+/// 2. WKWebView 底层背景：关闭 drawsBackground（私有 KVC，wry transparent 特性同款）
+///    让下层窗口底色透出，并设置 underPageBackgroundColor（macOS 12+ 公开 API）。
 ///
 /// 前端在主题应用/切换时调用（见 src/logics/theme.ts）；非 macOS 平台为 no-op。
 /// 颜色取值与 src/fluent-controls/fluent-styles.css 的 --window-background 同步，
@@ -81,91 +157,8 @@ pub fn set_window_background(window: WebviewWindow, dark: bool) {
     apply_window_background(&window, dark);
 }
 
-/// 对话框遮罩态的标题栏同步（macOS）。
-///
-/// DOM 遮罩只覆盖 webview，透明标题栏露出的原生顶栏不受其影响；backgroundColor
-/// 不是 animator 可动画属性，这里用动画线程逐帧插值混合因子并派发到主线程重设，
-/// 与 DOM 遮罩的进/出场过渡对齐。
-///
-/// `depth` 为当前打开的对话框层数（0 表示没有对话框）：页面上的每层对话框各叠一层
-/// 遮罩，标题栏按同一公式逐层加深，嵌套确认框出现时不会停在单层深度。
-/// 前端经 src/fluent-controls/dialogLayer.ts 的弹窗栈给出层数（见 logics/globals.ts 接线）；
-/// 非 macOS 平台为 no-op。
-#[tauri::command]
-pub fn set_dialog_mask(window: WebviewWindow, depth: u32, dark: bool) {
-    #[cfg(target_os = "macos")]
-    start_mask_animation(&window, depth, dark);
-    #[cfg(not(target_os = "macos"))]
-    let _ = (window, depth, dark);
-}
-
-/// 启动遮罩因子动画：独立线程按帧间隔步进（AppKit 调用经 run_on_main_thread
-/// 派发回主线程），每帧先更新 MASK_FACTOR 再着色，保证中途的 set_window_background
-/// 读到的是最新因子。主题在动画中途切换时旧线程会以旧 dark 值播完剩余帧，
-/// 随后前端主题切换流程会以新主题色 + 当前因子重新着色，最终一致。
-#[cfg(target_os = "macos")]
-fn start_mask_animation(window: &WebviewWindow, depth: u32, dark: bool) {
-    let from = decode_factor(MASK_FACTOR.load(Ordering::Relaxed));
-    let to = mask_factor_for_depth(depth);
-    if (to - from).abs() < 1e-9 {
-        return; // 已处于目标态（重复触发），无需动画
-    }
-    let duration = MASK_ANIM_DURATION;
-    let generation = MASK_ANIM_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
-    let window = window.clone();
-    std::thread::spawn(move || {
-        // 绝对时间节拍：每帧钉在 start + n × 帧间隔 的时刻上（sleep 到点而非“干完活再睡”），
-        // 帧耗时（IPC 派发等）不累积进节拍，动画总时长与 DOM 过渡严格一致；
-        // 超过 end 的帧收拢到 end，保证终止帧精确落在动画时长上
-        let started = Instant::now();
-        let end = started + duration;
-        let mut next_deadline = started + MASK_ANIM_FRAME_INTERVAL;
-        loop {
-            if MASK_ANIM_GENERATION.load(Ordering::Relaxed) != generation {
-                return; // 已被更新的动画取代
-            }
-            let now = Instant::now();
-            if next_deadline > now {
-                std::thread::sleep(next_deadline - now);
-            }
-            if MASK_ANIM_GENERATION.load(Ordering::Relaxed) != generation {
-                return; // 睡眠期间被更新的动画取代
-            }
-            let progress = (started.elapsed().as_secs_f64() / duration.as_secs_f64()).min(1.0);
-            MASK_FACTOR.store(
-                encode_factor(from + (to - from) * progress),
-                Ordering::Relaxed,
-            );
-            let frame_window = window.clone();
-            if window
-                .run_on_main_thread(move || apply_window_background(&frame_window, dark))
-                .is_err()
-            {
-                return; // 窗口已销毁
-            }
-            if progress >= 1.0 {
-                return;
-            }
-            next_deadline += MASK_ANIM_FRAME_INTERVAL;
-            let now = Instant::now();
-            if next_deadline > end {
-                next_deadline = end;
-            } else if next_deadline < now {
-                // 长帧落后时顺延到当前时刻之后，避免追帧突发
-                next_deadline = now + MASK_ANIM_FRAME_INTERVAL;
-            }
-        }
-    });
-}
-/// 按当前遮罩因子着色（因子由动画线程维护，未动画时为 0.0 或目标值）
 #[cfg(target_os = "macos")]
 fn apply_window_background(window: &WebviewWindow, dark: bool) {
-    let factor = decode_factor(MASK_FACTOR.load(Ordering::Relaxed));
-    apply_window_background_with_factor(window, dark, factor);
-}
-
-#[cfg(target_os = "macos")]
-fn apply_window_background_with_factor(window: &WebviewWindow, dark: bool, factor: f64) {
     let (red, green, blue) = if dark {
         (0x20, 0x20, 0x20)
     } else {
@@ -177,9 +170,9 @@ fn apply_window_background_with_factor(window: &WebviewWindow, dark: bool, facto
     let ns_window = unsafe { &*(ns_window as *mut NSWindow) };
     // colorWithSRGBRed / setBackgroundColor 在 objc2-app-kit 中为安全方法
     let color = NSColor::colorWithSRGBRed_green_blue_alpha(
-        f64::from(red) * factor / 255.0,
-        f64::from(green) * factor / 255.0,
-        f64::from(blue) * factor / 255.0,
+        f64::from(red) / 255.0,
+        f64::from(green) / 255.0,
+        f64::from(blue) / 255.0,
         1.0,
     );
     ns_window.setBackgroundColor(Some(&color));
@@ -234,23 +227,5 @@ unsafe fn sync_webview_background(view: &AnyObject, color: &NSColor, depth: u32)
     for index in 0..count {
         let subview: Retained<AnyObject> = msg_send![&subviews, objectAtIndex: index];
         sync_webview_background(&subview, color, depth - 1);
-    }
-}
-
-#[cfg(all(test, target_os = "macos"))]
-mod tests {
-    use super::{mask_factor_for_depth, MAX_MASK_DEPTH};
-
-    /// 每多一层对话框，标题栏按单层遮罩因子再压一次（与 DOM 叠加遮罩一致）；深度有上限
-    #[test]
-    fn mask_factor_scales_with_depth() {
-        assert!((mask_factor_for_depth(0) - 1.0).abs() < 1e-9);
-        let one = mask_factor_for_depth(1);
-        assert!((one - 178.0 / 255.0).abs() < 1e-9);
-        assert!((mask_factor_for_depth(2) - one * one).abs() < 1e-12);
-        assert_eq!(
-            mask_factor_for_depth(9),
-            mask_factor_for_depth(MAX_MASK_DEPTH)
-        );
     }
 }

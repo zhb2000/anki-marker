@@ -7,6 +7,6 @@ export interface StatusNotice {
     message: string;
     /** 文字下方显示不确定进度条，用于进行中的状态 */
     progress?: boolean;
-    /** 文案后的操作按钮（如失败提示的「重试」） */
+    /** 文案后的操作按钮（如失败提示的“重试”） */
     actionLabel?: string;
 }

@@ -8,6 +8,7 @@
   "permissions": [
     "core:default",
     "core:window:allow-show",
+    "core:window:allow-start-dragging",
     {
       "identifier": "http:default",
       "allow": [

@@ -28,7 +28,7 @@ const props = withDefaults(defineProps<{
     progress?: boolean;
     /** 是否联动高度：独占一行时用默认值，嵌在横排里时传 false */
     collapse?: boolean;
-    /** 文案后的操作按钮文字（如「重试」）；为空时不显示 */
+    /** 文案后的操作按钮文字（如“重试”）；为空时不显示 */
     actionLabel?: string | null;
 }>(), {
     message: null,
@@ -152,7 +152,7 @@ const iconStyle = computed(() => ({ '--status-icon': `url("${icons[props.severit
     gap: 8px;
 }
 
-/* 操作按钮是「小号文字按钮」而不是超链接：无下划线、无手型光标，
+/* 操作按钮是“小号文字按钮”而不是超链接：无下划线、无手型光标，
    hover / 按下靠一层很淡的填充提示可点（WinUI 轻量按钮的做法）。
    颜色继承所在提示的 severity 色，避免红字提示里突然出现蓝色链接。 */
 .status-action {

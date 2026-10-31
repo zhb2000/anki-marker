@@ -37,7 +37,7 @@
         "width": 800,
         "height": 500,
         "visible": false,
-        "titleBarStyle": "Transparent",
+        "titleBarStyle": "Overlay",
         "hiddenTitle": true
       }
     ],

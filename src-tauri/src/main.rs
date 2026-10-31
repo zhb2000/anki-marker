@@ -152,6 +152,12 @@ fn main() {
             // 需在窗口创建之后挂载（config 中的窗口在 setup 之前已创建）
             #[cfg(target_os = "windows")]
             application::menubar::install_tray_theme_listener(app.handle());
+            // macOS：覆盖式标题栏（Overlay）隐藏了标题，系统不再处理标题栏双击，
+            // 由原生事件监听按系统偏好补上缩放/最小化
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                application::window::install_titlebar_monitor(&window);
+            }
 
             // 静默启动判定：
             // - macOS：AppleScript 登录项带 hidden 标志拉起时，进程自启动起即处于
@@ -226,7 +232,6 @@ fn main() {
             application::shortcut::request_accessibility_trust,
             application::shortcut::get_shortcut_registration,
             application::window::set_window_background,
-            application::window::set_dialog_mask,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

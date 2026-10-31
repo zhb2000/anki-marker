@@ -2,7 +2,7 @@
 import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 
 /**
- * 「编辑笔记」图标按钮。与 AddButton 共用同一套命中盒规范：
+ * “编辑笔记”图标按钮。与 AddButton 共用同一套命中盒规范：
  * 24×24 的盒子承担 hover 面（微填充），内部 16px 图标颜色不变。
  */
 </script>

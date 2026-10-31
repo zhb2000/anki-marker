@@ -5,12 +5,12 @@ import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 import type { CardStatus } from './CardStatus';
 
 /**
- * 词条的「添加到 Anki / 已添加」切换按钮。
+ * 词条的“添加到 Anki / 已添加”切换按钮。
  *
  * 交互与视觉约定：
  * - 24×24 的命中盒同时是 hover 面（WinUI 图标按钮做法）：hover/按下只微填充盒底，
  *   图标本身与所在圆形不变色，避免把普通图标按钮渲染成强调按钮；
- * - 三态图形交叉淡入淡出：未添加「+」、处理中「进度环」、已添加「✓」，状态不靠颜色也能辨认；
+ * - 三态图形交叉淡入淡出：未添加“+”、处理中“进度环”、已添加“✓”，状态不靠颜色也能辨认；
  * - 处理中不可点击（aria-disabled，忽略点击），不再用 not-allowed 光标。
  */
 const props = defineProps({
@@ -122,7 +122,7 @@ function handleClick(): void {
         transform var(--motion-duration-enter) var(--motion-ease-standard);
 }
 
-/* 「+」：两条 2px 细棒 */
+/* “+”：两条 2px 细棒 */
 .glyph-plus::before,
 .glyph-plus::after {
     content: '';
@@ -141,7 +141,7 @@ function handleClick(): void {
     height: 8px;
 }
 
-/* 「✓」：用两条边框拼出对勾，颜色取强调底上的文字色 */
+/* “✓”：用两条边框拼出对勾，颜色取强调底上的文字色 */
 .glyph-check::before {
     content: '';
     width: 4px;

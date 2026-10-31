@@ -48,9 +48,9 @@ interface ItemModel<T> {
 
 /** 卡片就地反馈的自动收起计时器（按条目对象持有，条目被替换时自然失效） */
 const cardNoticeTimers = new WeakMap<object, number>();
-/** 卡片就地反馈上的操作回调（「停止」「重试」），随提示一起替换 */
+/** 卡片就地反馈上的操作回调（“停止”“重试”），随提示一起替换 */
 const cardNoticeActions = new WeakMap<object, () => void>();
-/** 操作超过这个时长才显示进度与「停止」：正常速度的添加/移除不应闪一下 */
+/** 操作超过这个时长才显示进度与“停止”：正常速度的添加/移除不应闪一下 */
 const SLOW_NOTICE_DELAY_MS = 700;
 
 /**
@@ -868,7 +868,7 @@ async function prepareDeckAndModel(deckName: string, modelName: string, signal?:
     try {
         newModelCreated = (await Promise.all([prepareDeck(deckName), prepareModel(modelName)]))[1];
     } catch (error) {
-        // 用户点了「停止」：这是预期内的中断，不再弹错误框
+        // 用户点了“停止”：这是预期内的中断，不再弹错误框
         if (signal?.aborted !== true) {
             await dialog.message(String(error), { title: errorTitle!, kind: 'error' });
         }
@@ -888,7 +888,7 @@ async function prepareDeckAndModel(deckName: string, modelName: string, signal?:
  * 一次加卡/移除操作的取消句柄。
  *
  * - 前 700ms 不显示任何提示：正常速度的添加/移除不应闪一下；
- * - 超过阈值才出现「进度 + 停止」，点停止后界面立即退出等待；
+ * - 超过阈值才出现“进度 + 停止”，点停止后界面立即退出等待；
  * - signal 交给可在 HTTP 层中断的请求（写入/删除）；无法中断的等待（共享的 Anki 启动、
  *   准备牌组）用 race 退出——共享启动不会因为某一张卡片停止而被打断，只解除本卡片的等待。
  */
@@ -1264,6 +1264,8 @@ onBeforeMount(async () => {
     grid-template-rows: calc(34px + 12px * 2) 1fr;
     background-color: var(--window-background);
     height: 100vh;
+    /* macOS 覆盖式标题栏：顶部让出原生标题栏高度，内容不会被红绿灯压住 */
+    padding-top: var(--titlebar-inset);
     grid-template-areas:
         'header header'
         'sentence words';

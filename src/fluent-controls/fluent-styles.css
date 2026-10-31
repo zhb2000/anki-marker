@@ -56,6 +56,11 @@
 
     /* ───── 字体 ───── */
     --font-size: 16px;
+
+    /* ───── macOS 覆盖式标题栏 ─────
+       tauri.conf.json 中 titleBarStyle: Overlay：内容视图铺满窗口，红绿灯浮在网页上，
+       顶部标题栏高度由页面让出（各视图用它做顶部内边距）。全屏时系统标题栏隐藏，归零 */
+    --titlebar-inset: 0px;
     --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 
     /* ───── 窗口 ───── */
@@ -186,6 +191,17 @@
    Values reference the dark dictionary of WinUI's Common_themeresources_any.xaml
    (e.g. ControlFillColorDefault = #0FFFFFFF, TextFillColorPrimary = #FFFFFF,
    SolidBackgroundFillColorBase = #202020). */
+/* macOS：让出原生标题栏高度（红绿灯 + 拖动区）。放在 html 上，切换主题/页面都不受影响 */
+html.macos {
+    /* 标题栏高度：32px 与 NSWindow.contentLayoutRect 给出的高度一致（红绿灯占顶部 9~23px）。
+       旧版 macOS 是 28px，这里多出来的几像素只是空白，不会压住内容 */
+    --titlebar-inset: 32px;
+}
+
+html.macos.is-fullscreen {
+    --titlebar-inset: 0px;
+}
+
 html.dark {
     color-scheme: dark;
     /* ───── 强调色 ───── */
