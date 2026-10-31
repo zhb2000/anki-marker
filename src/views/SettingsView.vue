@@ -7,6 +7,7 @@ import {
     SETTINGS_PAGES, searchSettings,
     type SettingEntry, type SettingsPageId,
 } from '../logics/settings-registry';
+import * as api from '../tauri-api';
 import * as globals from '../logics/globals';
 import { effectiveTextSetting } from '../logics/config';
 import { checkAccessibilityTrust } from '../logics/shortcut-status';
@@ -38,8 +39,11 @@ function isActivePage(pageId: SettingsPageId): boolean {
 /** 搜索框内容 */
 const searchQuery = ref('');
 
+/** 当前平台：搜索结果只列出本平台真实存在的设置项（与卡片的可见性同源） */
+const platform = api.os.type();
+
 /** 搜索结果（空 query 时 searchSettings 返回 []） */
-const searchResults = computed(() => searchSettings(searchQuery.value));
+const searchResults = computed(() => searchSettings(searchQuery.value, platform));
 
 /** 是否处于搜索态（输入非空时左栏导航替换为搜索结果列表） */
 const isSearching = computed(() => searchQuery.value.trim().length > 0);

@@ -9,6 +9,7 @@ import * as cfg from '../../logics/config';
 import * as debug from '../../logics/debug';
 import * as utils from '../../logics/utils';
 import { setThemeMode } from '../../logics/theme';
+import { isSettingAvailable } from '../../logics/settings-registry';
 import { useHighlight } from './useHighlight';
 
 const store = useSettingsStore();
@@ -24,8 +25,11 @@ const themeOptions: FluentSelectOption[] = [
     { value: 'dark', label: '深色' },
 ];
 
+/** 当前平台：设置项的可见性与搜索结果共用同一份判断（见 settings-registry 的 platforms） */
+const platform = api.os.type();
+
 /** 是否为 macOS（部分设置项与文案有平台差异） */
-const isMacOS = computed(() => api.os.type() === 'macos');
+const isMacOS = computed(() => platform === 'macos');
 
 // 主题切换即时生效：全窗口共享同一 DOM，setThemeMode 直接切换 dark class，无需等待保存
 watch(() => state.theme, theme => setThemeMode(theme));
@@ -207,7 +211,7 @@ async function onLaunchAtLoginChange(enabled: boolean | undefined) {
                 </template>
                 <FluentToggleSwitch v-model="state.keepRunningOnClose" />
             </FluentSettingCard>
-            <FluentSettingCard v-if="isMacOS" header="显示菜单栏图标"
+            <FluentSettingCard v-if="isSettingAvailable('showMenuBarIcon', platform)" header="显示菜单栏图标"
                 description="在屏幕顶部菜单栏显示图标，窗口关闭后仍可从这里唤起应用"
                 setting-id="showMenuBarIcon">
                 <template #header-extra>
@@ -215,7 +219,7 @@ async function onLaunchAtLoginChange(enabled: boolean | undefined) {
                 </template>
                 <FluentToggleSwitch v-model="state.showMenuBarIcon" />
             </FluentSettingCard>
-            <FluentSettingCard v-if="isMacOS" header="后台运行时保留 Dock 栏图标"
+            <FluentSettingCard v-if="isSettingAvailable('keepDockIconInBackground', platform)" header="后台运行时保留 Dock 栏图标"
                 description="关闭窗口后在 Dock 栏保留图标；窗口打开时 Dock 图标始终显示"
                 setting-id="keepDockIconInBackground">
                 <template #header-extra>
@@ -223,7 +227,7 @@ async function onLaunchAtLoginChange(enabled: boolean | undefined) {
                 </template>
                 <FluentToggleSwitch v-model="state.keepDockIconInBackground" />
             </FluentSettingCard>
-            <FluentSettingCard v-if="!isMacOS" header="托盘图标样式" :description="trayIconStyleDescription"
+            <FluentSettingCard v-if="isSettingAvailable('trayIconStyle', platform)" header="托盘图标样式" :description="trayIconStyleDescription"
                 setting-id="trayIconStyle">
                 <template #header-extra>
                     <ResetButton setting-key="trayIconStyle" />

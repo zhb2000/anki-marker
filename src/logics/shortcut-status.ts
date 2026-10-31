@@ -20,6 +20,13 @@ interface ShortcutRegistration {
 /** 最近一次全局快捷键注册结果的错误信息；null 表示正常（或未设置快捷键） */
 export const shortcutError: Ref<string | null> = ref(null);
 
+/**
+ * 最近一次向系统注册的全局快捷键（空串表示未设置）。注册失败时仍是配置里的值，
+ * 因此它反映“有没有设置快捷键”，而不是“注册是否成功”（后者看 shortcutError）。
+ * 供设置页徽标等设置页之外的代码判断依赖项是否可用
+ */
+export const configuredShortcut: Ref<string> = ref('');
+
 /** 辅助功能权限状态：null 表示尚未检查 */
 export const accessibilityTrusted: Ref<boolean | null> = ref(null);
 
@@ -77,6 +84,7 @@ export async function initShortcutStatus(): Promise<void> {
 
 /** 应用一次注册结果：成功时清除错误；失败时记录错误（提示由设置页的就地反馈与导航徽标承担） */
 function applyRegistration(registration: ShortcutRegistration) {
+    configuredShortcut.value = registration.shortcut;
     shortcutError.value = registration.success ? null : (registration.error ?? '未知错误');
 }
 

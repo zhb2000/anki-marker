@@ -5,8 +5,13 @@
  * - SETTING_ENTRIES：可搜索的设置项/动作条目；设置项 id 用 config 键名（与卡片 data-setting-id 一致），
  *   关于/高级页的动作条目用短横线 id
  * - 条目的 title/description 与各设置子页面的文案保持一致
+ * - 搜索只查这张表、跳转高亮又只认卡片的 data-setting-id，两边必须一一对应；
+ *   新增设置卡片时别忘在这里登记（settings-registry.test.ts 会做双向校验）
+ * - 平台专属条目的 platforms 与设置页卡片的可见性同源：页面卡片也调 isSettingAvailable 判断，
+ *   不要另写 v-if="isMacOS"，否则搜索会列出别的平台上根本不存在的设置项
  */
 
+import type * as api from '../tauri-api';
 import { LLM_DEFAULT_MAX_TOKENS } from './llm';
 
 /** 设置页 id（与 /settings/<id> 路由路径段一致） */
@@ -32,6 +37,9 @@ export const SETTINGS_PAGES: SettingsPageMeta[] = [
     { id: 'about', title: '关于', icon: 'about' },
 ];
 
+/** 设置项可见性判断用的平台（Tauri 的 OsType，应用只发布桌面三端） */
+export type SettingsPlatform = api.os.OsType;
+
 /** 可搜索的设置项/动作条目 */
 export interface SettingEntry {
     /** 设置项用 config 键名，动作条目用短横线 id（与卡片 data-setting-id 高亮锚点一致） */
@@ -42,6 +50,11 @@ export interface SettingEntry {
     description?: string;
     /** 搜索别名：中文名、口语说法、英文、相关词 */
     keywords: string[];
+    /**
+     * 仅在列出的平台出现；缺省表示所有平台。
+     * 设置页卡片的可见性也走 isSettingAvailable（同一份数据），两边不会漂移
+     */
+    platforms?: readonly SettingsPlatform[];
 }
 
 export const SETTING_ENTRIES: SettingEntry[] = [
@@ -66,6 +79,7 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         title: '显示菜单栏图标',
         description: '在屏幕顶部菜单栏显示图标（仅 macOS）',
         keywords: ['菜单栏', '菜单栏图标', '图标', '显示图标', 'menu bar', 'menubar'],
+        platforms: ['macos'],
     },
     {
         id: 'keepDockIconInBackground',
@@ -73,6 +87,7 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         title: '后台运行时保留 Dock 栏图标',
         description: '关闭窗口后在 Dock 栏保留图标（仅 macOS）',
         keywords: ['dock', 'dock 栏', '图标', '后台', '保留图标', 'dock icon'],
+        platforms: ['macos'],
     },
     {
         id: 'trayIconStyle',
@@ -80,6 +95,7 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         title: '托盘图标样式',
         description: '托盘图标使用单色跟随系统、彩色、白色或黑色',
         keywords: ['托盘图标', '图标样式', '单色', '彩色', '白色', '黑色', '跟随系统', '任务栏', '深色', '浅色', '主题', 'tray', 'icon', 'monochrome', 'theme'],
+        platforms: ['windows', 'linux'],
     },
     {
         id: 'launchAtLogin',
@@ -97,6 +113,21 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         title: '全局快捷键（录入句子）',
         description: '在任意应用中选中一段文字后按下此快捷键，所选文字将录入划词面板并自动分词。',
         keywords: ['快捷键', '快捷方式', '全局快捷键', '录入句子', 'hotkey', 'shortcut', '划词'],
+    },
+    {
+        id: 'wordToSentence',
+        page: 'selection',
+        title: '选词取句',
+        description: '开启后，只需选中一个单词按下快捷键，即可自动录入该单词所在的整个句子并查询该单词；关闭则需选中完整句子录入。',
+        keywords: ['选词取句', '取句', '选词', '选中单词', '单词取句', '划词取句', '整句', '句子', 'word to sentence', 'sentence'],
+    },
+    {
+        id: 'accessibility-permission',
+        page: 'selection',
+        title: '辅助功能权限',
+        description: 'macOS 上划词所需的系统权限；未授权时划词可能无法取得选中的文字',
+        keywords: ['辅助功能', '辅助功能权限', '权限', '授权', '系统设置', '隐私与安全性', 'accessibility', 'permission', 'trust'],
+        platforms: ['macos'],
     },
     // #endregion
 
@@ -201,16 +232,12 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         keywords: ['配置文件', '配置文件路径', '路径', '设置文件', 'config'],
     },
     {
+        // “打开文件”与“打开目录”两个按钮在同一张卡里，合成一条：锚点就是卡片的 id，
+        // 否则分开登记时“打开目录”能搜到、跳转后却没有元素可高亮
         id: 'open-config-file',
         page: 'advanced',
-        title: '打开文件',
-        keywords: ['打开文件', '打开配置文件', '配置文件', '编辑配置', 'open', 'config'],
-    },
-    {
-        id: 'open-config-dir',
-        page: 'advanced',
-        title: '打开目录',
-        keywords: ['打开目录', '打开文件夹', '所在目录', '目录', 'open', 'folder'],
+        title: '打开配置文件',
+        keywords: ['打开文件', '打开配置文件', '配置文件', '编辑配置', '打开目录', '打开文件夹', '所在目录', '目录', 'open', 'folder', 'config'],
     },
     {
         id: 'reset-all',
@@ -249,15 +276,37 @@ export const SETTING_ENTRIES: SettingEntry[] = [
     // #endregion
 ];
 
-/** 搜索设置条目：trim 后大小写不敏感地子串匹配 title/description/keywords，空 query 返回 [] */
-export function searchSettings(query: string): SettingEntry[] {
+/** id → 条目，供 isSettingAvailable 查询 */
+const ENTRIES_BY_ID = new Map(SETTING_ENTRIES.map(entry => [entry.id, entry]));
+
+/**
+ * 设置卡片在当前平台是否可见。
+ * 设置页卡片的 v-if 与搜索结果过滤都调这里，保证“能搜到的就是页面上存在的”；
+ * 非平台条件（如未设置快捷键时不显示辅助功能权限卡）仍由页面自行组合。
+ */
+export function isSettingAvailable(id: string, platform: SettingsPlatform): boolean {
+    const entry = ENTRIES_BY_ID.get(id);
+    if (entry == null) {
+        return false;
+    }
+    return entry.platforms?.includes(platform) ?? true;
+}
+
+/**
+ * 搜索设置条目：trim 后大小写不敏感地子串匹配 title/description/keywords，空 query 返回 []。
+ * 只返回 platform 上真实存在的条目（见 Entry.platforms）
+ */
+export function searchSettings(query: string, platform: SettingsPlatform): SettingEntry[] {
     const q = query.trim().toLowerCase();
     if (q.length === 0) {
         return [];
     }
     return SETTING_ENTRIES.filter(entry =>
-        entry.title.toLowerCase().includes(q) ||
-        (entry.description?.toLowerCase().includes(q) ?? false) ||
-        entry.keywords.some(keyword => keyword.toLowerCase().includes(q))
+        (entry.platforms?.includes(platform) ?? true) &&
+        (
+            entry.title.toLowerCase().includes(q) ||
+            (entry.description?.toLowerCase().includes(q) ?? false) ||
+            entry.keywords.some(keyword => keyword.toLowerCase().includes(q))
+        )
     );
 }
