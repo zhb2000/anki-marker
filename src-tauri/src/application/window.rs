@@ -1,4 +1,4 @@
-//! 主窗口外观与 macOS 标题栏行为。
+//! 主窗口的显示与重建、外观与 macOS 标题栏行为。
 //!
 //! 窗口使用 `titleBarStyle: "Overlay"`（见 tauri.conf.json）：原生标题栏透明、内容视图
 //! 铺满整个窗口，红绿灯浮在网页之上。这样弹窗遮罩（DOM 中 position: fixed 的 smoke）
@@ -8,9 +8,7 @@
 //! - 拖动：前端在顶部标题栏高度的命中条上调用 start_dragging（见 components/MacTitleBar.vue）；
 //! - 双击：Rust 侧装一个原生事件监听，按系统偏好执行缩放/最小化/无操作。
 
-#[cfg(target_os = "macos")]
-use tauri::Manager;
-use tauri::{AppHandle, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 #[cfg(target_os = "macos")]
 use {
@@ -26,9 +24,48 @@ use {
     std::sync::Mutex,
 };
 
+/// 显示并聚焦主窗口；若主窗口已不存在，则按 tauri.conf.json 中的窗口配置重建。
+///
+/// 调用时机：划词快捷键触发（macOS）、点击 Dock 图标（macOS）、点击托盘图标/托盘
+/// 菜单“打开”（Windows/Linux）。后台运行期间点关闭按钮仅隐藏窗口，正常情况下
+/// 窗口始终存在，重建仅作兜底。
+pub fn show_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.show().map_err(|e| e.to_string())?;
+        // 从最小化状态恢复（show() 对已最小化的窗口不自动还原）
+        window.unminimize().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+        // 恢复 macOS 的 Dock 图标（托盘图标常驻，不受窗口显隐影响）
+        super::menubar::on_main_window_shown(app);
+        return Ok(());
+    }
+    let window_config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .cloned()
+        .ok_or("main window config not found")?;
+    let window = tauri::WebviewWindowBuilder::from_config(app, &window_config)
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())?;
+    // tauri.conf.json 中窗口初始 visible: false（防启动闪屏），此处直接显示；
+    // 前端就绪后的 show() 是幂等的
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())?;
+    // 新窗口没有 setup 阶段挂在旧窗口上的原生监听（macOS 标题栏双击、Windows 任务栏
+    // 深浅子类化），重新挂载
+    install_main_window_hooks(app);
+    // 恢复 macOS 的 Dock 图标（托盘图标常驻，不受窗口显隐影响）
+    super::menubar::on_main_window_shown(app);
+    return Ok(());
+}
+
 /// 安装主窗口的原生挂载：macOS 标题栏双击监听、Windows 任务栏深浅监听（子类化主窗口）。
 ///
-/// 应用 setup 阶段调用一次；主窗口被销毁重建后（见 shortcut::show_and_focus_main_window）
+/// 应用 setup 阶段调用一次；主窗口被销毁重建后（见 show_and_focus_main_window）
 /// 必须对新窗口重新挂载，否则新窗口没有这些行为。可从任意线程调用。
 pub fn install_main_window_hooks(app: &AppHandle) {
     #[cfg(target_os = "macos")]

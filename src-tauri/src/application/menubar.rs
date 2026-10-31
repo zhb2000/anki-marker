@@ -398,7 +398,7 @@ pub fn register_tray_icon_event_handler(app: &AppHandle) {
             ..
         } = event
         {
-            if let Err(error) = super::shortcut::show_and_focus_main_window(app) {
+            if let Err(error) = super::window::show_and_focus_main_window(app) {
                 log::warn!("failed to show main window from tray icon click: {error}");
             }
         }
@@ -414,14 +414,15 @@ pub fn register_menu_event_handler(app: &AppHandle) {
     app.on_menu_event(|app, event| match event.id.as_ref() {
         // 划词录入：与全局快捷键相同的捕获流程（读取选中文本后录入主窗口）。
         // 点击托盘/Dock 菜单不会激活本应用，选中文本仍来自用户当前所在的应用；
-        // Windows 托盘菜单会抢走前台，由捕获流程内部先归还（见 shortcut 模块）
+        // Windows 托盘菜单会抢走前台，由捕获流程内部先归还（见 capture_flow 模块）
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        "capture" => {
-            super::shortcut::on_shortcut_pressed(app.clone(), super::shortcut::CaptureTrigger::Menu)
-        }
+        "capture" => super::capture_flow::start_capture(
+            app.clone(),
+            super::capture_flow::CaptureTrigger::Menu,
+        ),
         // 打开主窗口：复用划词快捷键/Dock 点击/托盘点击的显示并聚焦逻辑
         "open" => {
-            if let Err(error) = super::shortcut::show_and_focus_main_window(app) {
+            if let Err(error) = super::window::show_and_focus_main_window(app) {
                 log::warn!("failed to show main window from icon menu: {error}");
             }
         }

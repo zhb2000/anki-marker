@@ -1,5 +1,7 @@
 pub mod anki;
 pub mod autostart;
+/// 划词捕获编排：互斥、代次、后台重试补发与暂存（平台取词见 logics::selected_text）
+pub mod capture_flow;
 pub mod config;
 pub mod dict;
 pub mod logics;

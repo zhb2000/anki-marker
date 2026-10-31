@@ -54,7 +54,7 @@ fn main() {
             if args.iter().any(|arg| arg == "--hidden") {
                 return;
             }
-            if let Err(error) = application::shortcut::show_and_focus_main_window(app) {
+            if let Err(error) = application::window::show_and_focus_main_window(app) {
                 log::warn!("failed to show main window for the second instance: {error}");
             }
         }))
@@ -83,9 +83,9 @@ fn main() {
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, _shortcut, event| {
                 if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                    application::shortcut::on_shortcut_pressed(
+                    application::capture_flow::start_capture(
                         app.clone(),
-                        application::shortcut::CaptureTrigger::Shortcut,
+                        application::capture_flow::CaptureTrigger::Shortcut,
                     );
                 }
             })
@@ -128,8 +128,8 @@ fn main() {
             app.manage(application::config::IsWatching::new());
             app.manage(application::dict::DictPath::new(portable.0, app.path())?);
             app.manage(Mutex::new(None::<Connection>));
-            app.manage(application::shortcut::PendingSentence::new());
-            app.manage(application::shortcut::CaptureSettling::new());
+            app.manage(application::capture_flow::PendingSentence::new());
+            app.manage(application::capture_flow::CaptureSettling::new());
 
             // 注册配置中设置的划词全局快捷键
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -221,9 +221,9 @@ fn main() {
             application::dict::search_oxford,
             application::dict::get_word_base,
             application::dict::sanitize_filename,
-            application::shortcut::take_pending_sentence,
-            application::shortcut::take_pending_capture_failure,
-            application::shortcut::is_capture_settling,
+            application::capture_flow::take_pending_sentence,
+            application::capture_flow::take_pending_capture_failure,
+            application::capture_flow::is_capture_settling,
             application::shortcut::is_accessibility_trusted,
             application::shortcut::request_accessibility_trust,
             application::shortcut::get_shortcut_registration,
@@ -244,7 +244,7 @@ fn main() {
         } = event
         {
             if !has_visible_windows {
-                if let Err(error) = application::shortcut::show_and_focus_main_window(app_handle) {
+                if let Err(error) = application::window::show_and_focus_main_window(app_handle) {
                     log::warn!("failed to show main window on dock click: {error}");
                 }
             }
