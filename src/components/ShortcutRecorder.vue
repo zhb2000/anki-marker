@@ -162,13 +162,21 @@ const display = computed(() => {
     background-color: var(--control-background-hover);
 }
 
-/* 录制态复用输入框的聚焦观感（WKWebView 中点击 button 不获焦，:focus 覆盖不到录制态） */
+/* 录制态复用输入框的聚焦观感（WKWebView 中点击 button 不获焦，:focus 覆盖不到录制态）。
+   下划线采用 FluentInput / FluentTextarea 的同一套画法：边框宽度始终保持 --border-width
+   （不挤压内容区，文字零位移），只把底边框设透明，accent 色带作为背景从底边向上绘制，
+   形成上缘平直、下缘随圆角弯曲的强调下划线（总厚度 --input-text-border-bottom-width-focus），
+   圆角两侧仍归属侧边框，观感与真实边框一致 */
 .shortcut-recorder:focus,
 .shortcut-recorder.recording {
     outline: none;
     background-color: var(--input-text-background-focus);
-    border-bottom-width: var(--input-text-border-bottom-width-focus);
-    border-bottom-color: var(--accent);
+    border-bottom-color: transparent;
+    background-image: linear-gradient(var(--accent), var(--accent));
+    background-origin: border-box;
+    background-size: 100% var(--input-text-border-bottom-width-focus);
+    background-position: 0 100%;
+    background-repeat: no-repeat;
 }
 
 .shortcut-recorder.recording {

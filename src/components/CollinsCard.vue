@@ -59,12 +59,7 @@ function emitEditBtnClick() {
 </template>
 
 <style scoped>
-.ai-picked {
-    border-left: 2px solid var(--accent);
-    /* color-mix 不可用的旧 WebView 回退为原卡片背景色，仅保留左边条 */
-    background-color: var(--input-text-background-focus);
-    background-color: color-mix(in srgb, var(--accent) 6%, var(--input-text-background-focus));
-}
+/* .ai-picked 的左边条与背景 tint 由 WordCard 统一实现（色带画法见那里的注释） */
 
 .ai-picked-badge {
     float: right;

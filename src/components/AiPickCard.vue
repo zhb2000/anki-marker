@@ -58,7 +58,17 @@ const showEditButton = computed(() => showAddButton.value && props.status === 'i
 const inProgress = computed(() =>
     props.state.phase === 'loading' || props.state.phase === 'thinking' || props.state.phase === 'streaming');
 
+/** 已添加（含处理中）：与 WordCard 一致，整卡描边转为强调色 */
+const isAdded = computed(() =>
+    props.status === 'is-added' || props.status === 'processing-add' || props.status === 'processing-remove');
+
+/** 边框脉冲动画 class：与 WordCard 的添加/移除反馈同款，由点击的那一刻触发（不在基础样式里） */
+const boxShadowAnimation = ref<string | null>(null);
+
 function emitAddBtnClick() {
+    boxShadowAnimation.value = props.status === 'not-added'
+        ? 'use-add-box-shadow-animation'
+        : 'use-remove-box-shadow-animation';
     emit('add-btn-click');
 }
 
@@ -114,6 +124,9 @@ watch(() => [props.state.phase, props.state.pick != null], () => {
 function onCardAnimationEnd(event: AnimationEvent) {
     if (event.animationName.startsWith('aiPickCardIn')) {
         cardAnimIn.value = false;
+    } else if (event.animationName.startsWith('addBoxShadow') || event.animationName.startsWith('removeBoxShadow')) {
+        // 边框脉冲结束即摘掉 class，避免下次重挂载/切显隐时重放（与 WordCard 同一处理）
+        boxShadowAnimation.value = null;
     }
 }
 
@@ -125,9 +138,13 @@ function onBodyAnimationEnd(event: AnimationEvent) {
 </script>
 
 <template>
-    <div class="ai-pick-card"
-        :class="{ 'is-fallback': state.phase === 'done' && state.fallback, 'anim-card-in': cardAnimIn }"
-        @animationend="onCardAnimationEnd">
+    <div class="ai-pick-card" :class="{
+        'is-fallback': state.phase === 'done' && state.fallback,
+        'is-added': isAdded,
+        'anim-card-in': cardAnimIn,
+        'use-add-box-shadow-animation': boxShadowAnimation === 'use-add-box-shadow-animation',
+        'use-remove-box-shadow-animation': boxShadowAnimation === 'use-remove-box-shadow-animation'
+    }" @animationend="onCardAnimationEnd">
         <!-- 与 WordCard 相同的左右分栏：左侧内容自适应，右侧加号按钮固定 -->
         <div class="display-flex">
             <div class="flex-grow-1">
@@ -204,6 +221,8 @@ function onBodyAnimationEnd(event: AnimationEvent) {
 
 <style scoped>
 .ai-pick-card {
+    /* 左边条颜色：fallback 时只换这条自定义属性，画法与圆角裁剪都不变 */
+    --ai-pick-bar-color: var(--accent);
     user-select: text;
     cursor: text;
     padding: 10px;
@@ -217,13 +236,69 @@ function onBodyAnimationEnd(event: AnimationEvent) {
     border-color: var(--border-color);
     border-bottom-color: var(--border-bottom-color);
     border-width: var(--border-width);
-    /* 克制的 AI 区隔：accent 左边条 */
-    border-left: 2px solid var(--accent);
+    /* 克制的 AI 区隔：accent 左边条。与 WordCard 的 .ai-picked 同一套画法
+       （见那里的注释）：左边框透明，色带用背景渐变画在 border-box 左缘，
+       外缘随圆角弯曲、内缘竖直，宽度可比 border-width 略宽而不挤动内容 */
+    border-left-color: transparent;
+    background-image: linear-gradient(var(--ai-pick-bar-color), var(--ai-pick-bar-color));
+    background-origin: border-box;
+    background-size: var(--card-accent-bar-width) 100%;
+    background-position: 0 0;
+    background-repeat: no-repeat;
     border-radius: var(--border-radius);
+    /* 添加态的内阴影描边靠过渡衔接，与 WordCard 保持一致 */
+    transition: box-shadow calc(0.3s * 0.5);
 }
 
 .ai-pick-card.is-fallback {
-    border-left-color: var(--warning-text-color);
+    --ai-pick-bar-color: var(--warning-text-color);
+}
+
+/* 已添加：与 WordCard 一致整圈刷成强调色。规则放在上面两条之后且特异性更高，
+   因此左边框不再是透明色，而是直接用 accent 盖住色带——
+   左边不会出现“色带 2px + 内阴影 1px”的叠加，四边粗细完全一致，
+   边框脉冲动画也就在整圈上均匀扩散，不会只在左侧更粗 */
+.ai-pick-card.is-added {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* 添加/移除的边框脉冲：与 WordCard 同款参数与关键帧（scoped 编译后会加组件哈希，
+   动画名判断一律用前缀匹配） */
+.use-add-box-shadow-animation {
+    animation: addBoxShadow 0.3s;
+}
+
+.use-remove-box-shadow-animation {
+    animation: removeBoxShadow 0.3s;
+}
+
+@keyframes addBoxShadow {
+    0% {
+        box-shadow: initial;
+    }
+
+    50% {
+        box-shadow: inset 0 0 0 3px var(--accent);
+    }
+
+    100% {
+        box-shadow: inset 0 0 0 1px var(--accent);
+    }
+}
+
+@keyframes removeBoxShadow {
+    0% {
+        box-shadow: inset 0 0 0 1px var(--accent);
+    }
+
+    50% {
+        box-shadow: inset 0 0 0 3px var(--accent);
+    }
+
+    100% {
+        box-shadow: initial;
+    }
 }
 
 /* 入场动画不写进基础样式（见 script 中 cardAnimIn 的注释），由 class 控制且只播一次 */

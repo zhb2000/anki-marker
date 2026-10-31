@@ -43,6 +43,11 @@
     --border-radius: 5px;
     --border-color: #e5e5e5;
     --border-bottom-color: #cccccc;
+    /* 卡片左侧强调条（AI 优选）的可见宽度。与 FluentInput 的聚焦下划线同一套画法：
+       左边框本身透明，色带用背景渐变绘制在 border-box 左缘，因此可以比 border-width
+       略宽而不会挤动内容；外缘随圆角弯曲、内缘竖直，观感就是一条自然的加粗左边框。
+       见 WordCard / AiPickCard 的 .ai-picked 与 .ai-pick-card */
+    --card-accent-bar-width: 2px;
     /* 强调色控件底部描边: ControlStrokeColorOnAccentSecondary 浅色值（黑 40%），
        叠加在强调色填充上即“强调色压暗”；深色为黑 14%，见 html.dark */
     --border-accent-bottom-color: #00000066;

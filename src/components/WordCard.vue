@@ -94,6 +94,24 @@ function handleAnimationEnd() {
     margin-top: 6px;
 }
 
+/* AI 优选左边条：不额外加宽左边框（加宽会挤动内容，且圆角处与上下边框斜接错位），
+   改为把左边框设为透明、用背景渐变在 border-box 左缘画一条 accent 色带，
+   与 FluentInput 聚焦下划线同一套技巧：外缘随外圆角弯曲、内缘竖直，
+   宽度可超过 border-width（多出的部分落在内边距区），是一条自然的加粗左边框。
+   注意规则顺序：添加态 .card.is-added 在下面且特异性更高，会把整圈边框刷成
+   不透明 accent，正好盖住色带（含内边距区那一点，由内阴影覆盖），四边粗细一致 */
+.card.ai-picked {
+    border-left-color: transparent;
+    /* color-mix 不可用的旧 WebView 回退为原卡片背景色，仅保留左边条 */
+    background-color: var(--input-text-background-focus);
+    background-color: color-mix(in srgb, var(--accent) 6%, var(--input-text-background-focus));
+    background-image: linear-gradient(var(--accent), var(--accent));
+    background-origin: border-box;
+    background-size: var(--card-accent-bar-width) 100%;
+    background-position: 0 0;
+    background-repeat: no-repeat;
+}
+
 .card.is-added {
     border-color: var(--accent);
     box-shadow: inset 0 0 0 1px var(--accent);
