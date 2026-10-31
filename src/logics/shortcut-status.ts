@@ -5,7 +5,6 @@
 // - 窗口焦点监听全局常驻、不注销——权限状态需在任何时刻（含未打开设置页时）
 //   从系统设置授权返回后自动刷新，供导航红点使用。
 import { ref, type Ref } from 'vue';
-import { ElMessage } from 'element-plus';
 
 import * as api from '../tauri-api';
 import { dialog } from '../fluent-controls';
@@ -44,7 +43,7 @@ export async function initShortcutStatus(): Promise<void> {
     // 监听快捷键注册结果事件，失败时记录错误并向用户反馈（文案与原 SettingsView 一致）
     try {
         await api.event.listen<ShortcutRegistration>('shortcut-registration', event => {
-            applyRegistration(event.payload, true);
+            applyRegistration(event.payload);
         });
     } catch (error) {
         console.error(error);
@@ -54,7 +53,7 @@ export async function initShortcutStatus(): Promise<void> {
     try {
         const registration = await invoke<ShortcutRegistration | null>('get_shortcut_registration');
         if (registration != null) {
-            applyRegistration(registration, false);
+            applyRegistration(registration);
         }
     } catch (error) {
         console.error(error);
@@ -76,16 +75,9 @@ export async function initShortcutStatus(): Promise<void> {
     }
 }
 
-/** 应用一次注册结果：成功时清除错误；失败时记录错误（notify 为 true 时弹错提示） */
-function applyRegistration(registration: ShortcutRegistration, notify: boolean) {
-    if (registration.success) {
-        shortcutError.value = null;
-    } else {
-        shortcutError.value = registration.error ?? '未知错误';
-        if (notify) {
-            ElMessage.error(`全局快捷键注册失败：${shortcutError.value}`);
-        }
-    }
+/** 应用一次注册结果：成功时清除错误；失败时记录错误（提示由设置页的就地反馈与导航徽标承担） */
+function applyRegistration(registration: ShortcutRegistration) {
+    shortcutError.value = registration.success ? null : (registration.error ?? '未知错误');
 }
 
 /** 检查辅助功能权限状态 */

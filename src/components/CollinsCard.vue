@@ -3,6 +3,7 @@ import { PropType } from 'vue';
 
 import type { CollinsItem } from '../logics/dict';
 import type { CardStatus } from './CardStatus';
+import type { StatusNotice } from '../fluent-controls/status';
 import WordCard from './WordCard.vue';
 
 const props = defineProps({
@@ -22,12 +23,18 @@ const props = defineProps({
     aiPicked: {
         type: Boolean,
         default: false
+    },
+    /** 该卡片的就地反馈（由 MainView 按词条设置） */
+    notice: {
+        type: Object as PropType<StatusNotice | null>,
+        default: null
     }
 });
 
 const emit = defineEmits<{
     'add-btn-click': [index: number];
     'edit-btn-click': [index: number];
+    'notice-action': [index: number];
 }>();
 
 function emitAddBtnClick() {
@@ -40,8 +47,9 @@ function emitEditBtnClick() {
 </script>
 
 <template>
-    <WordCard :index="index" :status="status" :class="{ 'ai-picked': aiPicked }" @add-btn-click="emitAddBtnClick"
-        @edit-btn-click="emitEditBtnClick">
+    <WordCard :index="index" :status="status" :notice="notice" :class="{ 'ai-picked': aiPicked }"
+        @add-btn-click="emitAddBtnClick"
+        @edit-btn-click="emitEditBtnClick" @notice-action="emit('notice-action', index)">
         <span v-if="aiPicked" class="ai-picked-badge">AI 优选</span>
         <b>{{ item.word }}</b>
         <span v-if="item.sense != null"><span v-html="' '"></span><i>{{ item.sense }}</i></span>

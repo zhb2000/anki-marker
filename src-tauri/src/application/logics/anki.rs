@@ -97,9 +97,11 @@ fn anki_default_install_path() -> Option<String> {
 pub fn is_anki_running_impl() -> Result<bool, String> {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn inner() -> Result<bool, String> {
-        // pgrep 退出码 0 表示匹配到进程；flatpak 安装的 Anki 进程名同样为 anki，仍可匹配
+        // pgrep 退出码 0 表示匹配到进程；flatpak 安装的 Anki 进程名同样为 anki，仍可匹配。
+        // 必须带 -i：macOS 上 Anki.app 的可执行文件名是 "Anki"（大写），pgrep 默认大小写敏感，
+        // 只用 -x anki 会永远匹配不到，导致“Anki 正在运行但连不上 AnkiConnect”这一判断失效。
         let output = match std::process::Command::new("pgrep")
-            .args(["-x", "anki"])
+            .args(["-i", "-x", "anki"])
             .output()
         {
             Ok(output) => output,

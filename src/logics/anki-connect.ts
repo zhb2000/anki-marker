@@ -2,6 +2,9 @@ import { fetch } from '@tauri-apps/plugin-http';
 
 import { typeAssertion } from './typing';
 
+/** 单次 AnkiConnect 请求的默认超时（毫秒）：地址配置错误时请求可能永远不返回，用它兜底 */
+const REQUEST_TIMEOUT_MS = 30_000;
+
 /**
  * Anki Connect API: https://foosoft.net/projects/anki-connect/
  */
@@ -13,6 +16,31 @@ export class AnkiConnectApi {
     }
 
     public async invoke<T>(action: string, params?: Record<string, any>, signal?: AbortSignal): Promise<T> {
+        // 调用方信号与默认超时合并成一个内部信号（WebView 对 AbortSignal.any 支持不一致，手动合并）
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+        const forwardAbort = () => controller.abort();
+        signal?.addEventListener('abort', forwardAbort, { once: true });
+        try {
+            return await this.invokeInternal<T>(action, params, controller.signal);
+        } catch (error) {
+            if (signal?.aborted) {
+                throw error; // 调用方主动取消：保留 AbortError 语义
+            }
+            if (controller.signal.aborted) {
+                throw new Error(
+                    `AnkiConnect 请求超时（${REQUEST_TIMEOUT_MS / 1000} 秒，动作 ${action}），请检查 AnkiConnect 服务地址配置。`,
+                    { cause: error },
+                );
+            }
+            throw error;
+        } finally {
+            window.clearTimeout(timer);
+            signal?.removeEventListener('abort', forwardAbort);
+        }
+    }
+
+    private async invokeInternal<T>(action: string, params: Record<string, any> | undefined, signal: AbortSignal): Promise<T> {
         // 使用 Tauri 的 fetch 发送 HTTP 请求，以规避跨域问题
         const response = await fetch(this.url, {
             method: 'POST',
@@ -144,7 +172,8 @@ export class AnkiConnectApi {
         modelName: string,
         fields: Record<string, string>,
         audio?: { url: string, filename: string, fields: string[]; }[],
-        options?: { allowDuplicate: boolean; }
+        options?: { allowDuplicate: boolean; },
+        signal?: AbortSignal
     ): Promise<number | null> {
         return await this.invoke('addNote', {
             note: {
@@ -154,15 +183,15 @@ export class AnkiConnectApi {
                 audio,
                 options
             }
-        });
+        }, signal);
     }
 
     /**
      * Deletes notes with the given ids. If a note has several cards associated with it,
      * all associated cards will be deleted.
      */
-    public async deleteNotes(notes: number[]) {
-        await this.invoke('deleteNotes', { notes });
+    public async deleteNotes(notes: number[], signal?: AbortSignal) {
+        await this.invoke('deleteNotes', { notes }, signal);
     }
     // #endregion
 

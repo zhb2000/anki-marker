@@ -19,7 +19,6 @@
     "@tauri-apps/plugin-http": "~2.6.1",
     "@tauri-apps/plugin-log": "^2.9.0",
     "@tauri-apps/plugin-os": "~2.3.2",
-    "element-plus": "^2.14.5",
     "github-markdown-css": "^5.9.0",
     "markdown-it": "^15.0.3",
     "normalize.css": "^8.0.1",

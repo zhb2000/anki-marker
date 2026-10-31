@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onActivated, onBeforeMount, ref } from 'vue';
-import { ElMessage } from 'element-plus';
 import MarkdownIt from 'markdown-it';
 import 'github-markdown-css';
 import '../../assets/markdown-dark.css';
@@ -13,15 +12,26 @@ import {
     FluentDialogShell,
     FluentHyperlink,
     FluentSettingCard,
+    FluentStatusText,
     dialog,
     type FluentDialogCommand,
 } from '../../fluent-controls';
+import { useTransientNotice } from '../../fluent-controls/useTransientNotice';
 import OpenFilledSvg from '../../assets/OpenFilled.svg';
 import GitHubSvg from '../../assets/github.svg';
 import { useHighlight } from './useHighlight';
 
 // 搜索跳转高亮（见 useHighlight 注释）
 useHighlight();
+
+/**
+ * 就地反馈：结果写在触发它的那张设置卡片底部（#notice 插槽），
+ * 不再占用窗口顶部的全局信息条。
+ * - 应用版本卡片：检查更新的结果
+ * - 笔记模板卡片：启动 Anki 失败 / 模板更新成功
+ */
+const { notice: appVersionNotice, show: showAppVersionNotice } = useTransientNotice(3000);
+const { notice: templateNotice, show: showTemplateNotice } = useTransientNotice(3000);
 
 /** avoid rendering before the config is loaded */
 const pageInitialized = ref(false);
@@ -77,9 +87,9 @@ async function handleCheckUpdateClick() {
         checkingAppUpdate.value = false;
     }
     if (globals.appUpdateAvailable.value) {
-        ElMessage.success(`发现应用新版本：${globals.latestAppVersion.value}`);
+        showAppVersionNotice(`发现应用新版本：${globals.latestAppVersion.value}`, { severity: 'success', duration: 5000 });
     } else {
-        ElMessage.success('当前应用已是最新版本');
+        showAppVersionNotice('当前应用已是最新版本', { severity: 'success' });
     }
 }
 // #endregion
@@ -115,7 +125,10 @@ async function handleLaunchAnkiClick() {
         await globals.fetchAndSetTemplateVersion(effectiveModelName.value);
     } catch (error) {
         console.error(error);
-        ElMessage.error(error instanceof Error ? error.message : String(error));
+        showTemplateNotice(error instanceof Error ? error.message : String(error), {
+            severity: 'error',
+            duration: 5000,
+        });
     } finally {
         launchingAnki.value = false;
     }
@@ -165,7 +178,7 @@ async function handleUpdateTemplateClick() {
         await dialog.message(String(error), { title: '笔记模板更新失败', kind: 'error' });
         return;
     }
-    ElMessage.success('笔记模板更新成功');
+    showTemplateNotice('笔记模板更新成功', { severity: 'success' });
     templateReleaseNoteDialogVisible.value = false;
     await globals.fetchAndSetTemplateVersion(effectiveModelName.value); // 刷新笔记模板版本
 }
@@ -209,6 +222,10 @@ onActivated(async () => {
                     title="查看应用更新说明" @click="appReleaseNoteDialogVisible = true">
                     新版本：{{ globals.latestAppVersion }}
                 </FluentHyperlink>
+                <template #notice>
+                    <FluentStatusText :severity="appVersionNotice?.severity ?? 'success'"
+                        :message="appVersionNotice?.message ?? null" />
+                </template>
             </FluentSettingCard>
             <FluentSettingCard header="Anki 内笔记模板版本" setting-id="update-template"
                 :description="templateFailureDescription">
@@ -229,6 +246,10 @@ onActivated(async () => {
                     @click="templateReleaseNoteDialogVisible = true">
                     新版本：{{ anki.CARD_TEMPLATE_VERSION }}
                 </FluentHyperlink>
+                <template #notice>
+                    <FluentStatusText :severity="templateNotice?.severity ?? 'success'"
+                        :message="templateNotice?.message ?? null" />
+                </template>
             </FluentSettingCard>
             <FluentSettingCard header="作者" setting-id="author">
                 <FluentHyperlink @click="cfg.openInBrowser('https://github.com/zhb2000')"

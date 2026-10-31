@@ -60,8 +60,52 @@ const ANKI_CONNECT_PROBE_TIMEOUT_MS = 2000;
 const ANKI_LAUNCH_WAIT_TIMEOUT_MS = 60 * 1000;
 /** 启动 Anki 后轮询探活的间隔（毫秒） */
 const ANKI_LAUNCH_POLL_INTERVAL_MS = 500;
+/** 启动后每隔多久确认一次进程还在（用户可能在启动过程中把 Anki 关掉） */
+const ANKI_LAUNCH_RECHECK_INTERVAL_MS = 3000;
+/** 一次等待里最多拉起几次 Anki（避免用户关掉后无限重开窗口） */
+const ANKI_MAX_LAUNCH_ATTEMPTS = 3;
+/** Anki 已在运行但连不上时，先给多久的宽限期（可能只是还没启动完，插件尚未就绪） */
+const ANKI_RUNNING_GRACE_MS = 8000;
+/**
+ * 拉起 Anki 后，进程已经在、AnkiConnect 却迟迟不监听时，最多再等多久就提示检查插件。
+ * 不必等到 60 秒总超时——插件没启用时等下去也不会变好。
+ */
+const ANKI_CONNECT_GRACE_MS = 20_000;
+/** Anki 在运行却连不上时的统一提示（安装/启用插件的指引） */
+const ANKI_CONNECT_PLUGIN_HINT =
+    'Anki 正在运行，但无法连接 AnkiConnect。' +
+    '请确认已安装并启用 AnkiConnect 插件（安装代码 2055492159），并检查 AnkiConnect 服务地址设置。';
 /** ensureAnkiConnect 正在执行中的 Promise，用于防止重入（并发调用共享同一次执行） */
-let ensureAnkiConnectInFlight: Promise<void> | null = null;
+let ensureAnkiConnectInFlight: { promise: Promise<void>; controller: AbortController; } | null = null;
+/**
+ * 正在等待这次共享执行的调用方。
+ * 最后一个等待者取消（例如用户点了卡片的「停止」）时中断共享执行：
+ * 否则它会在后台继续轮询、甚至在用户关掉 Anki 后把它重新拉起来。
+ */
+const ankiConnectWaiters = new Set<object>();
+/**
+ * 共享执行期间登记的所有进度回调。
+ * 并发添加多个词条时会共享同一次启动 Anki 的执行，此时每个等待中的卡片都应看到
+ * 同一条进度（否则会出现“两张卡片都在处理中，只有一张显示进度条”的不一致）。
+ */
+const ankiConnectProgressListeners = new Set<(message: string) => void>();
+/** 最近一次进度文案，用于给中途加入的调用补发，避免它静默等待 */
+let lastAnkiConnectProgress: string | null = null;
+
+/** 已取消等待时立刻退出（避免继续轮询/重新拉起 Anki） */
+function throwIfAborted(signal: AbortSignal): void {
+    if (signal.aborted) {
+        throw new DOMException('已停止等待 Anki 启动', 'AbortError');
+    }
+}
+
+/** 向所有等待中的调用广播进度 */
+function emitAnkiConnectProgress(message: string): void {
+    lastAnkiConnectProgress = message;
+    for (const listener of ankiConnectProgressListeners) {
+        listener(message);
+    }
+}
 
 function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -80,7 +124,11 @@ async function probeAnkiConnect(): Promise<void> {
     }
 }
 
-async function ensureAnkiConnectImpl(onProgress?: (message: string) => void, forceLaunch = false): Promise<void> {
+async function ensureAnkiConnectImpl(
+    onProgress: ((message: string) => void) | undefined,
+    forceLaunch: boolean,
+    signal: AbortSignal,
+): Promise<void> {
     // 先探活，AnkiConnect 可用时直接返回
     try {
         await probeAnkiConnect();
@@ -88,12 +136,21 @@ async function ensureAnkiConnectImpl(onProgress?: (message: string) => void, for
     } catch {
         // AnkiConnect 不可用，继续后续处理
     }
-    // Anki 在运行但连不上，多半是未安装或未启用 AnkiConnect 插件
+    throwIfAborted(signal);
+    // Anki 在运行但连不上：可能是刚启动、AnkiConnect 还没就绪，先给一小段宽限期
     if (await utils.invoke<boolean>('is_anki_running')) {
-        throw new Error(
-            'Anki 正在运行，但无法连接 AnkiConnect。' +
-            '请确认已安装并启用 AnkiConnect 插件（安装代码 2055492159），并检查 AnkiConnect 服务地址设置。'
-        );
+        const graceDeadline = Date.now() + ANKI_RUNNING_GRACE_MS;
+        while (Date.now() < graceDeadline) {
+            await sleep(ANKI_LAUNCH_POLL_INTERVAL_MS);
+            throwIfAborted(signal);
+            try {
+                await probeAnkiConnect();
+                return;
+            } catch {
+                // 宽限期内继续探活
+            }
+        }
+        throw new Error(ANKI_CONNECT_PLUGIN_HINT);
     }
     const cfg = await getConfig();
     // “自动启动 Anki”设置只约束隐式启动（如添加笔记时顺带拉起）；
@@ -103,10 +160,23 @@ async function ensureAnkiConnectImpl(onProgress?: (message: string) => void, for
     }
     // 拉起 Anki，然后串行轮询等待 AnkiConnect 就绪（上一次探活结束后再 sleep，避免请求堆积）
     // 注意：该命令标注了 rename_all = "snake_case"（项目惯例），参数 key 须用 snake_case
+    const launchAnki = async () => {
+        await utils.invoke<void>('launch_anki', { anki_executable_path: cfg.ankiExecutablePath || null });
+    };
+
+    throwIfAborted(signal);
     onProgress?.('正在启动 Anki，请稍候…');
-    await utils.invoke<void>('launch_anki', { anki_executable_path: cfg.ankiExecutablePath || null });
+    await launchAnki();
+    let launchCount = 1;
     const deadline = Date.now() + ANKI_LAUNCH_WAIT_TIMEOUT_MS;
+    // 刚拉起时 Anki 可能还没出现在进程表里，先等一小段再开始确认进程是否还在
+    let nextRunningCheck = Date.now() + ANKI_LAUNCH_RECHECK_INTERVAL_MS;
+    // 进程已经起来、只是 AnkiConnect 还没监听：文案切换成“连接中”，否则会一直停在“正在启动”
+    let announcedConnecting = false;
+    // 进入“连接中”后最多等这么久，超时直接提示检查插件，而不是耗到 60 秒总超时
+    let connectingDeadline: number | null = null;
     while (true) {
+        throwIfAborted(signal);
         try {
             await probeAnkiConnect();
             return;
@@ -119,6 +189,34 @@ async function ensureAnkiConnectImpl(onProgress?: (message: string) => void, for
                 '或未安装 AnkiConnect 插件（安装代码 2055492159），请检查后重试。'
             );
         }
+        // Anki 进程已经在、但一直等不到 AnkiConnect：多半是插件没装/没启用，提前给出指引
+        if (connectingDeadline != null && Date.now() >= connectingDeadline) {
+            throw new Error(ANKI_CONNECT_PLUGIN_HINT);
+        }
+        // 拉起后用户又把 Anki 关掉（或启动失败）：重新拉起，而不是一直等到超时
+        if (Date.now() >= nextRunningCheck) {
+            nextRunningCheck = Date.now() + ANKI_LAUNCH_RECHECK_INTERVAL_MS;
+            const running = await utils.invoke<boolean>('is_anki_running');
+            if (!running) {
+                if (launchCount >= ANKI_MAX_LAUNCH_ATTEMPTS) {
+                    throw new Error(
+                        'Anki 启动后又退出了。请手动启动 Anki（并确认已启用 AnkiConnect 插件）后重试。'
+                    );
+                }
+                launchCount += 1;
+                throwIfAborted(signal);
+                announcedConnecting = false;
+                connectingDeadline = null;
+                onProgress?.('正在重新启动 Anki，请稍候…');
+                await launchAnki();
+                nextRunningCheck = Date.now() + ANKI_LAUNCH_RECHECK_INTERVAL_MS;
+            } else if (!announcedConnecting) {
+                // Anki 进程已经在了，剩下的是等 AnkiConnect 开始监听端口
+                announcedConnecting = true;
+                connectingDeadline = Date.now() + ANKI_CONNECT_GRACE_MS;
+                onProgress?.('正在连接 Anki，请稍候…');
+            }
+        }
         await sleep(ANKI_LAUNCH_POLL_INTERVAL_MS);
     }
 }
@@ -127,23 +225,65 @@ async function ensureAnkiConnectImpl(onProgress?: (message: string) => void, for
  * 确保 AnkiConnect 服务可用：探活失败且 Anki 未运行时，按配置自动拉起 Anki 并等待其就绪。
  *
  * 并发调用会共享同一次执行（后到的调用等待同一次结果，不会重复启动 Anki），
- * 此时只有第一次调用传入的 `onProgress` 会收到进度回调，启动行为也以第一次调用的参数为准。
+ * 进度会广播给所有等待中的调用，中途加入的调用会立刻收到当前进度，不会静默等待；
+ * 启动行为（forceLaunch）以第一次调用为准。
+ *
+ * 取消语义：调用方传入 signal 后，中断 signal 只解除它自己的等待；当所有等待者都取消时，
+ * 共享执行本身也会被中断——否则它会在后台继续轮询，甚至在用户关掉 Anki 后又把它拉起来。
  *
  * @param onProgress 进度提示回调（如“正在启动 Anki，请稍候……”）
  * @param options.forceLaunch 为 true 时无视“自动启动 Anki”设置强制拉起
  *   （仅用于用户显式发起的启动，如设置页的“启动 Anki”按钮）；缺省 false，隐式启动受该设置约束
- * @throws AnkiConnect 最终不可用时抛出 Error
+ * @param options.signal 取消信号（见上）
+ * @throws AnkiConnect 最终不可用时抛出 Error；被取消时抛出 AbortError
  */
-export async function ensureAnkiConnect(
+export function ensureAnkiConnect(
     onProgress?: (message: string) => void,
-    options?: { forceLaunch?: boolean }
+    options?: { forceLaunch?: boolean; signal?: AbortSignal; }
 ): Promise<void> {
-    if (ensureAnkiConnectInFlight == null) {
-        ensureAnkiConnectInFlight = ensureAnkiConnectImpl(onProgress, options?.forceLaunch ?? false).finally(() => {
-            ensureAnkiConnectInFlight = null;
-        });
+    const signal = options?.signal;
+    const waiter = {};
+    ankiConnectWaiters.add(waiter);
+
+    if (onProgress != null) {
+        ankiConnectProgressListeners.add(onProgress);
+        // 已有执行且已经发出过进度（Anki 正在启动）：补发一次，让后到的卡片也显示进度
+        if (ensureAnkiConnectInFlight != null && lastAnkiConnectProgress != null) {
+            onProgress(lastAnkiConnectProgress);
+        }
     }
-    return ensureAnkiConnectInFlight;
+
+    if (ensureAnkiConnectInFlight == null) {
+        lastAnkiConnectProgress = null;
+        const controller = new AbortController();
+        const promise = ensureAnkiConnectImpl(
+            emitAnkiConnectProgress,
+            options?.forceLaunch ?? false,
+            controller.signal,
+        ).finally(() => {
+            if (ensureAnkiConnectInFlight?.controller === controller) {
+                ensureAnkiConnectInFlight = null;
+            }
+            lastAnkiConnectProgress = null;
+            ankiConnectProgressListeners.clear();
+            ankiConnectWaiters.clear();
+        });
+        ensureAnkiConnectInFlight = { promise, controller };
+    }
+
+    const current = ensureAnkiConnectInFlight;
+    // 调用方取消：退出等待；最后一个等待者取消时中断共享执行，避免它在后台继续重试拉起 Anki
+    signal?.addEventListener('abort', () => {
+        ankiConnectWaiters.delete(waiter);
+        if (onProgress != null) {
+            ankiConnectProgressListeners.delete(onProgress);
+        }
+        if (ankiConnectWaiters.size === 0 && ensureAnkiConnectInFlight === current) {
+            current.controller.abort();
+        }
+    }, { once: true });
+
+    return current.promise;
 }
 // #endregion
 

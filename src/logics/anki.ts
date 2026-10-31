@@ -73,7 +73,8 @@ export class AnkiService extends AnkiConnectApi {
         modelName: string,
         fields: Fields,
         audioURL: string,
-        audioFilename: string
+        audioFilename: string,
+        signal?: AbortSignal
     ): Promise<number | null> {
         return await this.addNote(
             deckName,
@@ -86,7 +87,8 @@ export class AnkiService extends AnkiConnectApi {
                     fields: ['发音']
                 }
             ], // audio
-            { allowDuplicate: true } // options
+            { allowDuplicate: true }, // options
+            signal
         );
     }
 }

@@ -3,6 +3,10 @@ export { generateUniqueId } from './generateUniqueId';
 export { HoverWrapper } from './HoverWrapper';
 export { dialog, showMessage, showConfirm } from './ContentDialog';
 export { setDialogDepthListener } from './dialogLayer';
+export { default as FluentInfoBadge } from './FluentInfoBadge.vue';
+export { default as FluentStatusText } from './FluentStatusText.vue';
+export { useTransientNotice } from './useTransientNotice';
+export type { StatusNotice, StatusSeverity } from './status';
 export type {
     ContentDialogKind,
     ContentDialogMessageOptions,

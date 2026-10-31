@@ -2,7 +2,6 @@
 import { ref, reactive, watch, nextTick, onBeforeMount, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import * as api from '../tauri-api';
-import { ElMessage, type MessageHandler } from 'element-plus';
 
 import * as utils from '../logics/utils';
 import * as dict from '../logics/dict';
@@ -14,7 +13,11 @@ import * as aiPickLogic from '../logics/aiPick';
 import { isLlmReady, parseMaxTokens, type LlmRequestConfig } from '../logics/llm';
 import { useSettingsStore } from '../logics/settings-store';
 import AiPickCard from '../components/AiPickCard.vue';
-import { FluentButton, FluentSelect, FluentInput, FluentRadio, dialog } from '../fluent-controls';
+import {
+    FluentButton, FluentSelect, FluentInput, FluentRadio, FluentStatusText, dialog,
+} from '../fluent-controls';
+import type { StatusNotice } from '../fluent-controls/status';
+import { useTransientNotice } from '../fluent-controls/useTransientNotice';
 import {
     CardStatus,
     SentencePanel,
@@ -39,6 +42,67 @@ interface ItemModel<T> {
     item: T;
     status: CardStatus;
     id: number | null;
+    /** 该卡片自己的就地反馈（连接进度、编辑降级提示等） */
+    notice?: StatusNotice | null;
+}
+
+/** 卡片就地反馈的自动收起计时器（按条目对象持有，条目被替换时自然失效） */
+const cardNoticeTimers = new WeakMap<object, number>();
+/** 卡片就地反馈上的操作回调（「停止」「重试」），随提示一起替换 */
+const cardNoticeActions = new WeakMap<object, () => void>();
+/** 操作超过这个时长才显示进度与「停止」：正常速度的添加/移除不应闪一下 */
+const SLOW_NOTICE_DELAY_MS = 700;
+
+/**
+ * 给某张卡片挂一条就地反馈。
+ * duration > 0 时到点自动收起（触发 FluentStatusText 的退场动画）；0 表示常驻，
+ * 由调用方在流程结束处 clearCardNotice。
+ */
+function showCardNotice(
+    item: ItemModel<unknown>,
+    notice: StatusNotice,
+    duration = 3000,
+    onAction?: () => void,
+): void {
+    const timer = cardNoticeTimers.get(item);
+    if (timer != null) {
+        window.clearTimeout(timer);
+        cardNoticeTimers.delete(item);
+    }
+    item.notice = notice;
+    if (onAction != null) {
+        cardNoticeActions.set(item, onAction);
+    } else {
+        cardNoticeActions.delete(item);
+    }
+    if (duration > 0) {
+        cardNoticeTimers.set(item, window.setTimeout(() => { item.notice = null; }, duration));
+    }
+}
+
+/** 点击卡片提示上的操作（停止 / 重试） */
+function handleCardNoticeAction(dictionary: 'collins' | 'oxford' | 'youdao', index: number): void {
+    const item = wordItems[dictionary][index];
+    cardNoticeActions.get(item)?.();
+}
+
+/** 收起某张卡片的就地反馈（进行中流程结束时调用） */
+function clearCardNotice(item: ItemModel<unknown>): void {
+    const timer = cardNoticeTimers.get(item);
+    if (timer != null) {
+        window.clearTimeout(timer);
+        cardNoticeTimers.delete(item);
+    }
+    cardNoticeActions.delete(item);
+    item.notice = null;
+}
+
+/** 发音失败的就地提示：挂在发音行末尾，不挤动按钮与单选项 */
+const { notice: pronunciationNotice, show: showPronunciationNotice } = useTransientNotice(3000);
+
+/** 发音按钮报告失败：就地显示 3s */
+function handlePronunciationError(message: string): void {
+    showPronunciationNotice(message, { severity: 'error' });
 }
 
 /**
@@ -763,8 +827,8 @@ async function initSentenceCapture() {
 // #endregion
 
 // #region Anki
-/** 若牌组或笔记模板不存在，则创建之 */
-async function prepareDeckAndModel(deckName: string, modelName: string) {
+/** 若牌组或笔记模板不存在，则创建之（signal 仅用于“已取消时不再弹错误框”） */
+async function prepareDeckAndModel(deckName: string, modelName: string, signal?: AbortSignal) {
     let errorTitle: string | null = null;
 
     async function prepareDeck(deckName: string) {
@@ -804,7 +868,10 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
     try {
         newModelCreated = (await Promise.all([prepareDeck(deckName), prepareModel(modelName)]))[1];
     } catch (error) {
-        await dialog.message(String(error), { title: errorTitle!, kind: 'error' });
+        // 用户点了「停止」：这是预期内的中断，不再弹错误框
+        if (signal?.aborted !== true) {
+            await dialog.message(String(error), { title: errorTitle!, kind: 'error' });
+        }
         throw error;
     }
     if (newModelCreated) {
@@ -818,6 +885,67 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
 }
 
 /**
+ * 一次加卡/移除操作的取消句柄。
+ *
+ * - 前 700ms 不显示任何提示：正常速度的添加/移除不应闪一下；
+ * - 超过阈值才出现「进度 + 停止」，点停止后界面立即退出等待；
+ * - signal 交给可在 HTTP 层中断的请求（写入/删除）；无法中断的等待（共享的 Anki 启动、
+ *   准备牌组）用 race 退出——共享启动不会因为某一张卡片停止而被打断，只解除本卡片的等待。
+ */
+function createCardOperation(item: ItemModel<unknown>, initialMessage: string) {
+    const controller = new AbortController();
+    let rejectCancelled: ((reason?: unknown) => void) | null = null;
+    const cancelledPromise = new Promise<never>((_, reject) => { rejectCancelled = reject; });
+    let stopped = false;
+    let noticeVisible = false;
+    let slowTimer: number | null = null;
+
+    const clearSlowTimer = (): void => {
+        if (slowTimer != null) {
+            window.clearTimeout(slowTimer);
+            slowTimer = null;
+        }
+    };
+
+    const stop = (): void => {
+        if (stopped) {
+            return;
+        }
+        stopped = true;
+        clearSlowTimer();
+        controller.abort();
+        rejectCancelled?.(new Error('操作已停止'));
+    };
+
+    const showProgress = (message: string): void => {
+        if (stopped) {
+            return;
+        }
+        clearSlowTimer();
+        noticeVisible = true;
+        showCardNotice(item, { severity: 'informational', message, progress: true, actionLabel: '停止' }, 0, stop);
+    };
+
+    /** 仅在提示已经可见时更新文案：避免快操作因为一句“正在写入…”闪一下 */
+    const updateProgress = (message: string): void => {
+        if (noticeVisible) {
+            showProgress(message);
+        }
+    };
+
+    slowTimer = window.setTimeout(() => { slowTimer = null; showProgress(initialMessage); }, SLOW_NOTICE_DELAY_MS);
+
+    return {
+        signal: controller.signal,
+        get stopped() { return stopped; },
+        race: <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, cancelledPromise]),
+        showProgress,
+        updateProgress,
+        dispose: clearSlowTimer,
+    };
+}
+
+/**
  * 切换指定词典中指定条目的加卡状态（添加/取消添加）。
  *
  * 词典参数独立出来，是为了让 AI 优选卡片能跨词典操作其选中的条目（可能与当前 tab 不同）；
@@ -826,37 +954,30 @@ async function prepareDeckAndModel(deckName: string, modelName: string) {
 async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', index: number) {
     const item = wordItems[dictionary][index];
     const pronunciationType = selectedPronunciation.value;
+    const deckName = cfg.effectiveTextSetting('deckName', config.deckName);
+    const modelName = cfg.effectiveTextSetting('modelName', config.modelName);
+    // 上一次操作留下的提示（含失败提示）在这里清掉，避免与新一次操作叠加
+    clearCardNotice(item);
     if (item.status === 'not-added') { // add to Anki
         item.status = 'processing-add';
-        // 确保 AnkiConnect 可用：不可用时按配置自动启动 Anki 并等待其就绪
-        let progressMessage: MessageHandler | null = null;
-        // 关闭进度提示。通过箭头函数引用 progressMessage，
-        // 避免 TS 沿用外层将其窄化为 null 而导致 finally 中调用 close() 报类型错误
-        const closeProgressMessage = () => { progressMessage?.close(); };
+        const operation = createCardOperation(item, '正在添加到 Anki…');
+        // 出错或中断时先清掉进行中的提示，再决定显示什么（成功则什么都不显示）
+        const settle = () => {
+            operation.dispose();
+            clearCardNotice(item);
+        };
+        let phase: 'connect' | 'prepare' | 'write' = 'connect';
         try {
-            await globals.ensureAnkiConnect(message => {
-                closeProgressMessage();
-                progressMessage = ElMessage({ message, duration: 0, showClose: true });
-            });
-        } catch (error) {
-            item.status = 'not-added';
-            console.error(error);
-            await dialog.message(String(error), { title: '无法连接 Anki', kind: 'error' });
-            return;
-        } finally {
-            closeProgressMessage();
-        }
-        try {
-            await prepareDeckAndModel(
-                cfg.effectiveTextSetting('deckName', config.deckName),
-                cfg.effectiveTextSetting('modelName', config.modelName),
-            );
-        } catch (error) {
-            item.status = 'not-added';
-            console.error(error);
-            return; // prepareDeckAndModel has already shown the error message
-        }
-        try {
+            // 确保 AnkiConnect 可用：不可用时按配置自动启动 Anki 并等待其就绪
+            await operation.race(globals.ensureAnkiConnect(
+                message => operation.showProgress(message),
+                { signal: operation.signal },
+            ));
+            // 连接已就绪：文案切到“添加中”，不要再停在“启动/连接 Anki”
+            operation.updateProgress('正在添加到 Anki…');
+            phase = 'prepare';
+            await operation.race(prepareDeckAndModel(deckName, modelName, operation.signal));
+            phase = 'write';
             const fields = anki.makeFields(dictionary, item.item, makeSentenceHTML());
             // AI 优选联动：若所加条目正是 AI 优选命中的条目且带有笔记，则写入“笔记”字段
             if (aiPick.note.length > 0 && isAiPicked(dictionary, index)) {
@@ -873,33 +994,73 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
                 };
             }
             const audioFilename = await dict.makePronunciationFilename(word, pronunciationType, audioResult.dict);
-            const id = await ankiService.addMarkerNote(
-                cfg.effectiveTextSetting('deckName', config.deckName),
-                cfg.effectiveTextSetting('modelName', config.modelName),
+            operation.updateProgress('正在写入笔记…');
+            const id = await operation.race(ankiService.addMarkerNote(
+                deckName,
+                modelName,
                 fields,
                 audioResult.url,
-                audioFilename
-            );
+                audioFilename,
+                operation.signal
+            ));
             if (id == null) {
                 throw new Error('addNote returns null');
             }
             item.id = id;
             item.status = 'is-added';
+            settle();
         } catch (error) {
             item.status = 'not-added';
+            const stopped = operation.stopped;
+            operation.dispose();
+            if (stopped) {
+                // 用户主动停止：回到未添加，给一句短提示说明“确实停了”
+                clearCardNotice(item);
+                showCardNotice(item, { severity: 'informational', message: '已停止添加' }, 1500);
+                return;
+            }
             console.error(error);
-            await dialog.message(String(error), { title: '添加失败', kind: 'error' });
+            if (phase === 'connect') {
+                clearCardNotice(item);
+                await dialog.message(String(error), { title: '无法连接 Anki', kind: 'error' });
+            } else if (phase === 'write') {
+                // 写入类失败通常是偶发的，就地提示并给出重试，不打断连续加卡
+                clearCardNotice(item);
+                showCardNotice(item, {
+                    severity: 'error',
+                    message: `添加失败：${error instanceof Error ? error.message : String(error)}`,
+                    actionLabel: '重试',
+                }, 8000, () => { void changeItemAddedOf(dictionary, index); });
+            } else {
+                // 准备牌组/模板：错误框由 prepareDeckAndModel 自己弹出
+                clearCardNotice(item);
+            }
         }
     } else if (item.status === 'is-added') { // remove from Anki
         item.status = 'processing-remove';
+        const operation = createCardOperation(item, '正在从 Anki 移除…');
         try {
-            await ankiService.deleteNotes([item.id!]);
+            await operation.race(ankiService.deleteNotes([item.id!], operation.signal));
             item.id = null;
             item.status = 'not-added';
+            operation.dispose();
+            clearCardNotice(item);
         } catch (error) {
+            operation.dispose();
+            if (operation.stopped) {
+                item.status = 'is-added';
+                clearCardNotice(item);
+                showCardNotice(item, { severity: 'informational', message: '已停止移除' }, 1500);
+                return;
+            }
             item.status = 'is-added';
             console.error(error);
-            await dialog.message(String(error), { title: '删除失败', kind: 'error' });
+            clearCardNotice(item);
+            showCardNotice(item, {
+                severity: 'error',
+                message: `移除失败：${error instanceof Error ? error.message : String(error)}`,
+                actionLabel: '重试',
+            }, 8000, () => { void changeItemAddedOf(dictionary, index); });
         }
     }
 }
@@ -936,10 +1097,11 @@ async function openEditDialogOf(dictionary: 'collins' | 'oxford' | 'youdao', ind
         console.error(error);
         try {
             await ankiService.guiBrowse(`nid:${item.id}`);
-            ElMessage.warning({
+            // 降级结果就写在触发的这张卡片里；文案较长，多留一点阅读时间
+            showCardNotice(item, {
+                severity: 'warning',
                 message: '编辑对话框打开失败（Anki 26.08 与 AnkiConnect 不兼容），已在 Anki 卡片浏览器中定位该笔记，选中后可在右侧直接编辑。',
-                duration: 5000
-            });
+            }, 8000);
         } catch (fallbackError) {
             console.error(fallbackError);
             await dialog.message(String(error), { title: '打开编辑对话框失败', kind: 'error' });
@@ -1019,8 +1181,7 @@ onBeforeMount(async () => {
                 <option value="oxford">新牛津英汉双解</option>
                 <option value="youdao">有道在线词典</option>
             </FluentSelect>
-            <SettingButton @click="router.push('/settings')"
-                :update-available="globals.appUpdateAvailable.value || globals.templateUpdateAvailable.value" />
+            <SettingButton @click="router.push('/settings')" />
         </div>
         <div class="sentence-container">
             <SentencePanel :tokens="tokens" v-if="!showEdit" @mark="onMarkToken" @commit="onMarksCommitted" />
@@ -1030,11 +1191,16 @@ onBeforeMount(async () => {
         </div>
         <div class="words-container">
             <div class="pronunciation-container" v-show="searchText.length > 0">
-                <PlayAudioButton :word="searchText" :type="selectedPronunciation" />
+                <PlayAudioButton :word="searchText" :type="selectedPronunciation"
+                    @error="handlePronunciationError" />
                 <FluentRadio v-model="selectedPronunciation" value="en" label="英式" name="pronunciation"
                     class="pronunciation-radio-box" />
                 <FluentRadio v-model="selectedPronunciation" value="us" label="美式" name="pronunciation"
                     class="pronunciation-radio-box" />
+                <!-- 发音失败就地提示：追加在行末，只做淡入淡出，不挤动左边的按钮与单选项 -->
+                <FluentStatusText class="pronunciation-notice" :collapse="false"
+                    :severity="pronunciationNotice?.severity ?? 'error'"
+                    :message="pronunciationNotice?.message ?? null" />
             </div>
             <ScrollMemory :show="selectedDict === 'collins'" class="words-container-inner">
                 <!-- AI 优选卡随列表内容滚动，每个词典容器内各放一份（内容同源）；active 标记当前可见实例，仅它播放动画 -->
@@ -1042,16 +1208,18 @@ onBeforeMount(async () => {
                     :picked-item="aiPickItem" :active="selectedDict === 'collins'" @add-btn-click="handleAiPickAdd"
                     @edit-btn-click="handleAiPickEdit" @stop="stopAiPick" @regenerate="regenerateAiPick" />
                 <CollinsCard v-for="(item, index) in wordItems['collins']" :key="index" :item="item.item" :index="index"
-                    :status="item.status" :ai-picked="isAiPicked('collins', index)" @add-btn-click="changeItemAdded"
-                    @edit-btn-click="openEditDialog" />
+                    :status="item.status" :notice="item.notice" :ai-picked="isAiPicked('collins', index)"
+                    @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog"
+                    @notice-action="handleCardNoticeAction('collins', $event)" />
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'oxford'" class="words-container-inner">
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
                     :picked-item="aiPickItem" :active="selectedDict === 'oxford'" @add-btn-click="handleAiPickAdd"
                     @edit-btn-click="handleAiPickEdit" @stop="stopAiPick" @regenerate="regenerateAiPick" />
                 <OxfordCard v-for="(item, index) in wordItems['oxford']" :key="index" :item="item.item" :index="index"
-                    :status="item.status" :ai-picked="isAiPicked('oxford', index)" @add-btn-click="changeItemAdded"
-                    @edit-btn-click="openEditDialog" />
+                    :status="item.status" :notice="item.notice" :ai-picked="isAiPicked('oxford', index)"
+                    @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog"
+                    @notice-action="handleCardNoticeAction('oxford', $event)" />
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'youdao'" class="words-container-inner">
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
@@ -1061,23 +1229,23 @@ onBeforeMount(async () => {
                     简明释义
                 </div>
                 <YoudaoCard v-for="entry in wordItemsYoudao['concise']" :key="entry.flatIndex" :item="entry.model.item"
-                    :index="entry.flatIndex" :status="entry.model.status"
+                    :index="entry.flatIndex" :status="entry.model.status" :notice="entry.model.notice"
                     :ai-picked="isAiPicked('youdao', entry.flatIndex)" @add-btn-click="changeItemAdded"
-                    @edit-btn-click="openEditDialog" />
+                    @edit-btn-click="openEditDialog" @notice-action="handleCardNoticeAction('youdao', $event)" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['web'].length > 0" class="youdao-title">
                     网络释义
                 </div>
                 <YoudaoCard v-for="entry in wordItemsYoudao['web']" :key="entry.flatIndex" :item="entry.model.item"
-                    :index="entry.flatIndex" :status="entry.model.status"
+                    :index="entry.flatIndex" :status="entry.model.status" :notice="entry.model.notice"
                     :ai-picked="isAiPicked('youdao', entry.flatIndex)" @add-btn-click="changeItemAdded"
-                    @edit-btn-click="openEditDialog" />
+                    @edit-btn-click="openEditDialog" @notice-action="handleCardNoticeAction('youdao', $event)" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['phrase'].length > 0" class="youdao-title">
                     短语
                 </div>
                 <YoudaoCard v-for="entry in wordItemsYoudao['phrase']" :key="entry.flatIndex" :item="entry.model.item"
-                    :index="entry.flatIndex" :status="entry.model.status"
+                    :index="entry.flatIndex" :status="entry.model.status" :notice="entry.model.notice"
                     :ai-picked="isAiPicked('youdao', entry.flatIndex)" @add-btn-click="changeItemAdded"
-                    @edit-btn-click="openEditDialog" />
+                    @edit-btn-click="openEditDialog" @notice-action="handleCardNoticeAction('youdao', $event)" />
             </ScrollMemory>
         </div>
     </div>
@@ -1110,6 +1278,12 @@ onBeforeMount(async () => {
     align-items: center;
     padding: 12px 15px;
     gap: 5px;
+}
+
+/* 发音行末的就地提示：与单选项留出间距；横排内不参与高度联动，也不需要顶部间距 */
+.pronunciation-notice {
+    --status-gap: 0px;
+    margin-left: 10px;
 }
 
 .sentence-container {

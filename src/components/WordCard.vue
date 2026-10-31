@@ -4,6 +4,8 @@ import { ref, PropType } from 'vue';
 import AddButton from './AddButton.vue';
 import EditButton from './EditButton.vue';
 import type { CardStatus } from './CardStatus';
+import FluentStatusText from '../fluent-controls/FluentStatusText.vue';
+import type { StatusNotice } from '../fluent-controls/status';
 
 const props = defineProps({
     index: {
@@ -13,12 +15,19 @@ const props = defineProps({
     status: {
         type: String as PropType<CardStatus>,
         required: true
+    },
+    /** 该卡片自己的就地反馈（连接进度、编辑降级提示等）；null 时收起 */
+    notice: {
+        type: Object as PropType<StatusNotice | null>,
+        default: null
     }
 });
 
 const emit = defineEmits<{
     'add-btn-click': [index: number];
     'edit-btn-click': [index: number];
+    /** 就地反馈里的操作（如失败后的「重试」） */
+    'notice-action': [index: number];
 }>();
 
 const boxShadowAnimation = ref<string | null>(null);
@@ -43,7 +52,7 @@ function handleAnimationEnd() {
 
 <template>
     <div class="card" :class="{
-        'is-added': status === 'is-added' || status === 'processing-add',
+        'is-added': status === 'is-added' || status === 'processing-add' || status === 'processing-remove',
         'use-add-box-shadow-animation': boxShadowAnimation === 'use-add-box-shadow-animation',
         'use-remove-box-shadow-animation': boxShadowAnimation === 'use-remove-box-shadow-animation'
     }" @animationend="handleAnimationEnd">
@@ -51,11 +60,15 @@ function handleAnimationEnd() {
             <div class="flex-grow-1">
                 <slot></slot>
             </div>
-            <div class="flex-shrink-0">
-                <AddButton :status="status" class="card-button" @click="emitAddBtnClick" />
+            <div class="card-actions">
+                <AddButton :status="status" @click="emitAddBtnClick" />
                 <EditButton v-show="status === 'is-added'" @click="emitEditBtnClick" />
             </div>
         </div>
+        <!-- 反馈挂在卡片内部：与触发它的条目同处一处，且随卡片一起滚动 -->
+        <FluentStatusText class="card-notice" :severity="notice?.severity ?? 'informational'"
+            :message="notice?.message ?? null" :progress="notice?.progress ?? false"
+            :action-label="notice?.actionLabel ?? null" @action="emit('notice-action', index)" />
     </div>
 </template>
 
@@ -75,6 +88,10 @@ function handleAnimationEnd() {
     border-width: var(--border-width);
     border-radius: var(--border-radius);
     transition: box-shadow calc(0.3s * 0.5);
+}
+
+.card-notice {
+    margin-top: 6px;
 }
 
 .card.is-added {
@@ -131,10 +148,11 @@ function handleAnimationEnd() {
     flex-shrink: 0;
 }
 
-.card-button {
-    display: block;
-    margin-bottom: 8px;
-    width: 16px;
-    height: 16px;
+/* 右侧按钮列：两个 24px 命中盒纵向排列，间距 4px */
+.card-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
 }
 </style>

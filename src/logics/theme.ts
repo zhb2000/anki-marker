@@ -2,7 +2,7 @@
  * 主题模式：跟随系统 / 浅色 / 深色。
  *
  * - 暗色样式全部由 `<html>` 元素上的 `dark` class 驱动
- *   （fluent-styles.css 的 html.dark 变量块、element-plus 的 dark/css-vars 等）
+ *   （fluent-styles.css 的 html.dark 变量块）
  *   强调色家族由 fluent-styles.css 的派生层算好，主题切换只需切 class，无需 JS 参与
  * - 主题模式持久化在 localStorage（首帧由 index.html 内联脚本读取，保证窗口显示前 dark class 已定）；
  *   配置文件加载完成后会用 config.theme 校正此缓存（见 globals.initAtAppStart），两者漂移时以配置文件为准

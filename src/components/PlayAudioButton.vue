@@ -2,7 +2,6 @@
 import { computed, ref, PropType } from 'vue';
 import { HoverWrapper } from '../fluent-controls/HoverWrapper';
 import { makePronunciationURL } from '../logics/dict';
-import { ElMessage } from 'element-plus';
 
 const props = defineProps({
     word: {
@@ -14,6 +13,11 @@ const props = defineProps({
         required: true
     }
 });
+
+/** 发音失败时就地提示由所在行展示（消息跟随触发它的按钮，不另起全局浮层） */
+const emit = defineEmits<{
+    error: [message: string];
+}>();
 
 const audio = new Audio();
 const isPlaying = ref(false);
@@ -30,7 +34,7 @@ async function handleClick() {
     if (!playing) {
         const url = (await makePronunciationURL(word, props.type))?.url;
         if (url == null) {
-            ElMessage.error('无法获取在线发音');
+            emit('error', '无法获取在线发音');
             return;
         }
         audio.src = url;

@@ -47,6 +47,13 @@
        叠加在强调色填充上即“强调色压暗”；深色为黑 14%，见 html.dark */
     --border-accent-bottom-color: #00000066;
 
+    /* ───── 动效 ─────
+       就地反馈统一用这组时长与曲线：进场 180ms、退场 120ms，标准曲线避免“黏”
+       （与导航指示器、页面切换用的是同一条 Fluent 标准曲线） */
+    --motion-duration-enter: 180ms;
+    --motion-duration-exit: 120ms;
+    --motion-ease-standard: cubic-bezier(0.1, 0.9, 0.2, 1);
+
     /* ───── 字体 ───── */
     --font-size: 16px;
     --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -148,6 +155,12 @@
     /* ───── 键盘焦点外框 ───── */
     /* WinUI FocusStrokeColorOuter。焦点框是黑白高对比，不跟随强调色 */
     --focus-stroke: #00000089;
+
+    /* ───── 就地反馈 / 徽标 ───── */
+    /* 图标实心色：WinUI SystemFillColorAttention/Caution。
+       success 与 critical 直接复用上面的 --success-text-color / --critical-fill-color（同值） */
+    --system-fill-attention: var(--accent);
+    --system-fill-caution: #9d5d00;
 }
 
 /*
@@ -288,17 +301,9 @@ html.dark {
     /* ───── 键盘焦点外框 ───── */
     /* WinUI FocusStrokeColorOuter */
     --focus-stroke: #ffffff;
-}
 
-/*
- * element-plus 兼容层。
- * 项目现在只剩 ElMessage（toast）与 ElBadge（更新红点）两个组件仍来自 element-plus，
- * 它们的配色沿用 element-plus 默认（深色走 theme-chalk/dark/css-vars.css），
- * 这里只把主色接回项目强调色，避免出现第二套主题色。
- */
-:root,
-html.dark {
-    /* 深色要单独写一条：element-plus 的 dark/css-vars.css 用 html.dark 覆盖同一个变量，
-       :root 的选择器优先级压不住它 */
-    --el-color-primary: var(--accent);
+    /* ───── 就地反馈 / 徽标 ───── */
+    /* 深色下 WinUI 改用亮一档的实心色（SystemAccentColorLight2 / #FCE100） */
+    --system-fill-attention: color-mix(in srgb, var(--accent), white 30%);
+    --system-fill-caution: #fce100;
 }

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { ElConfigProvider } from 'element-plus';
 
 const currentRoute = useRoute();
 const transitionName = ref<string | undefined>(undefined);
@@ -15,15 +14,13 @@ watch(() => currentRoute.matched[0]?.path ?? currentRoute.path, (newTopPath) => 
 </script>
 
 <template>
-    <ElConfigProvider :message="{ showClose: true }">
-        <RouterView v-slot="{ Component, route }">
-            <Transition :name="transitionName">
-                <KeepAlive>
-                    <component :is="Component" :key="route.matched[0]?.path ?? route.path" />
-                </KeepAlive>
-            </Transition>
-        </RouterView>
-    </ElConfigProvider>
+    <RouterView v-slot="{ Component, route }">
+        <Transition :name="transitionName">
+            <KeepAlive>
+                <component :is="Component" :key="route.matched[0]?.path ?? route.path" />
+            </KeepAlive>
+        </Transition>
+    </RouterView>
 </template>
 
 <style scoped>

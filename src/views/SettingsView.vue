@@ -9,8 +9,9 @@ import {
 } from '../logics/settings-registry';
 import * as globals from '../logics/globals';
 import { effectiveTextSetting } from '../logics/config';
-import { accessibilityTrusted, checkAccessibilityTrust, shortcutError } from '../logics/shortcut-status';
-import { FluentInput } from '../fluent-controls';
+import { checkAccessibilityTrust } from '../logics/shortcut-status';
+import { pageAttentionCount } from '../logics/settings-attention';
+import { FluentInfoBadge, FluentInput } from '../fluent-controls';
 import { ReturnButton, SettingsNavIcon } from '../components';
 
 const router = useRouter();
@@ -31,21 +32,6 @@ const pageTitles = Object.fromEntries(
 /** 判断导航项是否为当前页（active 判断用 route.path） */
 function isActivePage(pageId: SettingsPageId): boolean {
     return route.path === `/settings/${pageId}`;
-}
-
-/**
- * 导航项是否需要显示关注红点：
- * - 关于：应用更新可用，或 Anki 内笔记模板有更新
- * - 划词：辅助功能权限未授权，或全局快捷键注册失败（冲突）
- */
-function hasAttentionBadge(pageId: SettingsPageId): boolean {
-    if (pageId === 'about') {
-        return globals.appUpdateAvailable.value || globals.templateUpdateAvailable.value;
-    }
-    if (pageId === 'selection') {
-        return accessibilityTrusted.value === false || shortcutError.value != null;
-    }
-    return false;
 }
 
 // #region 搜索
@@ -193,7 +179,8 @@ onActivated(() => {
                             class="nav-item" :class="{ active: isActivePage(page.id) }">
                             <span class="nav-icon"><SettingsNavIcon :name="page.icon" /></span>
                             <span>{{ page.title }}</span>
-                            <span v-if="hasAttentionBadge(page.id)" class="nav-dot" title="有需要关注的项"></span>
+                            <FluentInfoBadge v-if="pageAttentionCount(page.id) > 0" class="nav-badge"
+                                :value="pageAttentionCount(page.id)" :title="`${pageAttentionCount(page.id)} 项需要关注`" />
                         </RouterLink>
                     </template>
                     <template v-else>
@@ -328,14 +315,11 @@ onActivated(() => {
     width: 20px;
 }
 
-/* 关注红点：右对齐的小圆点，提示该分类下有需要用户关注的项（更新/权限/快捷键冲突） */
-.nav-dot {
-    flex-shrink: 0;
-    width: 8px;
-    height: 8px;
+/* 关注红点（WinUI InfoBadge dot）：右对齐，提示该分类下有需要用户关注的项
+   （更新/权限/快捷键冲突），与主页设置按钮上的红点同源 */
+.nav-badge {
     margin-left: auto;
-    border-radius: 50%;
-    background-color: var(--critical-fill-color);
+    margin-right: 4px;
 }
 
 .result-item {
@@ -385,6 +369,7 @@ onActivated(() => {
 
 .content-area {
     flex: 1;
+    min-height: 0;
     min-width: 0;
     overflow: auto;
     padding: 24px;

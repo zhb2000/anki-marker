@@ -178,8 +178,8 @@ function onBodyAnimationEnd(event: AnimationEvent) {
                     </div>
                 </div>
             </div>
-            <div v-if="showAddButton" class="flex-shrink-0">
-                <AddButton :status="status" class="card-button" @click="emitAddBtnClick" />
+            <div v-if="showAddButton" class="card-actions">
+                <AddButton :status="status" @click="emitAddBtnClick" />
                 <EditButton v-if="showEditButton" @click="emitEditBtnClick" />
             </div>
         </div>
@@ -233,11 +233,12 @@ function onBodyAnimationEnd(event: AnimationEvent) {
     flex-shrink: 0;
 }
 
-.card-button {
-    display: block;
-    margin-bottom: 8px;
-    width: 16px;
-    height: 16px;
+/* 右侧按钮列：与 WordCard 相同的 24px 命中盒规范 */
+.card-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
 }
 
 .ai-pick-header {

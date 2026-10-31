@@ -43,6 +43,10 @@ withDefaults(defineProps<{
         <div v-if="$slots.default" class="card-actions">
             <slot></slot>
         </div>
+        <!-- 卡片自己的就地反馈（操作结果、错误）：独占一行，位于整行控件下方 -->
+        <div v-if="$slots.notice" class="card-notice">
+            <slot name="notice"></slot>
+        </div>
     </div>
 </template>
 
@@ -115,6 +119,12 @@ withDefaults(defineProps<{
     row-gap: 4px;
     /* 推到卡片最右侧；flex-wrap 换行后仍靠右 */
     margin-left: auto;
+}
+
+/* 就地反馈独占一行（flex-basis 100% 强制换行），宽度与卡片内容区一致 */
+.card-notice {
+    flex-basis: 100%;
+    min-width: 0;
 }
 </style>
 
