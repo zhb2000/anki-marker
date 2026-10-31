@@ -41,6 +41,11 @@ export function tokenize(text: string): string[] {
  * 该启发式无法区分词形变化与仅一字之差的换词（如 fox→box，编辑距离同为极小值），
  * 选择转移标记——撤销错误转移的成本（点击取消）与重新标记的成本相当，而转移能额外
  * 覆盖复数/时态/笔误修正等常见场景。
+ *
+ * LCS 是 O(n·m) 的时间与内存。长文本（全局快捷键可录入整段内容）先剥掉公共前缀/后缀，
+ * 编辑通常是局部的，剩余部分很小；剩余部分仍超过 LCS_MAX_CELLS 时跳过这部分的对齐，
+ * 其中的标记退化为只靠模糊对齐转移（最坏等同于重新分词）。
+ * 无论走哪条路径，返回的词元都来自 tokenize(sentence)，拼接后与 sentence 完全一致。
  */
 export function rebuildTokensPreservingMarks(
     oldTokens: { token: string; marked: boolean; }[],
@@ -53,33 +58,59 @@ export function rebuildTokensPreservingMarks(
     }
     const oldLowered = oldTokens.map(({ token }) => token.toLowerCase());
     const newLowered = newTokens.map(({ token }) => token.toLowerCase());
-    // lcs[i][j]：oldLowered 前 i 个与 newLowered 前 j 个词元的最长公共子序列长度
-    const lcs: number[][] = Array.from({ length: oldTokens.length + 1 },
-        () => new Array<number>(newTokens.length + 1).fill(0));
-    for (let i = 1; i <= oldTokens.length; i++) {
-        for (let j = 1; j <= newTokens.length; j++) {
-            lcs[i][j] = oldLowered[i - 1] === newLowered[j - 1]
-                ? lcs[i - 1][j - 1] + 1
-                : Math.max(lcs[i - 1][j], lcs[i][j - 1]);
-        }
-    }
-    // 从末尾回溯对齐结果：相等的词元互相匹配，并继承旧的标记状态
     const oldMatched = new Array<boolean>(oldTokens.length).fill(false);
     const newMatched = new Array<boolean>(newTokens.length).fill(false);
-    let i = oldTokens.length;
-    let j = newTokens.length;
-    while (i > 0 && j > 0) {
-        if (oldLowered[i - 1] === newLowered[j - 1]) {
-            newTokens[j - 1].marked = oldTokens[i - 1].marked;
-            oldMatched[i - 1] = true;
-            newMatched[j - 1] = true;
-            i--;
-            j--;
-        } else if (lcs[i - 1][j] >= lcs[i][j - 1]) {
-            i--;
-        } else {
-            j--;
+    /** 对齐一对相等的词元：新词元继承旧的标记状态 */
+    const matchPair = (oi: number, ni: number): void => {
+        newTokens[ni].marked = oldTokens[oi].marked;
+        oldMatched[oi] = true;
+        newMatched[ni] = true;
+    };
+    // 公共后缀：与原先“从末尾回溯时相等即匹配”的结果完全相同，先剥掉以缩小 LCS 规模
+    let suffix = 0;
+    while (suffix < oldTokens.length && suffix < newTokens.length
+        && oldLowered[oldTokens.length - 1 - suffix] === newLowered[newTokens.length - 1 - suffix]) {
+        matchPair(oldTokens.length - 1 - suffix, newTokens.length - 1 - suffix);
+        suffix++;
+    }
+    // 公共前缀：只在剩余规模仍超限时才剥，规模允许时保持完整 LCS 原有的对齐结果
+    let prefix = 0;
+    if ((oldTokens.length - suffix) * (newTokens.length - suffix) > LCS_MAX_CELLS) {
+        while (prefix < oldTokens.length - suffix && prefix < newTokens.length - suffix
+            && oldLowered[prefix] === newLowered[prefix]) {
+            matchPair(prefix, prefix);
+            prefix++;
         }
+    }
+    const oldMid = oldTokens.length - prefix - suffix;
+    const newMid = newTokens.length - prefix - suffix;
+    if (oldMid * newMid <= LCS_MAX_CELLS) {
+        // lcs[i * width + j]：中段 oldLowered 前 i 个与 newLowered 前 j 个词元的最长公共子序列长度
+        const width = newMid + 1;
+        const lcs = new Uint32Array((oldMid + 1) * width);
+        for (let i = 1; i <= oldMid; i++) {
+            for (let j = 1; j <= newMid; j++) {
+                lcs[i * width + j] = oldLowered[prefix + i - 1] === newLowered[prefix + j - 1]
+                    ? lcs[(i - 1) * width + j - 1] + 1
+                    : Math.max(lcs[(i - 1) * width + j], lcs[i * width + j - 1]);
+            }
+        }
+        // 从末尾回溯对齐结果：相等的词元互相匹配，并继承旧的标记状态
+        let i = oldMid;
+        let j = newMid;
+        while (i > 0 && j > 0) {
+            if (oldLowered[prefix + i - 1] === newLowered[prefix + j - 1]) {
+                matchPair(prefix + i - 1, prefix + j - 1);
+                i--;
+                j--;
+            } else if (lcs[(i - 1) * width + j] >= lcs[i * width + j - 1]) {
+                i--;
+            } else {
+                j--;
+            }
+        }
+    } else {
+        console.warn(`[rebuildTokens] 编辑范围过大（${oldMid}×${newMid} 词元），跳过精确对齐`);
     }
     // 模糊补救：LCS 未能对齐的已标记单词可能是编辑时被改写（如 fox→foxes），
     // 把它的标记转移到相似度最高且尚未对齐的新单词词元上（一对一，忽略大小写）
@@ -115,6 +146,12 @@ export function rebuildTokensPreservingMarks(
     }
     return newTokens;
 }
+
+/**
+ * LCS 表的单元数上限（约 16 MB 的 Uint32Array）：超过时跳过精确对齐，
+ * 避免长文本编辑后一次性分配几千万个单元导致卡顿与内存暴涨
+ */
+const LCS_MAX_CELLS = 4_000_000;
 
 /** 模糊对齐的相似度阈值：低于该值视为不同的单词，不转移标记 */
 const FUZZY_ALIGNMENT_THRESHOLD = 0.6;

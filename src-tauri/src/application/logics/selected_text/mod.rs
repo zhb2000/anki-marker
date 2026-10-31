@@ -51,11 +51,16 @@ pub fn get_selected_context(
 /// 覆盖先到的降级结果，因此需要一对成对的状态信号驱动界面上的工作指示。
 ///
 /// 调用约定：`on_started` 在重试线程真正开始轮询时调用一次；`on_finished` 在重试
-/// 结束时调用恰好一次——`Some` 为补取到的结果，`None` 为超时放弃。重试未真正启动
-/// 时（平台侧无重试依据，或已有重试在途被互斥守卫拦下）两个回调都不调用。
+/// 结束时调用恰好一次——`Some` 为补取到的结果，`None` 为超时放弃或已过期。重试未
+/// 真正启动时（平台侧无重试依据、已有重试在途被互斥守卫拦下，或等待旧重试退出期间
+/// 自身已过期）两个回调都不调用。
+///
+/// `is_cancelled`：重试已过期（用户又发起了新一次取词，或主路径失败、补发已无意义）。
+/// 平台侧须在每次轮询前与补发前检查，过期即停止轮询并调用 `on_finished(None)`。
 pub struct RetryCallbacks {
     pub on_started: Box<dyn FnOnce() + Send>,
     pub on_finished: Box<dyn FnOnce(Option<SelectedContext>) + Send>,
+    pub is_cancelled: Box<dyn Fn() -> bool + Send>,
 }
 
 /// 划词捕获结果：text 为录入文本（取句成功时是整句），word 为取句模式命中的单词。

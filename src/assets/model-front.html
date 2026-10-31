@@ -34,6 +34,27 @@
 {{/例句}}
 
 <script type="text/javascript">
+// Anki 桌面版与 AnkiMobile 在同一个 webview 里为每次显示（换卡、翻面）重新执行本脚本，
+// 背面的 {{FrontSide}} 也会再次引入它。全局作用域的 const/class 第二次执行会报
+// “Identifier has already been declared”，导致整段脚本失效，所以整体包进 IIFE；
+// 需要被内联 onclick 调用的函数显式挂到 window 上。AnkiDroid 每张卡重新加载页面，同样适用。
+(function () {
+    /**
+     * 跨次执行共享的状态（挂在 window 上，每次执行取回同一份）：
+     * - audio：例句朗读用的唯一 Audio，换卡后仍能找到上一张卡正在播放的那个并暂停
+     * - observer：唯一的可见性监听，每次执行先断开再重新挂到当前卡片上，避免逐卡累积
+     * - generation：执行序号，异步查找可用音频期间换了卡则放弃播放
+     */
+    const shared = window.__ankiMarkerCardState || (window.__ankiMarkerCardState = {
+        audio: new Audio(),
+        observer: null,
+        generation: 0,
+    });
+    shared.generation += 1;
+    // 脚本被重新执行意味着换卡或翻面：上一次的例句朗读不应继续
+    // （桌面版换卡时虽会把 #qa 的 opacity 置 0，但随即执行的新脚本会断开旧监听，丢掉这条通知）
+    shared.audio.pause();
+
     /** hide or display the content */
     function toggle(e) {
         const box = document.getElementById(e);
@@ -46,13 +67,18 @@
         }
     }
 
-    const __sentenceAudio = new Audio();
+    const __sentenceAudio = shared.audio;
 
     /** Observer to pause audio when sentenceSection becomes invisible. */
     function setupSentenceButtonVisibilityObserver() {
+        // 幂等：先断开上一张卡片挂的监听（它观察的祖先节点在换卡后仍然存在，不断开会逐卡累积）
+        if (shared.observer != null) {
+            shared.observer.disconnect();
+            shared.observer = null;
+        }
         const sentenceSection = document.getElementById('sentenceSection');
         if (sentenceSection == null) {
-            return;
+            return; // 本卡没有例句；下一张卡执行脚本时会重新挂接
         }
         // Create mutation observer to detect when element becomes hidden
         const mutationObserver = new MutationObserver((mutations) => {
@@ -69,6 +95,7 @@
                 }
             });
         });
+        shared.observer = mutationObserver;
         // Start observing
         mutationObserver.observe(sentenceSection, {
             attributes: true,
@@ -88,6 +115,7 @@
     }
 
     async function clickSentenceButton() {
+        const generation = shared.generation;
         const isPlaying = !__sentenceAudio.paused;
         __sentenceAudio.pause();
         if (isPlaying) {
@@ -106,8 +134,8 @@
         ];
         const timeoutMs = 5000;
         const validIndex = await findFirstValidAudio(urls, timeoutMs);
-        if (validIndex == null) {
-            return;
+        if (validIndex == null || generation !== shared.generation) {
+            return; // 没有可用音频，或查找期间已换卡/翻面
         }
         __sentenceAudio.src = urls[validIndex];
         __sentenceAudio.play();
@@ -431,10 +459,15 @@
         return k;
     })();
 
+    // 供模板中的内联 onclick 调用（正面与背面模板都用到 toggle）
+    window.toggle = toggle;
+    window.clickSentenceButton = clickSentenceButton;
+
     // Initialize observer when DOM is ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', setupSentenceButtonVisibilityObserver);
     } else {
         setupSentenceButtonVisibilityObserver();
     }
+})();
 </script>

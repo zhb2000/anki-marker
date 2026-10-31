@@ -6,6 +6,8 @@ import type { CollinsItem, OxfordItem, YoudaoItem } from '../logics/dict';
 import AddButton from './AddButton.vue';
 import EditButton from './EditButton.vue';
 import type { CardStatus } from './CardStatus';
+import FluentStatusText from '../fluent-controls/FluentStatusText.vue';
+import type { StatusNotice } from '../fluent-controls/status';
 
 const props = defineProps({
     state: {
@@ -22,6 +24,14 @@ const props = defineProps({
         type: Object as PropType<{ source: DictSource; item: CollinsItem | OxfordItem | YoudaoItem; } | null>,
         default: null
     },
+    /**
+     * AI 选中的那条词典条目的就地反馈（加卡进度、失败与重试等）；null 时收起。
+     * 从本卡加卡时源条目可能在隐藏的标签页或列表下方，反馈要在本卡上也看得到
+     */
+    notice: {
+        type: Object as PropType<StatusNotice | null>,
+        default: null
+    },
     /** 是否为当前可见词典 tab 内的实例：仅可见实例播放入场/淡入动画（见 cardAnimIn 注释） */
     active: {
         type: Boolean,
@@ -34,6 +44,8 @@ const emit = defineEmits<{
     'edit-btn-click': [];
     'stop': [];
     'regenerate': [];
+    /** 就地反馈里的操作（如“停止”“重试”），由父组件转发给源条目 */
+    'notice-action': [];
 }>();
 
 /** 完成态且命中真实词典条目（非 fallback）时才显示加号，语义等同该条目卡片上的加号 */
@@ -183,6 +195,10 @@ function onBodyAnimationEnd(event: AnimationEvent) {
                 <EditButton v-if="showEditButton" @click="emitEditBtnClick" />
             </div>
         </div>
+        <!-- 与 WordCard 一致：反馈挂在卡片内部底部，随卡片一起滚动 -->
+        <FluentStatusText class="card-notice" :severity="notice?.severity ?? 'informational'"
+            :message="notice?.message ?? null" :progress="notice?.progress ?? false"
+            :action-label="notice?.actionLabel ?? null" @action="emit('notice-action')" />
     </div>
 </template>
 
@@ -231,6 +247,10 @@ function onBodyAnimationEnd(event: AnimationEvent) {
 
 .flex-shrink-0 {
     flex-shrink: 0;
+}
+
+.card-notice {
+    margin-top: 6px;
 }
 
 /* 右侧按钮列：与 WordCard 相同的 24px 命中盒规范 */

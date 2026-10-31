@@ -40,6 +40,26 @@ let ankiService: anki.AnkiService;
 let appVersion: string;
 const markdownIt = new MarkdownIt();
 
+/**
+ * 更新说明（v-html 渲染的 markdown）里的链接一律交给系统浏览器打开。
+ *
+ * 默认行为会让应用自己的 WebView 导航到外部网页，整个界面被替换掉；release 构建禁用了
+ * 右键菜单和快捷键，用户无法后退，只能关窗重开。站内锚点等非 http(s) 链接直接忽略
+ */
+function handleReleaseNoteClick(event: MouseEvent): void {
+    if (!(event.target instanceof Element)) {
+        return;
+    }
+    const anchor = event.target.closest('a[href]');
+    if (!(anchor instanceof HTMLAnchorElement)) {
+        return;
+    }
+    event.preventDefault();
+    if (anchor.protocol === 'http:' || anchor.protocol === 'https:') {
+        void cfg.openInBrowser(anchor.href);
+    }
+}
+
 /** 笔记模板名称的生效值（留空表示使用内置默认模板，见 config.ts 的 TEXT_SETTING_FALLBACKS） */
 const effectiveModelName = computed(() => cfg.effectiveTextSetting('modelName', config.modelName));
 
@@ -275,13 +295,15 @@ onActivated(async () => {
             :title="`Anki 划词助手 ${globals.latestAppVersion.value} 更新说明`"
             width="80%" max-height="80vh" :commands="appReleaseCommands"
             @close="appReleaseNoteDialogVisible = false" @command="onAppReleaseCommand">
-            <div class="markdown-body release-note" v-html="renderedAppReleaseNote"></div>
+            <div class="markdown-body release-note" v-html="renderedAppReleaseNote"
+                @click="handleReleaseNoteClick"></div>
         </FluentDialogShell>
         <FluentDialogShell :open="templateReleaseNoteDialogVisible"
             :title="`划词助手单词笔记模板 ${anki.CARD_TEMPLATE_VERSION} 更新说明`"
             width="80%" max-height="80vh" :commands="templateReleaseCommands"
             @close="templateReleaseNoteDialogVisible = false" @command="onTemplateReleaseCommand">
-            <div class="markdown-body release-note" v-html="renderedTemplateReleaseNote"></div>
+            <div class="markdown-body release-note" v-html="renderedTemplateReleaseNote"
+                @click="handleReleaseNoteClick"></div>
         </FluentDialogShell>
     </div>
 </template>

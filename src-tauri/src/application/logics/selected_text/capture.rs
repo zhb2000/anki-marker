@@ -197,6 +197,171 @@ pub fn char_offset_to_utf16(s: &str, char_offset: usize) -> Option<usize> {
     return (char_offset == s.chars().count()).then_some(utf16_offset);
 }
 
+/// AT-SPI 超文本模型里内嵌子对象（链接、行内 code、图片等）在父对象 Text 中的占位符。
+/// 仅 Linux（AT-SPI）使用；test 保留以便单测在各平台运行。
+#[cfg(any(target_os = "linux", test))]
+pub const EMBEDDED_OBJECT_CHAR: char = '\u{FFFC}';
+
+/// 一个内嵌子对象的展开结果。
+#[cfg(any(target_os = "linux", test))]
+#[derive(Debug, Clone)]
+pub struct EmbeddedObject {
+    /// 子对象的文本（图片等非文本对象为空串）
+    pub text: String,
+    /// 选区落在子对象内的部分（相对 text 的字符偏移，[start, end)）。
+    /// None 表示子对象整体算作选中：选区在父对象里只能精确到占位符这一个字符，
+    /// 只选了链接文字的一部分时，要靠它还原真实的选区边界。
+    pub selected: Option<(usize, usize)>,
+}
+
+/// 含内嵌对象的取句结果。
+#[cfg(any(target_os = "linux", test))]
+#[derive(Debug)]
+pub struct EmbeddedCapture {
+    /// 真实的所选文本：词里的占位符已展开
+    pub word: String,
+    pub capture: SentenceCapture,
+    /// 句子是否触及上下文边缘，语义同 capture_in_context
+    pub touched_edge: bool,
+}
+
+/// 占位符展开后的上下文与选区（UTF-16 码元偏移，[start, end)）。
+#[cfg(any(target_os = "linux", test))]
+struct ExpandedSelection {
+    context: String,
+    sel_start_utf16: usize,
+    sel_end_utf16: usize,
+}
+
+/// 把上下文里的占位符逐个替换为子对象文本，并同步换算选区。
+///
+/// `objects` 与上下文里的占位符按出现顺序一一对应，None 表示未能解析：该占位符
+/// 原样保留，由调用方据此降级。数量不足、选区越界时返回 None。
+#[cfg(any(target_os = "linux", test))]
+fn expand_embedded_objects(
+    context: &str,
+    sel_start_chars: usize,
+    sel_end_chars: usize,
+    objects: &[Option<EmbeddedObject>],
+) -> Option<ExpandedSelection> {
+    let mut expanded = String::with_capacity(context.len());
+    let mut utf16_len = 0usize;
+    let mut sel_start_utf16 = None;
+    let mut sel_end_utf16 = None;
+    let mut next_object = 0usize;
+    let mut char_buffer = [0u8; 4];
+    for (index, ch) in context.chars().enumerate() {
+        let object = if ch == EMBEDDED_OBJECT_CHAR {
+            let object = objects.get(next_object)?.as_ref();
+            next_object += 1;
+            object
+        } else {
+            None
+        };
+        let piece: &str = match object {
+            Some(object) => &object.text,
+            None => ch.encode_utf8(&mut char_buffer),
+        };
+        let piece_utf16 = piece.encode_utf16().count();
+        // 选区端点落在子对象上时，按子对象内的选区收窄
+        let (inner_start, inner_end) = match object.and_then(|object| object.selected) {
+            Some((start, end)) if start <= end => (
+                char_offset_to_utf16(piece, start)?,
+                char_offset_to_utf16(piece, end)?,
+            ),
+            Some(_) => return None,
+            None => (0, piece_utf16),
+        };
+        if index == sel_start_chars {
+            sel_start_utf16 = Some(utf16_len + inner_start);
+        }
+        if index + 1 == sel_end_chars {
+            sel_end_utf16 = Some(utf16_len + inner_end);
+        }
+        expanded.push_str(piece);
+        utf16_len += piece_utf16;
+    }
+    return Some(ExpandedSelection {
+        context: expanded,
+        sel_start_utf16: sel_start_utf16?,
+        sel_end_utf16: sel_end_utf16?,
+    });
+}
+
+/// 在含内嵌对象的上下文中切句：先展开占位符并换算选区，再走 capture_in_context。
+///
+/// `word` 与 `context` 都是 AT-SPI 读到的原文（可含占位符），`sel_start_chars` 是
+/// `word` 在 `context` 中的字符偏移。未解析的占位符只要落进词或句子就返回 None：
+/// 占位符背后往往是链接文字，去掉它等于录入缺字的句子——宁可降级为仅录词。
+#[cfg(any(target_os = "linux", test))]
+pub fn capture_with_embedded_objects(
+    context: &str,
+    word: &str,
+    sel_start_chars: usize,
+    objects: &[Option<EmbeddedObject>],
+    window_loc: isize,
+) -> Option<EmbeddedCapture> {
+    let word_chars = word.chars().count();
+    let expanded = expand_embedded_objects(
+        context,
+        sel_start_chars,
+        sel_start_chars + word_chars,
+        objects,
+    )?;
+    let word_has_object = word.contains(EMBEDDED_OBJECT_CHAR);
+    let real_word = if word_has_object {
+        // 词要从展开后的选区还原，偏移必须可信：原文切片须与读到的词逐字符一致
+        if !context
+            .chars()
+            .skip(sel_start_chars)
+            .take(word_chars)
+            .eq(word.chars())
+        {
+            return None;
+        }
+        let context_utf16: Vec<u16> = expanded.context.encode_utf16().collect();
+        let range = expanded.sel_start_utf16..expanded.sel_end_utf16;
+        let real_word = String::from_utf16(context_utf16.get(range)?).ok()?;
+        if real_word.trim().is_empty() || real_word.contains(EMBEDDED_OBJECT_CHAR) {
+            return None;
+        }
+        real_word
+    } else {
+        word.to_string()
+    };
+    // 词是由偏移还原出来的时候，唯一出现兜底没有校验意义，只有原文词才允许
+    let (capture, touched_edge) = capture_in_context(
+        &expanded.context,
+        &real_word,
+        &[expanded.sel_start_utf16 as isize],
+        window_loc,
+        !word_has_object,
+    )?;
+    if let SentenceCapture::Expanded { sentence, .. } = &capture {
+        if sentence.contains(EMBEDDED_OBJECT_CHAR) {
+            return None;
+        }
+    }
+    return Some(EmbeddedCapture {
+        word: real_word,
+        capture,
+        touched_edge,
+    });
+}
+
+/// 记录本次读到的 PRIMARY 内容，返回它相对上次记录是否变化（首次读取视为变化）。
+///
+/// X11 下取消选中后 PRIMARY 往往不会清空，单看内容分不清“新选的”和“很久以前选的”，
+/// 只能靠与上次比较判断。仅 Linux 使用；test 保留以便单测在各平台运行。
+#[cfg(any(target_os = "linux", test))]
+pub fn remember_primary(last: &mut Option<String>, current: &str) -> bool {
+    if last.as_deref() == Some(current) {
+        return false;
+    }
+    *last = Some(current.to_string());
+    return true;
+}
+
 /// 用权威选区文本调和平台 API 的捕获结果。
 ///
 /// 权威文本来自模拟复制读到的剪贴板内容——拷贝成功的语义下它恒为用户真实选区；
@@ -272,8 +437,9 @@ pub fn reconcile_with_primary(
 #[cfg(test)]
 mod tests {
     use super::{
-        capture_in_context, char_offset_to_utf16, find_anchor, reconcile_with_primary,
-        SentenceCapture,
+        capture_in_context, capture_with_embedded_objects, char_offset_to_utf16,
+        expand_embedded_objects, find_anchor, reconcile_with_primary, remember_primary,
+        EmbeddedCapture, EmbeddedObject, SentenceCapture, EMBEDDED_OBJECT_CHAR,
     };
 
     /// 锚点候选 1：提供方忠实响应请求窗口（窗口偏移有效）
@@ -499,5 +665,289 @@ mod tests {
         );
         assert_eq!(reconciled.text, "reconstruction");
         assert_eq!(reconciled.word, None);
+    }
+
+    /// 测试便捷构造：子对象整体算作选中
+    fn object(text: &str) -> Option<EmbeddedObject> {
+        return Some(EmbeddedObject {
+            text: text.to_string(),
+            selected: None,
+        });
+    }
+
+    /// 取出 Expanded 结果的 (句子, 词偏移)，并校验偏移处的 UTF-16 切片确为所选词
+    fn expanded_of(result: &EmbeddedCapture) -> (&str, usize) {
+        let SentenceCapture::Expanded {
+            sentence,
+            word_offset,
+        } = &result.capture
+        else {
+            panic!("expected an expanded sentence, got {:?}", result.capture);
+        };
+        let word_offset = word_offset.expect("word offset");
+        let sentence_utf16: Vec<u16> = sentence.encode_utf16().collect();
+        let word_utf16: Vec<u16> = result.word.encode_utf16().collect();
+        assert_eq!(
+            sentence_utf16[word_offset..word_offset + word_utf16.len()],
+            word_utf16[..]
+        );
+        return (sentence, word_offset);
+    }
+
+    /// 完整性：展开后除占位符外逐字符不变（含 CJK 与 astral 字符）；选区端点随之换算
+    #[test]
+    fn expansion_keeps_text_intact() {
+        let context = "Hello \u{FFFC} there, 世界😀 \u{FFFC}\u{FFFC} end.\n";
+        let objects = [object("brave 𝒳 new"), object(""), object("𝒴")];
+        let expanded = expand_embedded_objects(context, 8, 13, &objects).unwrap();
+
+        let mut expected = String::new();
+        let mut replacements = objects.iter().flatten();
+        for ch in context.chars() {
+            if ch == EMBEDDED_OBJECT_CHAR {
+                expected.push_str(&replacements.next().unwrap().text);
+            } else {
+                expected.push(ch);
+            }
+        }
+        assert_eq!(expanded.context, expected);
+        assert_eq!(expanded.context, "Hello brave 𝒳 new there, 世界😀 𝒴 end.\n");
+
+        // 选区是原文的 "there"（字符 [8, 13)）：前面的展开文本含 astral 字符，须按 UTF-16 计
+        let start = "Hello brave 𝒳 new ".encode_utf16().count();
+        assert_eq!(expanded.sel_start_utf16, start);
+        assert_eq!(expanded.sel_end_utf16, start + 5);
+    }
+
+    /// 没有占位符时展开是恒等变换
+    #[test]
+    fn expansion_without_objects_is_identity() {
+        let context = "纯文本 😀 no objects.";
+        let expanded = expand_embedded_objects(context, 4, 5, &[]).unwrap();
+        assert_eq!(expanded.context, context);
+        assert_eq!(expanded.sel_start_utf16, 4);
+        assert_eq!(expanded.sel_end_utf16, 6);
+    }
+
+    /// 未解析的占位符原样保留，其余文本不受影响
+    #[test]
+    fn expansion_keeps_unresolved_placeholder() {
+        let context = "a \u{FFFC} b \u{FFFC} c";
+        let expanded = expand_embedded_objects(context, 0, 1, &[None, object("link")]).unwrap();
+        assert_eq!(expanded.context, "a \u{FFFC} b link c");
+    }
+
+    /// 占位符与解析结果数量不符、选区越界、子对象选区非法时不展开
+    #[test]
+    fn expansion_rejects_invalid_input() {
+        let context = "a \u{FFFC} b";
+        assert!(expand_embedded_objects(context, 0, 1, &[]).is_none());
+        assert!(expand_embedded_objects(context, 0, 100, &[object("x")]).is_none());
+        for selected in [(2, 1), (0, 100)] {
+            let objects = [Some(EmbeddedObject {
+                text: "xy".to_string(),
+                selected: Some(selected),
+            })];
+            assert!(expand_embedded_objects(context, 2, 3, &objects).is_none());
+        }
+    }
+
+    /// 选词在普通文本里：句中链接展开，偏移换算到展开后的句子
+    #[test]
+    fn embedded_sentence_around_plain_word() {
+        let context = "First one. See \u{FFFC} for 😀 details here. Next \u{FFFC} end.";
+        let start = context.chars().position(|ch| ch == 'd').unwrap();
+        let result = capture_with_embedded_objects(
+            context,
+            "details",
+            start,
+            &[object("the 𝒳 docs"), object("other")],
+            0,
+        )
+        .unwrap();
+        assert_eq!(result.word, "details");
+        let (sentence, word_offset) = expanded_of(&result);
+        assert_eq!(sentence, "See the 𝒳 docs for 😀 details here.");
+        assert_eq!(word_offset, "See the 𝒳 docs for 😀 ".encode_utf16().count());
+        assert!(!result.touched_edge);
+    }
+
+    /// 选中整个链接：父对象里读到的词只有一个占位符，要还原成链接文字
+    #[test]
+    fn embedded_word_is_a_whole_link() {
+        let result = capture_with_embedded_objects(
+            "Click \u{FFFC} now. Bye.",
+            "\u{FFFC}",
+            6,
+            &[object("here")],
+            0,
+        )
+        .unwrap();
+        assert_eq!(result.word, "here");
+        assert_eq!(expanded_of(&result), ("Click here now.", 6));
+    }
+
+    /// 只选链接的一部分：词按子对象内的选区收窄；句中同词多次出现时偏移仍指向选中的那处
+    #[test]
+    fn embedded_word_is_part_of_a_link() {
+        let objects = [Some(EmbeddedObject {
+            text: "hello world".to_string(),
+            selected: Some((6, 11)),
+        })];
+        let result =
+            capture_with_embedded_objects("world \u{FFFC} end. Bye.", "\u{FFFC}", 6, &objects, 0)
+                .unwrap();
+        assert_eq!(result.word, "world");
+        assert_eq!(expanded_of(&result), ("world hello world end.", 12));
+    }
+
+    /// 选区跨过链接：词的两端是普通文本，中间展开
+    #[test]
+    fn embedded_word_spans_a_link() {
+        let context = "Say a \u{FFFC} b now.";
+        let result =
+            capture_with_embedded_objects(context, "a \u{FFFC} b", 4, &[object("𝒳")], 0).unwrap();
+        assert_eq!(result.word, "a 𝒳 b");
+        assert_eq!(expanded_of(&result), ("Say a 𝒳 b now.", 4));
+    }
+
+    /// 选区以链接开头和结尾，且两端都只选了一部分
+    #[test]
+    fn embedded_word_starts_and_ends_inside_links() {
+        let objects = [
+            Some(EmbeddedObject {
+                text: "abc def".to_string(),
+                selected: Some((4, 7)),
+            }),
+            Some(EmbeddedObject {
+                text: "ghi jkl".to_string(),
+                selected: Some((0, 3)),
+            }),
+        ];
+        let result = capture_with_embedded_objects(
+            "\u{FFFC} mid \u{FFFC} tail.",
+            "\u{FFFC} mid \u{FFFC}",
+            0,
+            &objects,
+            0,
+        )
+        .unwrap();
+        assert_eq!(result.word, "def mid ghi");
+        assert_eq!(expanded_of(&result), ("abc def mid ghi jkl tail.", 4));
+    }
+
+    /// 图片等非文本对象展开为空串：其余文本逐字符保留
+    #[test]
+    fn embedded_image_expands_to_nothing() {
+        let result =
+            capture_with_embedded_objects("Hello \u{FFFC} there.", "there", 8, &[object("")], 0)
+                .unwrap();
+        assert_eq!(expanded_of(&result), ("Hello  there.", 7));
+    }
+
+    /// 未解析的占位符落进句子或词：降级，不录入缺字的文本
+    #[test]
+    fn embedded_unresolved_in_sentence_degrades() {
+        assert!(capture_with_embedded_objects(
+            "Hello \u{FFFC} there. Bye.",
+            "there",
+            8,
+            &[None],
+            0
+        )
+        .is_none());
+        assert!(
+            capture_with_embedded_objects("Click \u{FFFC} now.", "\u{FFFC}", 6, &[None], 0)
+                .is_none()
+        );
+        assert!(capture_with_embedded_objects(
+            "Say a \u{FFFC} b now.",
+            "a \u{FFFC} b",
+            4,
+            &[None],
+            0
+        )
+        .is_none());
+    }
+
+    /// 未解析的占位符在别的句子里：不影响本句
+    #[test]
+    fn embedded_unresolved_in_other_sentence_is_ignored() {
+        let result = capture_with_embedded_objects(
+            "Hello there. Next \u{FFFC} one.",
+            "there",
+            6,
+            &[None],
+            0,
+        )
+        .unwrap();
+        assert_eq!(expanded_of(&result), ("Hello there.", 6));
+    }
+
+    /// 词含占位符时偏移必须可信：原文切片与词不一致就降级，不用展开结果猜
+    #[test]
+    fn embedded_word_with_stale_offset_degrades() {
+        assert!(capture_with_embedded_objects(
+            "Click \u{FFFC} now.",
+            "\u{FFFC}",
+            0,
+            &[object("here")],
+            0
+        )
+        .is_none());
+    }
+
+    /// 普通词的偏移失真时沿用唯一出现兜底，与不含占位符的路径一致
+    #[test]
+    fn embedded_plain_word_uses_unique_occurrence_fallback() {
+        let result = capture_with_embedded_objects(
+            "See \u{FFFC} for details.",
+            "details",
+            0,
+            &[object("docs")],
+            0,
+        )
+        .unwrap();
+        assert_eq!(expanded_of(&result), ("See docs for details.", 13));
+    }
+
+    /// 选区跨句：与普通路径一样原样录入所选文本，占位符已展开
+    #[test]
+    fn embedded_selection_across_sentences() {
+        let result = capture_with_embedded_objects(
+            "One. Two \u{FFFC}. Three.",
+            "Two \u{FFFC}. Three",
+            5,
+            &[object("𝒳")],
+            0,
+        )
+        .unwrap();
+        assert_eq!(result.word, "Two 𝒳. Three");
+        let SentenceCapture::SelectionAsIs(text) = &result.capture else {
+            panic!("expected the selection as is, got {:?}", result.capture);
+        };
+        assert_eq!(text, "Two 𝒳. Three");
+    }
+
+    /// 触边判定基于展开后的上下文
+    #[test]
+    fn embedded_touched_edge() {
+        let result =
+            capture_with_embedded_objects("cut \u{FFFC} word", "word", 6, &[object("off")], 100)
+                .unwrap();
+        assert!(result.touched_edge);
+        assert_eq!(expanded_of(&result), ("cut off word", 8));
+    }
+
+    /// PRIMARY 变化判定：首次与内容变化都算变化，内容不变不算；变回旧内容也算变化
+    #[test]
+    fn primary_change_detection() {
+        let mut last = None;
+        assert!(remember_primary(&mut last, "old"));
+        assert!(!remember_primary(&mut last, "old"));
+        assert!(remember_primary(&mut last, "new"));
+        assert!(!remember_primary(&mut last, "new"));
+        assert!(remember_primary(&mut last, "old"));
+        assert_eq!(last.as_deref(), Some("old"));
     }
 }

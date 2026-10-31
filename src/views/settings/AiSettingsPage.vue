@@ -6,6 +6,7 @@ import {
     LLM_DEFAULT_MAX_TOKENS,
     LlmError,
     fetchAvailableModels,
+    parseMaxTokens,
     testLlmConnection,
     type RemoteModelInfo,
 } from '../../logics/llm';
@@ -238,8 +239,15 @@ async function runConnectionTest(): Promise<void> {
     testAbort = controller;
     testState.value = { phase: 'testing' };
     try {
+        // 传入与 AI 优选完全相同的参数：测试走同一条请求路径，避免“测试通过、实际优选失败”
         const latencyMs = await testLlmConnection(
-            { baseUrl: state.llmBaseUrl, apiKey: state.llmApiKey, model: state.llmModel },
+            {
+                baseUrl: state.llmBaseUrl,
+                apiKey: state.llmApiKey,
+                model: state.llmModel,
+                maxTokens: parseMaxTokens(state.llmMaxTokens),
+                reasoningEffort: state.llmReasoningEffort,
+            },
             controller.signal
         );
         if (controller.signal.aborted) {
@@ -261,7 +269,8 @@ async function runConnectionTest(): Promise<void> {
 
 function describeTestError(error: LlmError): string {
     if (error.kind === 'timeout') {
-        return '请求超时（15 秒），请检查 API 地址与模型是否正确';
+        // 超时分首字节、流空闲、总上限几段（与真实请求一致），不写具体秒数
+        return '请求超时，请检查 API 地址与模型是否正确';
     }
     if (error.kind === 'network') {
         return `网络请求失败：${error.message}`;

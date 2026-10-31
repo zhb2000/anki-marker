@@ -242,6 +242,11 @@ export function ensureAnkiConnect(
     options?: { forceLaunch?: boolean; signal?: AbortSignal; }
 ): Promise<void> {
     const signal = options?.signal;
+    // 已中止的信号不会再触发 abort 事件：此时若照常登记，这个等待者永远不会被移除，
+    // 共享执行也就无法因“所有等待者都已取消”而中断。所以入口处直接退出
+    if (signal?.aborted) {
+        return Promise.reject(new DOMException('已停止等待 Anki 启动', 'AbortError'));
+    }
     const waiter = {};
     ankiConnectWaiters.add(waiter);
 
@@ -272,18 +277,27 @@ export function ensureAnkiConnect(
     }
 
     const current = ensureAnkiConnectInFlight;
-    // 调用方取消：退出等待；最后一个等待者取消时中断共享执行，避免它在后台继续重试拉起 Anki
-    signal?.addEventListener('abort', () => {
-        ankiConnectWaiters.delete(waiter);
-        if (onProgress != null) {
-            ankiConnectProgressListeners.delete(onProgress);
-        }
-        if (ankiConnectWaiters.size === 0 && ensureAnkiConnectInFlight === current) {
-            current.controller.abort();
-        }
-    }, { once: true });
-
-    return current.promise;
+    if (signal == null) {
+        return current.promise;
+    }
+    return new Promise<void>((resolve, reject) => {
+        // 调用方取消：立即以 AbortError 结束自己的等待（其他等待者仍在等时，共享执行不会马上结束）；
+        // 最后一个等待者取消时中断共享执行，避免它在后台继续重试拉起 Anki
+        const onAbort = () => {
+            ankiConnectWaiters.delete(waiter);
+            if (onProgress != null) {
+                ankiConnectProgressListeners.delete(onProgress);
+            }
+            if (ankiConnectWaiters.size === 0 && ensureAnkiConnectInFlight === current) {
+                current.controller.abort();
+            }
+            reject(new DOMException('已停止等待 Anki 启动', 'AbortError'));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        current.promise
+            .then(resolve, reject)
+            .finally(() => signal.removeEventListener('abort', onAbort));
+    });
 }
 // #endregion
 
@@ -463,7 +477,8 @@ async function getLatestAppInfoFromGitHubRelease(etag?: string): Promise<GitHubR
     if (!(data instanceof Object)) {
         throw TypeError(`Expect response data to be Object but receive ${typeof data}: ${String(data)}`);
     }
-    typeAssertion<{ tag_name: string, html_url: string, name: string, body: string; }>(data);
+    // GitHub API 中 name/body 可能为 null，入缓存前须归一化为字符串，否则缓存校验永远不通过
+    typeAssertion<{ tag_name: string, html_url: string, name: string | null, body: string | null; }>(data);
     const version = semver.clean(data.tag_name);
     if (version == null) {
         throw new Error(`version ${version} cannot be cleaned by semver`);
@@ -473,8 +488,8 @@ async function getLatestAppInfoFromGitHubRelease(etag?: string): Promise<GitHubR
             version,
             tagName: data.tag_name,
             htmlURL: data.html_url,
-            name: data.name,
-            body: data.body
+            name: data.name ?? '',
+            body: data.body ?? ''
         },
         etag: responseEtag
     };
@@ -518,25 +533,43 @@ export const templateUpdateAvailable = computed(() => {
     return false;
 });
 
-/** 获取 Anki 中的笔记模板版本，出错时不抛出异常，而是将异常信息存入 templateVersion */
+/** fetchAndSetTemplateVersion 的请求序号，用于丢弃过期结果 */
+let templateVersionRequestSeq = 0;
+
+/**
+ * 获取 Anki 中的笔记模板版本，出错时不抛出异常，而是将异常信息存入 templateVersion。
+ * 该函数会被多处并发调用（配置 watch、设置页等），返回顺序不固定：
+ * 只有最后一次发起的请求可以写入结果，避免旧模型名的结果覆盖新的。
+ */
 export async function fetchAndSetTemplateVersion(modelName: string) {
+    const seq = ++templateVersionRequestSeq;
     if (debug.templateVersionScenario === 'low-version') {
         // mock：模拟 Anki 中的笔记模板版本过低
         await debug.mockDelay();
-        templateVersion.value = '0.0.0';
+        if (seq === templateVersionRequestSeq) {
+            templateVersion.value = '0.0.0';
+        }
         return;
     }
     if (debug.templateVersionScenario === 'request-error') {
         // mock：模拟获取笔记模板版本失败
         await debug.mockDelay();
-        templateVersion.value = new Error("mock request error (debug template version scenario: 'request-error')");
+        if (seq === templateVersionRequestSeq) {
+            templateVersion.value = new Error("mock request error (debug template version scenario: 'request-error')");
+        }
         return;
     }
     try {
-        templateVersion.value = await ankiService.getCardTemplateVersionByModelName(modelName);
+        // 经由 getAnkiService()：设置页可能在 MainView 完成初始化之前调用本函数
+        const version = await (await getAnkiService()).getCardTemplateVersionByModelName(modelName);
+        if (seq === templateVersionRequestSeq) {
+            templateVersion.value = version;
+        }
     } catch (error) {
         console.error(error);
-        templateVersion.value = (error instanceof Error) ? error : new Error(String(error));
+        if (seq === templateVersionRequestSeq) {
+            templateVersion.value = (error instanceof Error) ? error : new Error(String(error));
+        }
     }
 }
 // #endregion

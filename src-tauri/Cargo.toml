@@ -79,7 +79,8 @@ objc2-foundation = { version = "0.3", features = ["std", "NSProcessInfo", "NSUse
 # （剪贴板备份/读取/恢复）、Win32_UI_Input_KeyboardAndMouse（SendInput）；
 # 另外：Win32_UI_Accessibility 还提供 SetWinEventHook（跟踪前台窗口，
 # selected_text::windows_target），Win32_System_Threading 提供 OpenProcess +
-# QueryFullProcessImageNameW（归还日志里的应用名，如 chrome.exe）
+# QueryFullProcessImageNameW（归还日志里的应用名，如 chrome.exe）；
+# Win32_System_Diagnostics_ToolHelp（枚举进程检测 Anki 是否在运行）
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_System_Registry",
@@ -93,6 +94,7 @@ windows = { version = "0.61", features = [
     "Win32_System_DataExchange",
     "Win32_System_Memory",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_Diagnostics_ToolHelp",
 ] }
 
 # 划词取词（Linux）：AT-SPI（D-Bus）读选区与上下文（优先），回退读 PRIMARY 选区

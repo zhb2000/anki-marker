@@ -2,6 +2,7 @@
 import { computed, ref, useAttrs, watch } from 'vue';
 import { HoverWrapper } from './HoverWrapper';
 import { handleInputWheel } from './inputWheelScroll';
+import { useTextModel } from './useTextModel';
 
 // 关闭 attr 自动继承：class/style 手动绑到容器（继承外部的尺寸设置），
 // 其余 attrs（placeholder、@blur 等）透传给内部 input
@@ -22,13 +23,12 @@ const [model, modifiers] = defineModel<string>({
         if (value == null) {
             return value;
         }
-        let stringValue = String(value);
-        if (modifiers.trim) {
-            stringValue = stringValue.trim();
-        }
-        return stringValue;
+        return String(value);
     }
 });
+
+// 内部 input 绑定草稿而非 model：.trim 只在提交时裁剪，逐键输入不吞空白（见 useTextModel）
+const { text, commitTrim } = useTextModel(model, modifiers);
 
 const attrs = useAttrs();
 
@@ -81,8 +81,9 @@ function handlePeekEnd() {
 <template>
     <HoverWrapper>
         <div class="fluent-password-input" :class="[$attrs.class, { disabled }]" :style="$attrs.style">
-            <input v-model="model" class="inner-input" spellcheck="false" autocomplete="off"
-                @wheel="handleInputWheel" v-bind="restAttrs()" :type="inputType" :disabled="disabled" />
+            <input v-model="text" class="inner-input" spellcheck="false" autocomplete="off"
+                @wheel="handleInputWheel" @change="commitTrim" v-bind="restAttrs()" :type="inputType"
+                :disabled="disabled" />
             <!-- @mousedown.prevent 阻止按钮抢夺输入框焦点，避免触发外部绑定的 blur 保存逻辑 -->
             <button v-show="revealButtonVisible" type="button" class="reveal-button" :class="{ revealed }"
                 :title="revealed ? '隐藏' : '显示'" :aria-label="revealed ? '隐藏密码' : '显示密码'"

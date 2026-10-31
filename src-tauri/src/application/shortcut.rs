@@ -9,6 +9,7 @@
 //! 其所在的整个句子；捕获结果（录入文本 + 取句命中的单词）以
 //! sentence-captured 事件发给前端。
 
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -210,10 +211,55 @@ pub fn update_from_config_silently(app: &AppHandle) {
 
 fn update_from_config_inner(app: &AppHandle, notify: bool) {
     let config_path = app.state::<ConfigPath>();
-    let shortcut = logics::config::read_config(config_path.0.as_str())
-        .map(|config| config.global_shortcut().to_string())
-        .unwrap_or_default();
-    apply_shortcut(app, &shortcut, notify);
+    match logics::config::read_config(config_path.0.as_str()) {
+        Ok(config) => apply_shortcut(app, config.global_shortcut(), notify),
+        Err(error) => {
+            // 读取失败（语法错误、文件被占用或正写到一半）：保持现有注册不动，
+            // 不能当作“未设置快捷键”把它注销掉；上报失败让设置页看得到原因
+            log::warn!(
+                "failed to read the config file, keeping the current global shortcut: {error}"
+            );
+            let shortcut = LAST_REGISTRATION
+                .lock()
+                .ok()
+                .and_then(|guard| {
+                    guard
+                        .as_ref()
+                        .map(|registration| registration.shortcut.clone())
+                })
+                .unwrap_or_default();
+            record_registration(
+                app,
+                ShortcutRegistration {
+                    shortcut,
+                    success: false,
+                    error: Some(format!("读取配置文件失败：{error}")),
+                },
+                notify,
+            );
+        }
+    }
+}
+
+/// 录制快捷键期间暂停全局快捷键：否则按下当前已注册的组合会被系统级热键吃掉，
+/// 录制控件收不到按键，还会意外触发一次取词。录制结束后调用 resume_global_shortcut 恢复。
+#[tauri::command(rename_all = "snake_case")]
+pub fn suspend_global_shortcut(app: AppHandle) {
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    {
+        use tauri_plugin_global_shortcut::GlobalShortcutExt;
+        if let Err(error) = app.global_shortcut().unregister_all() {
+            log::warn!("failed to suspend the global shortcut: {error}");
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    let _ = app;
+}
+
+/// 结束录制后按配置恢复全局快捷键注册（不通知前端：录制结果若有变化，保存配置时会通知）。
+#[tauri::command(rename_all = "snake_case")]
+pub fn resume_global_shortcut(app: AppHandle) {
+    update_from_config_silently(&app);
 }
 
 /// 将全局快捷键注册状态更新为 `shortcut`：空字符串表示注销全部快捷键。
@@ -246,7 +292,11 @@ fn apply_shortcut(app: &AppHandle, shortcut: &str, notify: bool) {
             }
         }
     };
-    // 更新缓存（无论是否通知前端，缓存始终反映真实注册状态）
+    record_registration(app, registration, notify);
+}
+
+/// 记录注册结果：更新缓存（无论是否通知前端，缓存始终反映真实注册状态），按需通知前端
+fn record_registration(app: &AppHandle, registration: ShortcutRegistration, notify: bool) {
     if let Ok(mut guard) = LAST_REGISTRATION.lock() {
         *guard = Some(registration.clone());
     }
@@ -316,7 +366,15 @@ pub enum CaptureTrigger {
 /// `restore_foreground_before_capture`）。
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub fn on_shortcut_pressed(app: AppHandle, trigger: CaptureTrigger) {
+    // 取词互斥：上一次取词仍在途时丢弃新的触发。两次取词交错会互相覆盖剪贴板备份
+    // （模拟复制回退路径先备份、再复制、后恢复），用户原剪贴板（macOS 还有提示音音量）
+    // 会被永久替换；两次结果先后 emit 也会让界面被覆盖两次
+    let Some(in_flight) = CaptureInFlight::acquire() else {
+        log::info!("a capture is already in progress, ignoring the new trigger");
+        return;
+    };
     std::thread::spawn(move || {
+        let _in_flight = in_flight;
         // 菜单触发：取词前先把前台窗口还给用户所在的应用（必须在取词线程里做：
         // 归还带有界等待，不能阻塞主线程的事件循环）
         restore_foreground_before_capture(trigger);
@@ -327,10 +385,22 @@ pub fn on_shortcut_pressed(app: AppHandle, trigger: CaptureTrigger) {
         // 主路径选区文本（重试守卫的比对基准）：取句命中时是词，降级/回退时是所选原文。
         // 后台重试在 get_selected_context 内部就启动，此时主路径结果尚不可知，
         // 故经此共享槽位在捕获返回后回填给重试回调
-        let primary_text = std::sync::Arc::new(Mutex::new(None::<String>));
+        let generation = CAPTURE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        // 上一次取词的重试随代次递增而过期，过期回调不再改动“仍在补取”状态——
+        // 这里统一收掉旧指示；本次若启动新重试，其 on_started 会再置 true
+        if app
+            .state::<CaptureSettling>()
+            .0
+            .lock()
+            .map(|guard| *guard)
+            .unwrap_or(false)
+        {
+            set_capture_settling(&app, false);
+        }
+        let retry_sync = std::sync::Arc::new(Mutex::new(RetrySync::default()));
         let context = match logics::selected_text::get_selected_context(
             word_to_sentence,
-            retry_callbacks(app.clone(), primary_text.clone()),
+            retry_callbacks(app.clone(), generation, retry_sync.clone()),
         ) {
             Ok(context) => context,
             Err(capture_error) => {
@@ -339,6 +409,9 @@ pub fn on_shortcut_pressed(app: AppHandle, trigger: CaptureTrigger) {
                 // 见 selected_text::windows_target）；Linux 目标应用未通过 AT-SPI
                 // 暴露选区且 PRIMARY 也为空
                 log::warn!("text capture failed: {capture_error}");
+                // 主路径已失败（界面会弹失败提示）：作废本次的后台重试，免得提示之后
+                // 句子又被悄悄填进来
+                mark_primary_failed(&retry_sync);
                 report_capture_failure(&app, CaptureFailure::Failed);
                 return;
             }
@@ -350,25 +423,100 @@ pub fn on_shortcut_pressed(app: AppHandle, trigger: CaptureTrigger) {
                 // 与取词报错同样给反馈——静默时用户分不清“没选中”“应用不支持”与
                 // “取词目标取错了”（托盘菜单路径下尤其明显）
                 log::info!("no text captured: the target app returned an empty selection");
+                mark_primary_failed(&retry_sync);
                 report_capture_failure(&app, CaptureFailure::Empty);
                 return;
             }
         };
-        // 须在弹窗前记录——弹窗期间重试可能已命中
-        if let Ok(mut guard) = primary_text.lock() {
-            *guard = Some(captured.word.clone().unwrap_or(captured.text.clone()));
-        }
+        // 回填重试守卫的比对基准，并取出“先于主路径完成”的重试结果（若有）：
+        // 主路径（模拟复制、PDF 精修）可能比重试的首轮轮询还慢，此前到达的重试结果
+        // 暂存在槽位里，须在主路径结果之后经守卫补发，否则会被主路径的降级结果覆盖
+        let early_retry = match retry_sync.lock() {
+            Ok(mut sync) => {
+                sync.primary =
+                    PrimaryState::Ready(captured.word.clone().unwrap_or(captured.text.clone()));
+                sync.early.take()
+            }
+            Err(_) => None,
+        };
         if let Err(error) = show_and_focus_main_window(&app) {
             log::warn!("failed to show main window: {error}");
         }
-        // 暂存捕获结果：若主窗口刚被重建、前端尚未就绪，事件会丢失，前端启动时会取回暂存内容
-        if let Ok(mut pending) = app.state::<PendingSentence>().0.lock() {
-            *pending = Some(captured.clone());
-        }
-        if let Err(error) = app.emit("sentence-captured", captured) {
-            log::warn!("failed to emit sentence-captured event: {error}");
+        emit_captured(&app, captured);
+        if let Some(context) = early_retry {
+            if CAPTURE_GENERATION.load(Ordering::SeqCst) == generation {
+                deliver_retry_capture(&app, &retry_sync, context);
+            }
         }
     });
+}
+
+/// 发出 sentence-captured 事件，并暂存结果：若主窗口刚被重建、前端尚未就绪，事件会丢失，
+/// 前端启动时取回暂存内容（前端收到事件时也会取走暂存，避免日后重载时回放旧句子）
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn emit_captured(app: &AppHandle, captured: CapturedSentence) {
+    if let Ok(mut pending) = app.state::<PendingSentence>().0.lock() {
+        *pending = Some(captured.clone());
+    }
+    if let Err(error) = app.emit("sentence-captured", captured) {
+        log::warn!("failed to emit sentence-captured event: {error}");
+    }
+}
+
+/// 取词在途标记：同一时间只允许一次取词（见 on_shortcut_pressed）。
+static CAPTURE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// 取词代次：每次取词递增。后台重试记下自己的代次，代次落后即视为过期
+/// （用户已发起新一次取词），停止轮询、不再补发
+static CAPTURE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// 取词在途标记的 RAII 守卫：Drop 时复位（含取词线程 panic 的情形）
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+struct CaptureInFlight;
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+impl CaptureInFlight {
+    fn acquire() -> Option<CaptureInFlight> {
+        if CAPTURE_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+            return None;
+        }
+        return Some(CaptureInFlight);
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+impl Drop for CaptureInFlight {
+    fn drop(&mut self) {
+        CAPTURE_IN_FLIGHT.store(false, Ordering::SeqCst);
+    }
+}
+
+/// 主路径结果的状态（重试守卫的比对基准）
+#[derive(Debug, Default)]
+enum PrimaryState {
+    /// 主路径尚未返回
+    #[default]
+    Pending,
+    /// 主路径已交付：取句命中时是词，降级/回退时是所选原文
+    Ready(String),
+    /// 主路径失败或为空（已弹失败提示）：重试结果一律丢弃
+    Failed,
+}
+
+/// 主路径与后台重试之间的同步槽位
+#[derive(Debug, Default)]
+struct RetrySync {
+    primary: PrimaryState,
+    /// 主路径尚未返回时就已完成的重试结果，等主路径交付后再经守卫补发
+    early: Option<logics::selected_text::SelectedContext>,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn mark_primary_failed(retry_sync: &Mutex<RetrySync>) {
+    if let Ok(mut sync) = retry_sync.lock() {
+        sync.primary = PrimaryState::Failed;
+        sync.early = None;
+    }
 }
 
 /// 划词没有录入内容时的统一反馈：弹出主窗口，并让前端提示原因（`failure` 区分
@@ -412,20 +560,54 @@ fn restore_foreground_before_capture(trigger: CaptureTrigger) {
 fn restore_foreground_before_capture(_trigger: CaptureTrigger) {}
 
 /// 构造后台重试的生命周期回调：驱动“仍在补取”指示状态，并落地补发的完整句子。
+///
+/// 回调都带代次检查：过期的重试（用户已发起新一次取词）既不补发结果，也不改动
+/// “仍在补取”状态——否则旧重试结束时会把新重试的指示环提前收掉
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn retry_callbacks(
     app: AppHandle,
-    primary_text: std::sync::Arc<Mutex<Option<String>>>,
+    generation: u64,
+    retry_sync: std::sync::Arc<Mutex<RetrySync>>,
 ) -> logics::selected_text::RetryCallbacks {
+    let is_current = move || CAPTURE_GENERATION.load(Ordering::SeqCst) == generation;
     let started_app = app.clone();
+    let cancel_sync = retry_sync.clone();
     return logics::selected_text::RetryCallbacks {
-        on_started: Box::new(move || set_capture_settling(&started_app, true)),
+        on_started: Box::new(move || {
+            if is_current() {
+                set_capture_settling(&started_app, true);
+            }
+        }),
         on_finished: Box::new(move |outcome| {
+            if !is_current() {
+                return;
+            }
             if let Some(context) = outcome {
-                deliver_retry_capture(&app, &primary_text, context);
+                let deliver_now = match retry_sync.lock() {
+                    Ok(mut sync) => match sync.primary {
+                        // 主路径尚未返回：暂存，由主路径交付后补发
+                        PrimaryState::Pending => {
+                            sync.early = Some(context);
+                            None
+                        }
+                        PrimaryState::Ready(_) => Some(context),
+                        PrimaryState::Failed => None,
+                    },
+                    Err(_) => None,
+                };
+                if let Some(context) = deliver_now {
+                    deliver_retry_capture(&app, &retry_sync, context);
+                }
             }
             // 无论补发成功、被守卫丢弃还是超时放弃，都要结束“仍在补取”状态
             set_capture_settling(&app, false);
+        }),
+        is_cancelled: Box::new(move || {
+            CAPTURE_GENERATION.load(Ordering::SeqCst) != generation
+                || cancel_sync
+                    .lock()
+                    .map(|sync| matches!(sync.primary, PrimaryState::Failed))
+                    .unwrap_or(false)
         }),
     };
 }
@@ -441,13 +623,21 @@ fn retry_callbacks(
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn deliver_retry_capture(
     app: &AppHandle,
-    primary_text: &Mutex<Option<String>>,
+    retry_sync: &Mutex<RetrySync>,
     context: logics::selected_text::SelectedContext,
 ) {
     let Some(mut captured) = CapturedSentence::from_selected_context(context, true) else {
         return;
     };
-    if let Ok(Some(primary)) = primary_text.lock().map(|guard| guard.clone()) {
+    let primary = match retry_sync.lock() {
+        Ok(sync) => match &sync.primary {
+            PrimaryState::Ready(primary) => primary.clone(),
+            // 调用方只在主路径已交付时调用；其余状态一律不补发
+            _ => return,
+        },
+        Err(_) => return,
+    };
+    {
         let word_matches = captured
             .word
             .as_deref()
@@ -478,12 +668,7 @@ fn deliver_retry_capture(
             }
         }
     }
-    if let Ok(mut pending) = app.state::<PendingSentence>().0.lock() {
-        *pending = Some(captured.clone());
-    }
-    if let Err(error) = app.emit("sentence-captured", captured) {
-        log::warn!("failed to emit sentence-captured event (retry): {error}");
-    }
+    emit_captured(app, captured);
 }
 
 /// 显示并聚焦主窗口；若主窗口已不存在，则按 tauri.conf.json 中的窗口配置重建。
@@ -517,6 +702,9 @@ pub fn show_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
     // 前端就绪后的 show() 是幂等的
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
+    // 新窗口没有 setup 阶段挂在旧窗口上的原生监听（macOS 标题栏双击、Windows 任务栏
+    // 深浅子类化），重新挂载
+    super::window::install_main_window_hooks(app);
     // 恢复 macOS 的 Dock 图标（托盘图标常驻，不受窗口显隐影响）
     super::menubar::on_main_window_shown(app);
     return Ok(());

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onBeforeUnmount, onDeactivated } from 'vue';
 
 import { formatShortcut } from '../logics/shortcut';
+import { invoke } from '../logics/utils';
 
 const props = defineProps<{ modelValue: string }>();
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
@@ -75,19 +76,48 @@ function handleRecordingMousedown(event: MouseEvent) {
     }
 }
 
+/** 窗口失焦（切到别的应用）时取消录制：录制期间全局快捷键是暂停的，不能一直停着 */
+function handleWindowBlur() {
+    recording.value = false;
+}
+
+/**
+ * 录制期间暂停全局快捷键：系统级热键会先把按键吃掉，录制控件收不到；同时还会触发取词、
+ * 跳回主界面。结束时按配置文件重新注册（幂等）——保存新快捷键时 commit_config 也会按新配置
+ * 重新注册，两者谁先谁后，最终注册的都是配置文件里的值
+ */
+function setGlobalShortcutSuspended(suspended: boolean) {
+    invoke(suspended ? 'suspend_global_shortcut' : 'resume_global_shortcut').catch((error: unknown) => {
+        console.error(error);
+    });
+}
+
 watch(recording, recording => {
     if (recording) {
         window.addEventListener('keydown', handleRecordingKeydown, true);
         window.addEventListener('mousedown', handleRecordingMousedown, true);
+        window.addEventListener('blur', handleWindowBlur);
     } else {
         window.removeEventListener('keydown', handleRecordingKeydown, true);
         window.removeEventListener('mousedown', handleRecordingMousedown, true);
+        window.removeEventListener('blur', handleWindowBlur);
     }
+    setGlobalShortcutSuspended(recording);
+});
+
+// 所在页面被 KeepAlive 停用时结束录制（watch 随之恢复全局快捷键）
+onDeactivated(() => {
+    recording.value = false;
 });
 
 onBeforeUnmount(() => {
     window.removeEventListener('keydown', handleRecordingKeydown, true);
     window.removeEventListener('mousedown', handleRecordingMousedown, true);
+    window.removeEventListener('blur', handleWindowBlur);
+    // 卸载时组件的 watch 已停止，不会再触发恢复，这里补上
+    if (recording.value) {
+        setGlobalShortcutSuspended(false);
+    }
 });
 
 const display = computed(() => {

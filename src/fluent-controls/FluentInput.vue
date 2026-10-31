@@ -2,6 +2,7 @@
 import { computed, ref, useAttrs } from 'vue';
 import { HoverWrapper } from './HoverWrapper';
 import { handleInputWheel } from './inputWheelScroll';
+import { useTextModel } from './useTextModel';
 
 // 关闭 attr 自动继承：clearable 时根节点为容器 div，class/style 需手动绑到容器（继承外部的尺寸设置），
 // 其余 attrs（placeholder、type、事件监听等）透传给内部 input；
@@ -24,13 +25,12 @@ const [model, modifiers] = defineModel({
             return value;
         }
         // eslint-disable-next-line @typescript-eslint/no-base-to-string
-        let stringValue = String(value);
-        if (modifiers.trim) {
-            stringValue = stringValue.trim();
-        }
-        return stringValue;
+        return String(value);
     }
 });
+
+// 内部 input 绑定草稿而非 model：.trim 只在提交时裁剪，逐键输入不吞空白（见 useTextModel）
+const { text, commitTrim } = useTextModel(model, modifiers);
 
 const attrs = useAttrs();
 
@@ -48,7 +48,7 @@ const showClearButton = computed(() => {
 
 /** 清空内容（经 v-model 的 set 触发 update:modelValue）并保持输入框焦点 */
 function clearInput() {
-    model.value = '';
+    text.value = '';
     inputEl.value?.focus();
 }
 
@@ -63,13 +63,15 @@ function restAttrs() {
     <!-- 非 clearable：保持既有 DOM 结构不变（HoverWrapper 直接渲染 input，attrs 全部落在 input 上）；
          @wheel 在 v-bind 之前，外部显式传入的 @wheel 可覆盖内部的滚轮横滚兼容层 -->
     <HoverWrapper v-if="!clearable">
-        <input v-model="model" class="fluent-input" :disabled="disabled" @wheel="handleInputWheel" v-bind="$attrs" />
+        <input v-model="text" class="fluent-input" :disabled="disabled" @wheel="handleInputWheel"
+            @change="commitTrim" v-bind="$attrs" />
     </HoverWrapper>
     <!-- clearable：包一层相对定位容器，× 按钮绝对定位在输入框内部右侧；class/style 落在容器上 -->
     <div v-else class="fluent-input-clearable" :class="$attrs.class" :style="$attrs.style">
         <HoverWrapper>
-            <input ref="inputEl" v-model="model" class="fluent-input" :disabled="disabled"
-                :class="{ 'with-clear-button': showClearButton }" @wheel="handleInputWheel" v-bind="restAttrs()" />
+            <input ref="inputEl" v-model="text" class="fluent-input" :disabled="disabled"
+                :class="{ 'with-clear-button': showClearButton }" @wheel="handleInputWheel" @change="commitTrim"
+                v-bind="restAttrs()" />
         </HoverWrapper>
         <!-- mousedown.prevent 避免点击时夺走输入框焦点；tabindex="-1" 不进入 Tab 序列 -->
         <button v-if="showClearButton" type="button" tabindex="-1" class="clear-button" title="清空"

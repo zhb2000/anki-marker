@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue';
+import { onBeforeUnmount, onDeactivated, ref, watch } from 'vue';
 import FluentButton from './FluentButton.vue';
 import { enterDialog, isTopDialog, leaveDialog, type DialogLayer } from './dialogLayer';
 
@@ -76,6 +76,26 @@ watch(() => props.open, open => {
 }, { immediate: true });
 
 onBeforeUnmount(leave);
+
+/**
+ * 所在页面被 KeepAlive 停用时（如设置页弹窗开着时按快捷键取词，应用切回主界面）请求关闭：
+ * KeepAlive 把页面移进存储容器时，Teleport 到 body 的弹窗不会跟着移走，会残留在主界面上
+ */
+onDeactivated(() => {
+    if (props.open) {
+        emit('close');
+    }
+});
+
+/** 弹窗容器元素：供宿主在自己的 DOM 范围内查找元素（不能用 document 全局查询，可能命中下层弹窗） */
+const dialogEl = ref<HTMLElement | null>(null);
+
+/** 聚焦命令区的默认（accent）按钮，对齐 WinUI ContentDialog 的 DefaultButton 焦点行为 */
+function focusDefaultCommand(): void {
+    dialogEl.value?.querySelector<HTMLElement>('.command-button.accent')?.focus();
+}
+
+defineExpose({ focusDefaultCommand });
 </script>
 
 <template>
@@ -84,7 +104,7 @@ onBeforeUnmount(leave);
             <!-- mousedown.self：仅点击遮罩空白处关闭，弹窗内部的点击不受影响 -->
             <div v-if="open" class="fluent-dialog-backdrop" :style="{ zIndex: layer?.zIndex }"
                 @mousedown.self="emit('close')">
-                <div class="fluent-dialog" role="dialog" aria-modal="true" :aria-label="title"
+                <div ref="dialogEl" class="fluent-dialog" role="dialog" aria-modal="true" :aria-label="title"
                     :style="{ width, maxHeight }">
                     <div class="dialog-content">
                         <div class="dialog-title"><slot name="title-icon"></slot>{{ title }}</div>

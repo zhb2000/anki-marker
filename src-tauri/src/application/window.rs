@@ -8,25 +8,63 @@
 //! - 拖动：前端在顶部标题栏高度的命中条上调用 start_dragging（见 components/MacTitleBar.vue）；
 //! - 双击：Rust 侧装一个原生事件监听，按系统偏好执行缩放/最小化/无操作。
 
-use tauri::WebviewWindow;
+#[cfg(target_os = "macos")]
+use tauri::Manager;
+use tauri::{AppHandle, WebviewWindow};
 
 #[cfg(target_os = "macos")]
 use {
     block2::RcBlock,
-    objc2::rc::Retained,
+    objc2::rc::{Retained, Weak},
     objc2::runtime::{AnyObject, Bool},
     objc2::{msg_send, ClassType},
     objc2_app_kit::{NSColor, NSEvent, NSEventMask, NSEventType, NSWindow, NSWindowButton},
     objc2_foundation::{ns_string, NSNumber, NSPoint, NSProcessInfo, NSUserDefaults},
     objc2_web_kit::WKWebView,
+    std::cell::{Cell, RefCell},
     std::ptr::NonNull,
     std::sync::Mutex,
 };
+
+/// 安装主窗口的原生挂载：macOS 标题栏双击监听、Windows 任务栏深浅监听（子类化主窗口）。
+///
+/// 应用 setup 阶段调用一次；主窗口被销毁重建后（见 shortcut::show_and_focus_main_window）
+/// 必须对新窗口重新挂载，否则新窗口没有这些行为。可从任意线程调用。
+pub fn install_main_window_hooks(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    if let Some(window) = app.get_webview_window("main") {
+        install_titlebar_monitor(&window);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // SetWindowSubclass 不能跨线程子类化窗口，必须在窗口所属的主线程上调用
+        let handle = app.clone();
+        if let Err(error) =
+            app.run_on_main_thread(move || super::menubar::install_tray_theme_listener(&handle))
+        {
+            log::warn!("failed to install the taskbar theme listener: {error}");
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app;
+    }
+}
 
 /// 双击标题栏时第二次按下的位置（窗口坐标），用于判断按下后是否移动过：
 /// 与 AppKit 的行为一致，双击后拖动鼠标应取消缩放。
 #[cfg(target_os = "macos")]
 static DOUBLE_CLICK_ORIGIN: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+
+// 事件监听回调与安装都只在主线程执行（AppKit 限制），故用线程局部变量
+#[cfg(target_os = "macos")]
+thread_local! {
+    /// 标题栏监听作用的主窗口。只持弱引用：主窗口被销毁重建后旧 NSWindow 随之释放，
+    /// 弱引用自动失效，监听里不会解引用悬垂指针；重建后由 install_titlebar_monitor 换成新窗口
+    static TITLEBAR_TARGET: RefCell<Option<Weak<NSWindow>>> = const { RefCell::new(None) };
+    /// 事件监听只装一次（全局生效），窗口重建时只需更新 TITLEBAR_TARGET
+    static TITLEBAR_MONITOR_INSTALLED: Cell<bool> = const { Cell::new(false) };
+}
 
 /// 安装标题栏双击监听（macOS）。
 ///
@@ -39,20 +77,39 @@ static DOUBLE_CLICK_ORIGIN: Mutex<Option<(f64, f64)>> = Mutex::new(None);
 /// （原生标题栏视图在上层）以及窗口未激活时的第一次点击。
 #[cfg(target_os = "macos")]
 pub fn install_titlebar_monitor(window: &WebviewWindow) {
+    // AppKit 对象只能在主线程访问；窗口重建后本函数可能从其它线程调用，转发到主线程
+    if objc2::MainThreadMarker::new().is_none() {
+        let target = window.clone();
+        if let Err(error) = window.run_on_main_thread(move || install_titlebar_monitor(&target)) {
+            log::warn!("failed to install the titlebar monitor: {error}");
+        }
+        return;
+    }
     let Ok(ns_window) = window.ns_window() else {
         return;
     };
-    let ns_window = ns_window as usize;
+    // 此刻窗口存活，指针有效；retain 后只留弱引用
+    let Some(ns_window) = (unsafe { Retained::retain(ns_window as *mut NSWindow) }) else {
+        return;
+    };
+    TITLEBAR_TARGET.with(|target| *target.borrow_mut() = Some(Weak::from_retained(&ns_window)));
+    if TITLEBAR_MONITOR_INSTALLED.with(|installed| installed.replace(true)) {
+        return;
+    }
 
     let handler = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let raw = event.as_ptr();
         let event = unsafe { event.as_ref() };
-        // 只处理主窗口；调试窗口等其它窗口保持系统行为
-        let own_window = unsafe { &*(ns_window as *const NSWindow) };
+        // 只处理主窗口；调试窗口等其它窗口保持系统行为。主窗口已释放时弱引用为 None，放行
+        let own_window =
+            TITLEBAR_TARGET.with(|target| target.borrow().as_ref().and_then(Weak::load));
+        let Some(own_window) = own_window else {
+            return raw;
+        };
         if event.windowNumber() != own_window.windowNumber() || event.clickCount() < 2 {
             return raw;
         }
-        let window = own_window;
+        let window = &*own_window;
         let point = event.locationInWindow();
 
         match event.r#type() {
@@ -80,7 +137,7 @@ pub fn install_titlebar_monitor(window: &WebviewWindow) {
         }
     });
 
-    // 监听对象释放即失效；窗口与进程同生命周期，直接泄漏住
+    // 监听对象释放即失效；监听只装一次、与进程同生命周期，直接泄漏住
     let monitor = unsafe {
         NSEvent::addLocalMonitorForEventsMatchingMask_handler(
             NSEventMask::LeftMouseDown | NSEventMask::LeftMouseUp,

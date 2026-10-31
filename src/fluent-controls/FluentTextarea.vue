@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, useAttrs } from 'vue';
 import { HoverWrapper } from './HoverWrapper';
+import { useTextModel } from './useTextModel';
 
 // 根节点是 HoverWrapper（无渲染包装），关闭自动继承后由内部 textarea 显式接收 attrs：
 // class/style 与 placeholder、事件监听等都落在 textarea 上，与 FluentInput 的 DOM 语义一致
@@ -16,13 +17,12 @@ const [model, modifiers] = defineModel<string | null>({
         if (value == null) {
             return value;
         }
-        let stringValue = String(value);
-        if (modifiers.trim) {
-            stringValue = stringValue.trim();
-        }
-        return stringValue;
+        return String(value);
     }
 });
+
+// 内部 textarea 绑定草稿而非 model：.trim 只在提交时裁剪，逐键输入不吞空白（见 useTextModel）
+const { text, commitTrim } = useTextModel(model, modifiers);
 
 const attrs = useAttrs();
 
@@ -39,7 +39,8 @@ defineExpose({ focus });
 
 <template>
     <HoverWrapper>
-        <textarea ref="textareaEl" v-model="model" class="fluent-textarea" :disabled="disabled" v-bind="attrs" />
+        <textarea ref="textareaEl" v-model="text" class="fluent-textarea" :disabled="disabled"
+            @change="commitTrim" v-bind="attrs" />
     </HoverWrapper>
 </template>
 

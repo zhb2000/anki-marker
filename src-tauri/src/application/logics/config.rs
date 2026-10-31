@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Mutex;
 
 /// 托盘图标样式（Windows/Linux 生效）
 ///
@@ -174,7 +175,14 @@ pub fn copy_template_config(
             .ok_or("config path is a root or an empty string")?;
         std::fs::create_dir_all(config_dir)
             .map_err(|e| format!("failed to create directory {}: {e}", config_dir.display()))?;
-        std::fs::copy(template_path, config_path).map_err(|e| {
+        // 同样原子写入：复制到一半中断会留下残缺的配置文件
+        let template = std::fs::read(template_path).map_err(|e| {
+            format!(
+                "failed to read template config {}: {e}",
+                template_path.display()
+            )
+        })?;
+        super::utils::write_file_atomically(config_path, &template).map_err(|e| {
             format!(
                 "failed to copy template config from {} to {}: {e}",
                 template_path.display(),
@@ -186,16 +194,38 @@ pub fn copy_template_config(
     return inner(config_path.as_ref(), template_path.as_ref());
 }
 
+/// 串行化配置文件的“读-改-写”：并发的 commit_config 若交错执行，后写者会覆盖先写者的
+/// 修改（丢失更新），也会争用同一个临时文件
+static COMMIT_LOCK: Mutex<()> = Mutex::new(());
+
+/// 读取并解析配置文件。
+///
+/// 不含任何键值的文档（空文件、只有空白或注释）视为损坏并报错，而不是当作“全部取默认值”
+/// 的合法配置：这类文件只会来自写入中断或外部误操作，若照常解析，界面会静默显示默认值，
+/// 随后 commit_config 只把本次改动的键写进空文档，其余配置（含 API Key、牌组名、快捷键）
+/// 就被永久定格为默认值。报错让问题暴露出来，由用户检查或删除该文件（非便携模式下删除后
+/// 会按模板重建）。缺少部分键仍是合法的（老版本配置文件、手工精简），各键按缺省值回退。
+fn read_config_document(config_path: &Path) -> Result<toml_edit::DocumentMut, String> {
+    let toml_string = std::fs::read_to_string(config_path)
+        .map_err(|e| format!("failed to read config file {}: {e}", config_path.display()))?;
+    let doc = toml_string.parse::<toml_edit::DocumentMut>().map_err(|e| {
+        format!(
+            "failed to parse toml from config file {}: {e}",
+            config_path.display()
+        )
+    })?;
+    if doc.as_table().is_empty() {
+        return Err(format!(
+            "config file {} is empty or truncated, please check it or delete it to restore defaults",
+            config_path.display()
+        ));
+    }
+    return Ok(doc);
+}
+
 pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
     fn inner(config_path: &Path) -> Result<Config, String> {
-        let toml_string = std::fs::read_to_string(config_path)
-            .map_err(|e| format!("failed to read config file {}: {e}", config_path.display()))?;
-        let doc = toml_string.parse::<toml_edit::DocumentMut>().map_err(|e| {
-            format!(
-                "failed to parse toml from config file {}: {e}",
-                config_path.display()
-            )
-        })?;
+        let doc = read_config_document(config_path)?;
         // AnkiConnect URL / 牌组名 / 模板名遵循“留空 = 使用内置默认”的语义（生效值由前端消费端回退），
         // 因此缺键（老模板或手工精简的配置文件）与非字符串值一律回退空串，绝不因缺键而报错
         let anki_connect_url = doc
@@ -324,14 +354,12 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
 
 pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> Result<(), String> {
     fn inner(config_path: &Path, modified: PartialConfig) -> Result<(), String> {
-        let toml_string = std::fs::read_to_string(config_path)
-            .map_err(|e| format!("failed to read config file {}: {e}", config_path.display()))?;
-        let mut doc = toml_string.parse::<toml_edit::DocumentMut>().map_err(|e| {
-            format!(
-                "failed to parse toml from config file {}: {e}",
-                config_path.display()
-            )
-        })?;
+        // 锁中毒（持锁线程 panic）不影响文件本身的一致性，照常继续
+        let _guard = COMMIT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // 空文档同样报错：在空文档上只写入本次改动的键，会把其余配置永久定格为默认值
+        let mut doc = read_config_document(config_path)?;
         if let Some(theme) = modified.theme {
             doc["theme"] = toml_edit::value(theme.as_toml_str());
         }
@@ -391,12 +419,15 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
         if let Some(llm_reasoning_effort) = modified.llm_reasoning_effort {
             doc["llm-reasoning-effort"] = toml_edit::value(llm_reasoning_effort);
         }
-        std::fs::write(config_path, doc.to_string()).map_err(|e| {
-            format!(
-                "failed to write to config file {}: {e}",
-                config_path.display()
-            )
-        })?;
+        // 原子写入：std::fs::write 先截断再写，中途崩溃会留下空文件或残缺文件
+        super::utils::write_file_atomically(config_path, doc.to_string().as_bytes()).map_err(
+            |e| {
+                format!(
+                    "failed to write to config file {}: {e}",
+                    config_path.display()
+                )
+            },
+        )?;
         return Ok(());
     }
     return inner(config_path.as_ref(), modified);
@@ -482,5 +513,62 @@ mod tests {
                 .show_menu_bar_icon
         );
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// 空文件、只有空白或注释的文件视为损坏：read_config 报错，commit_config 拒绝写入
+    /// 且不改动文件（否则会把只含本次改动键的文档当作完整配置落盘）
+    #[test]
+    fn rejects_empty_config() {
+        let path = std::env::temp_dir().join("anki-marker-test-config-empty.toml");
+        for content in ["", "  \n\n", "# only comments\n"] {
+            std::fs::write(&path, content).expect("failed to write the empty config file");
+            assert!(read_config(&path).is_err(), "content = {content:?}");
+            let modified: PartialConfig = serde_json::from_str(r#"{"deckName":"English"}"#)
+                .expect("failed to parse the payload");
+            assert!(
+                commit_config(&path, modified).is_err(),
+                "content = {content:?}"
+            );
+            let text = std::fs::read_to_string(&path).expect("failed to read the config file");
+            assert_eq!(text, content, "commit must not touch a broken config file");
+        }
+        // 缺少部分键仍是合法配置（老版本配置文件），按缺省值回退
+        std::fs::write(&path, "deck-name = \"English\"\n").expect("failed to write");
+        let config = read_config(&path).expect("a partial config should be accepted");
+        assert_eq!(config.deck_name, "English");
+        assert!(config.keep_running_on_close);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// 提交单个键后，文档其余部分（注释、空行、其它键与值）逐字符保持不变，
+    /// 只有被修改的那一行变化；且落盘后不残留临时文件
+    #[test]
+    fn commit_keeps_the_rest_of_the_document() {
+        let dir = std::env::temp_dir().join("anki-marker-test-config-integrity");
+        std::fs::create_dir_all(&dir).expect("failed to create the test directory");
+        let path = dir.join("config.toml");
+        let template = include_str!("../../../resources/config-template.toml");
+        std::fs::write(&path, template).expect("failed to write the temporary config file");
+        let modified: PartialConfig = serde_json::from_str(r#"{"deckName":"English & 单词"}"#)
+            .expect("failed to parse the payload");
+        commit_config(&path, modified).expect("failed to commit the config");
+        let text = std::fs::read_to_string(&path).expect("failed to read the config file");
+        let expected =
+            template.replacen("deck-name = \"\"\n", "deck-name = \"English & 单词\"\n", 1);
+        assert_ne!(expected, template, "the template should contain deck-name");
+        assert_eq!(text, expected);
+        assert_eq!(
+            read_config(&path)
+                .expect("failed to read back the config")
+                .deck_name,
+            "English & 单词"
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .expect("failed to list the test directory")
+            .flatten()
+            .map(|entry| entry.file_name())
+            .collect();
+        assert_eq!(leftovers, vec![std::ffi::OsString::from("config.toml")]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

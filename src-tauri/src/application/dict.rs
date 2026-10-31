@@ -4,7 +4,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::Connection;
 use tauri::path::BaseDirectory;
-use tauri::State;
+use tauri::{AppHandle, Manager};
 
 use super::logics;
 use super::logics::dict::{CollinsItem, OxfordItem};
@@ -49,46 +49,47 @@ impl<'a> GetConnection<'a> for MutexGuard<'_, Option<Connection>> {
     }
 }
 
-#[tauri::command(rename_all = "snake_case")]
-pub fn search_collins(
-    word: String,
-    conn: State<Mutex<Option<Connection>>>,
-    dict_path: State<DictPath>,
-) -> Result<Vec<CollinsItem>, String> {
+/// 取得（必要时打开）词典连接并执行查询。
+///
+/// 在阻塞线程池中调用（见各查询命令）：冷启动首次查询要读取数十 MB 的词典文件，
+/// 且查询语句用了 collate nocase、无法命中按默认排序规则建的索引而全表扫描，
+/// 放在主线程会造成明显卡顿。
+fn with_connection<T>(
+    app: &AppHandle,
+    query: impl FnOnce(&Connection) -> Result<T, String>,
+) -> Result<T, String> {
+    let conn = app.state::<Mutex<Option<Connection>>>();
+    let dict_path = app.state::<DictPath>();
     let dict_path: &Path = dict_path.0.as_ref();
     let mut guard = conn
         .lock()
         .map_err(|e| format!("failed to lock connection: {e}"))?;
     let conn = guard.connection(dict_path)?;
-    return logics::dict::search_collins(conn, word);
+    return query(conn);
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn search_oxford(
-    word: String,
-    conn: State<Mutex<Option<Connection>>>,
-    dict_path: State<DictPath>,
-) -> Result<Vec<OxfordItem>, String> {
-    let dict_path: &Path = dict_path.0.as_ref();
-    let mut guard = conn
-        .lock()
-        .map_err(|e| format!("failed to lock connection: {e}"))?;
-    let conn = guard.connection(dict_path)?;
-    return logics::dict::search_oxford(conn, word);
+pub async fn search_collins(word: String, app: AppHandle) -> Result<Vec<CollinsItem>, String> {
+    return logics::utils::run_blocking(move || {
+        with_connection(&app, |conn| logics::dict::search_collins(conn, word))
+    })
+    .await;
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn get_word_base(
-    word: String,
-    conn: State<Mutex<Option<Connection>>>,
-    dict_path: State<DictPath>,
-) -> Result<Option<String>, String> {
-    let dict_path: &Path = dict_path.0.as_ref();
-    let mut guard = conn
-        .lock()
-        .map_err(|e| format!("failed to lock connection: {e}"))?;
-    let conn = guard.connection(dict_path)?;
-    return logics::dict::get_word_base(conn, word);
+pub async fn search_oxford(word: String, app: AppHandle) -> Result<Vec<OxfordItem>, String> {
+    return logics::utils::run_blocking(move || {
+        with_connection(&app, |conn| logics::dict::search_oxford(conn, word))
+    })
+    .await;
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_word_base(word: String, app: AppHandle) -> Result<Option<String>, String> {
+    return logics::utils::run_blocking(move || {
+        with_connection(&app, |conn| logics::dict::get_word_base(conn, word))
+    })
+    .await;
 }
 
 #[tauri::command(rename_all = "snake_case")]

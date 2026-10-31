@@ -150,7 +150,7 @@ export async function requestAiPick(options: RequestAiPickOptions): Promise<void
         { role: 'user', content: buildUserPrompt(sentence, word, lines) }
     ];
 
-    // 3. 流式请求（含 reasoningEffort 兼容重试）
+    // 3. 流式请求（400/422 的参数兼容降级重试与两段式超时均由 streamChatCompletion 内部处理）
     const onReasoning = (): void => {
         // 首个思维链增量到达：loading → thinking（仅推进一次，后续增量不重复触发 UI 更新）
         if (state.phase === 'loading') {
@@ -182,27 +182,15 @@ export async function requestAiPick(options: RequestAiPickOptions): Promise<void
         }
         onUpdate({ ...state });
     };
+    // 超时沿用默认的两段式（首字节 + 流空闲，另有宽松总上限）：思考模型的思维链可能很长，
+    // 只要还在持续输出就不应被中断；用户可随时通过 signal 停止
     const requestOptions = { messages, signal, onDelta, onReasoning, jsonMode: true, temperature: 0.2 };
     let fullText: string;
     try {
         fullText = await streamChatCompletion(config, requestOptions);
     } catch (error) {
-        // 部分服务不支持 reasoning_effort 字段（400/422）：去掉该字段后重试一次
-        const canRetryWithoutReasoningEffort = error instanceof LlmError
-            && error.kind === 'http'
-            && (error.status === 400 || error.status === 422)
-            && config.reasoningEffort != null
-            && config.reasoningEffort.trim().length > 0;
-        if (!canRetryWithoutReasoningEffort) {
-            emitError(error);
-            return;
-        }
-        try {
-            fullText = await streamChatCompletion({ ...config, reasoningEffort: '' }, requestOptions);
-        } catch (retryError) {
-            emitError(retryError);
-            return;
-        }
+        emitError(error);
+        return;
     }
 
     // 4. 容错解析与校验

@@ -152,6 +152,12 @@ mod ax_ffi {
         pub fn AXUIElementCreateApplication(pid: i32) -> CFTypeRef;
         /// 读取元素所属应用的进程 id。
         pub fn AXUIElementGetPid(element: CFTypeRef, pid: *mut i32) -> AXError;
+        /// 设置跨进程消息的超时（秒）。传系统级元素时对本进程全局生效，
+        /// 传其他元素时只对该元素对象生效（见 SDK AXUIElement.h）。
+        pub fn AXUIElementSetMessagingTimeout(
+            element: CFTypeRef,
+            timeout_in_seconds: f32,
+        ) -> AXError;
         /// 读取辅助功能元素的属性值（返回值已 retain，调用者负责释放）。
         pub fn AXUIElementCopyAttributeValue(
             element: CFTypeRef,
@@ -171,6 +177,8 @@ mod ax_ffi {
             parameter: CFTypeRef,
             value: *mut CFTypeRef,
         ) -> AXError;
+        /// AXTextMarkerRange 的类型 id（解包前校验用，见 ensure_text_marker_range）。
+        pub fn AXTextMarkerRangeGetTypeID() -> usize;
         /// 取 AXTextMarkerRange 的起点 marker（Copy 规则，返回值已 retain，调用者
         /// 负责释放）。AXTextMarker 体系公开 C API，随 HIServices 导出。
         pub fn AXTextMarkerRangeCopyStartMarker(range: CFTypeRef) -> CFTypeRef;
@@ -200,6 +208,20 @@ mod ax_ffi {
         pub fn CFAttributedStringGetTypeID() -> usize;
         /// 取富文本的纯文本部分（Get 规则：借用自富文本对象，不得释放）。
         pub fn CFAttributedStringGetString(a_str: CFTypeRef) -> CFStringRef;
+    }
+
+    /// 硬件层面的键盘修饰键状态，即 kCGEventSourceStateHIDSystemState：反映物理按键，
+    /// 不受其他进程合成事件的影响。
+    pub const CG_EVENT_SOURCE_STATE_HID_SYSTEM: i32 = 1;
+    /// Shift / Control / Option / Command 的 CGEventFlags 掩码（kCGEventFlagMask*）。
+    /// 不含 Caps Lock：它是锁定键，长期置位，且不会与模拟按键合并成别的快捷键。
+    pub const CG_EVENT_FLAG_MASK_MODIFIERS: u64 =
+        0x0002_0000 | 0x0004_0000 | 0x0008_0000 | 0x0010_0000;
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        /// 读取当前修饰键状态（CGEventFlags 位掩码）。
+        pub fn CGEventSourceFlagsState(state_id: i32) -> u64;
     }
 
     /// “当前焦点元素”属性名，即 kAXFocusedUIElementAttribute 的值。
@@ -259,18 +281,52 @@ mod ax_ffi {
         "AXTextMarkerRangeForUnorderedTextMarkers";
 }
 
+/// AX 跨进程调用的超时（秒）。系统默认约 6 秒且作用于每一次调用：目标应用卡死时，主路径
+/// 要依次等焦点查询、PDF 精修的窗口查询，用户十几秒后才有反馈。超时后走既有的降级链路
+///（回退模拟复制、后台重试），一次慢调用不会丢结果。
+const AX_MESSAGING_TIMEOUT_SECONDS: f32 = 1.0;
+
+/// 创建系统级元素（Create 规则，随 Drop 释放），并设置本进程全局的 AX 消息超时——
+/// 对系统级元素设置才是全局的，取词链路之后拿到的子元素都受它约束。
+fn create_system_wide_element() -> core_foundation::base::CFType {
+    use core_foundation::base::{CFType, TCFType};
+
+    unsafe {
+        let system_wide: CFType =
+            TCFType::wrap_under_create_rule(ax_ffi::AXUIElementCreateSystemWide());
+        ax_ffi::AXUIElementSetMessagingTimeout(
+            system_wide.as_CFTypeRef(),
+            AX_MESSAGING_TIMEOUT_SECONDS,
+        );
+        return system_wide;
+    }
+}
+
+/// 创建目标应用的元素（Create 规则，随 Drop 释放）并设置 AX 消息超时：系统级元素的全局
+/// 设置生效前（如焦点查询之前）也不会被卡死的应用拖住。
+fn create_application_element(pid: i32) -> Option<core_foundation::base::CFType> {
+    use core_foundation::base::{CFType, TCFType};
+
+    unsafe {
+        let app_ref = ax_ffi::AXUIElementCreateApplication(pid);
+        if app_ref.is_null() {
+            return None;
+        }
+        let app: CFType = TCFType::wrap_under_create_rule(app_ref);
+        ax_ffi::AXUIElementSetMessagingTimeout(app.as_CFTypeRef(), AX_MESSAGING_TIMEOUT_SECONDS);
+        return Some(app);
+    }
+}
+
 /// 获取系统当前焦点 UI 元素。
 ///
 /// 注意：未授予辅助功能权限时此处会失败，由调用方回退或提示。
 fn get_focused_ui_element_by_ax() -> Result<core_foundation::base::CFType, String> {
-    use core_foundation::base::{CFType, CFTypeRef, TCFType};
+    use core_foundation::base::{CFTypeRef, TCFType};
     use core_foundation::string::CFString;
 
     unsafe {
-        // AXUIElementCreateSystemWide 遵循 Create 规则（返回已 retain 的对象），
-        // 包装成 CFType 借助 Drop 自动释放。
-        let system_wide: CFType =
-            TCFType::wrap_under_create_rule(ax_ffi::AXUIElementCreateSystemWide());
+        let system_wide = create_system_wide_element();
 
         let focused_attribute = CFString::from_static_string(ax_ffi::FOCUSED_UI_ELEMENT_ATTRIBUTE);
         let mut focused_ref: CFTypeRef = std::ptr::null();
@@ -332,8 +388,8 @@ fn copy_string_attribute_by_ax_ref(
     element: core_foundation::base::CFTypeRef,
     attribute: &'static str,
 ) -> Result<String, String> {
-    use core_foundation::base::{CFGetTypeID, CFTypeRef, TCFType};
-    use core_foundation::string::{CFString, CFStringRef};
+    use core_foundation::base::{CFType, CFTypeRef, TCFType};
+    use core_foundation::string::CFString;
 
     unsafe {
         let attribute_ref = CFString::from_static_string(attribute);
@@ -348,12 +404,13 @@ fn copy_string_attribute_by_ax_ref(
                 "failed to copy attribute \"{attribute}\": AXError {err}"
             ));
         }
-        if CFGetTypeID(value_ref) != CFString::type_id() {
+        // 先接管所有权（Copy 规则）再判类型：类型不符提前返回时对象也会随 Drop 释放
+        let value: CFType = TCFType::wrap_under_create_rule(value_ref);
+        let Some(value) = value.downcast_into::<CFString>() else {
             return Err(format!(
                 "value of attribute \"{attribute}\" is not a string"
             ));
-        }
-        let value: CFString = TCFType::wrap_under_create_rule(value_ref as CFStringRef);
+        };
         return Ok(value.to_string());
     }
 }
@@ -406,13 +463,15 @@ fn copy_children_array_by_ax(
                 ax_ffi::CHILDREN_ATTRIBUTE
             ));
         }
-        if CFGetTypeID(value_ref) != CFArray::<CFType>::type_id() {
+        // 先接管所有权（Copy 规则）再判类型：类型不符提前返回时对象也会随 Drop 释放
+        let value: CFType = TCFType::wrap_under_create_rule(value_ref);
+        if CFGetTypeID(value.as_CFTypeRef()) != CFArray::<CFType>::type_id() {
             return Err(format!(
                 "value of attribute \"{}\" is not an array",
                 ax_ffi::CHILDREN_ATTRIBUTE
             ));
         }
-        return Ok(TCFType::wrap_under_create_rule(value_ref));
+        return Ok(value);
     }
 }
 
@@ -422,8 +481,8 @@ fn copy_i64_attribute_by_ax(
     element: &core_foundation::base::CFType,
     attribute: &'static str,
 ) -> Result<i64, String> {
-    use core_foundation::base::{CFGetTypeID, CFTypeRef, TCFType};
-    use core_foundation::number::{CFNumber, CFNumberRef};
+    use core_foundation::base::{CFType, CFTypeRef, TCFType};
+    use core_foundation::number::CFNumber;
     use core_foundation::string::CFString;
 
     unsafe {
@@ -439,12 +498,13 @@ fn copy_i64_attribute_by_ax(
                 "failed to copy attribute \"{attribute}\": AXError {err}"
             ));
         }
-        if CFGetTypeID(value_ref) != CFNumber::type_id() {
+        // 先接管所有权（Copy 规则）再判类型：类型不符提前返回时对象也会随 Drop 释放
+        let value: CFType = TCFType::wrap_under_create_rule(value_ref);
+        let Some(value) = value.downcast_into::<CFNumber>() else {
             return Err(format!(
                 "value of attribute \"{attribute}\" is not a number"
             ));
-        }
-        let value: CFNumber = TCFType::wrap_under_create_rule(value_ref as CFNumberRef);
+        };
         return value
             .to_i64()
             .ok_or_else(|| format!("value of attribute \"{attribute}\" does not fit in i64"));
@@ -555,6 +615,31 @@ fn copy_parameterized_attribute_by_ax(
     }
 }
 
+/// 校验对象确实是 AXTextMarkerRange。AXTextMarkerRangeCopyStart/EndMarker 在本进程内
+/// 解析对象内部结构（不是跨进程调用），而属性值的类型由目标应用决定，非 WebKit/Chromium
+/// 的应用可能返回别的 CF 类型；不校验就解包是未定义行为，最坏让本应用崩溃。
+fn ensure_text_marker_range(range: &core_foundation::base::CFType) -> Result<(), String> {
+    use core_foundation::base::{CFGetTypeID, TCFType};
+
+    let is_marker_range =
+        unsafe { CFGetTypeID(range.as_CFTypeRef()) == ax_ffi::AXTextMarkerRangeGetTypeID() };
+    return if is_marker_range {
+        Ok(())
+    } else {
+        Err("the value is not an AXTextMarkerRange".to_string())
+    };
+}
+
+/// 读取元素的选区 marker 范围（AXSelectedTextMarkerRange），并校验其类型。
+fn copy_selected_marker_range_by_ax(
+    element: &core_foundation::base::CFType,
+) -> Result<core_foundation::base::CFType, String> {
+    let range =
+        copy_element_attribute_by_ax(element, ax_ffi::SELECTED_TEXT_MARKER_RANGE_ATTRIBUTE)?;
+    ensure_text_marker_range(&range)?;
+    return Ok(range);
+}
+
 /// 读取 marker 范围对应的文本（AXStringForTextMarkerRange）。
 fn string_for_marker_range_by_ax(
     element: &core_foundation::base::CFType,
@@ -581,11 +666,18 @@ fn string_for_marker_range_by_ax(
 ///
 /// 这类提供方不提供 AXSelectedText / AXSelectedTextRange，选区只经 AXTextMarker 体系
 /// 暴露（实测 Safari：任一网页元素的 AXSelectedTextMarkerRange 都指向页面级选区，
-/// 经 AXStringForTextMarkerRange 读文本）。元素没有该属性返回 None，空选区返回 Some("")。
+/// 经 AXStringForTextMarkerRange 读文本）。元素没有该属性、或读取文本失败返回 None，
+/// 只有确实读到空串才返回 Some("")——读取失败不能当成“没有选区”，否则调用方会跳过
+/// 树搜索与后台重试，并把随后的取词失败误报成“没有选区”。
 fn marker_selected_text(element: &core_foundation::base::CFType) -> Option<String> {
-    let range =
-        copy_element_attribute_by_ax(element, ax_ffi::SELECTED_TEXT_MARKER_RANGE_ATTRIBUTE).ok()?;
-    return Some(string_for_marker_range_by_ax(element, &range).unwrap_or_default());
+    let range = copy_selected_marker_range_by_ax(element).ok()?;
+    return match string_for_marker_range_by_ax(element, &range) {
+        Ok(text) => Some(text),
+        Err(error) => {
+            log::info!("failed to read the text of the selected marker range: {error}");
+            None
+        }
+    };
 }
 
 /// text marker 提供方的选词取句：选区 marker 范围 → 词；所在段落的 marker 范围 → 上下文；
@@ -720,8 +812,7 @@ fn find_sentence_for_marker_selection(
     element: &core_foundation::base::CFType,
     word: &str,
 ) -> Result<(SentenceCapture, String), String> {
-    let selection =
-        copy_element_attribute_by_ax(element, ax_ffi::SELECTED_TEXT_MARKER_RANGE_ATTRIBUTE)?;
+    let selection = copy_selected_marker_range_by_ax(element)?;
     return find_sentence_for_marker_range(element, word, &selection);
 }
 
@@ -738,6 +829,7 @@ fn find_sentence_for_marker_range(
     const LINE_EXPANSION_STEPS: [usize; 2] = [10, 40];
 
     let marker_of = |range: &CFType, end: bool| -> Result<CFType, String> {
+        ensure_text_marker_range(range)?;
         let marker = unsafe {
             if end {
                 ax_ffi::AXTextMarkerRangeCopyEndMarker(range.as_CFTypeRef())
@@ -1020,7 +1112,7 @@ fn refine_truncated_with_markers(
     element: &core_foundation::base::CFType,
     word: &str,
 ) -> Option<SelectedContext> {
-    copy_element_attribute_by_ax(element, ax_ffi::SELECTED_TEXT_MARKER_RANGE_ATTRIBUTE).ok()?;
+    copy_selected_marker_range_by_ax(element).ok()?;
     return match find_sentence_for_marker_selection(element, word) {
         Ok((
             SentenceCapture::Expanded {
@@ -1045,41 +1137,89 @@ fn refine_truncated_with_markers(
 
 /// 读取当前焦点应用的焦点窗口（AX 树搜索的备选根）。
 fn get_focused_window_by_ax() -> Result<core_foundation::base::CFType, String> {
-    use core_foundation::base::{CFType, TCFType};
-
-    unsafe {
-        let system_wide: CFType =
-            TCFType::wrap_under_create_rule(ax_ffi::AXUIElementCreateSystemWide());
-        let app =
-            copy_element_attribute_by_ax(&system_wide, ax_ffi::FOCUSED_APPLICATION_ATTRIBUTE)?;
-        return copy_element_attribute_by_ax(&app, ax_ffi::FOCUSED_WINDOW_ATTRIBUTE);
-    }
+    let system_wide = create_system_wide_element();
+    let app = copy_element_attribute_by_ax(&system_wide, ax_ffi::FOCUSED_APPLICATION_ATTRIBUTE)?;
+    return copy_element_attribute_by_ax(&app, ax_ffi::FOCUSED_WINDOW_ATTRIBUTE);
 }
 
-/// 唤醒目标应用的无障碍支持（尽力而为）：Electron/Chromium 系应用监听
-/// AXManualAccessibility 属性被设置来激活无障碍树；AXEnhancedUserInterface
-/// 是另一类应用使用的开关。二者都设、失败忽略——实测 Word/Zotero 均不响应
-///（-25205 / -25208），保留此机制给其他可能响应的应用一个机会。
-fn wake_app_accessibility(app: &core_foundation::base::CFType) {
+/// 设置应用元素的布尔属性，返回 AXError（0 表示成功）。
+fn set_app_bool_attribute(
+    app: &core_foundation::base::CFType,
+    attribute: &'static str,
+    value: bool,
+) -> ax_ffi::AXError {
     use core_foundation::base::TCFType;
     use core_foundation::boolean::CFBoolean;
     use core_foundation::string::CFString;
 
-    for attribute in [
-        ax_ffi::MANUAL_ACCESSIBILITY_ATTRIBUTE,
-        ax_ffi::ENHANCED_USER_INTERFACE_ATTRIBUTE,
-    ] {
-        unsafe {
-            let attribute_ref = CFString::from_static_string(attribute);
-            let err = ax_ffi::AXUIElementSetAttributeValue(
-                app.as_CFTypeRef(),
-                attribute_ref.as_concrete_TypeRef(),
-                CFBoolean::true_value().as_CFTypeRef(),
-            );
-            if err != 0 {
-                log::info!("setting \"{attribute}\" on the application failed: AXError {err}");
-            }
+    let attribute_ref = CFString::from_static_string(attribute);
+    let value = if value {
+        CFBoolean::true_value()
+    } else {
+        CFBoolean::false_value()
+    };
+    return unsafe {
+        ax_ffi::AXUIElementSetAttributeValue(
+            app.as_CFTypeRef(),
+            attribute_ref.as_concrete_TypeRef(),
+            value.as_CFTypeRef(),
+        )
+    };
+}
+
+/// 本次重试把 AXEnhancedUserInterface 从关闭改成了开启：Drop 时复原。
+///
+/// 这个开关持续生效：会让响应它的应用常驻完整无障碍树（额外的 CPU 与内存开销），
+/// 窗口管理器移动其窗口时也可能出现动画异常，不能在重试结束后留给用户。
+struct EnhancedUiRestore {
+    app: core_foundation::base::CFType,
+}
+
+impl Drop for EnhancedUiRestore {
+    fn drop(&mut self) {
+        let attribute = ax_ffi::ENHANCED_USER_INTERFACE_ATTRIBUTE;
+        let err = set_app_bool_attribute(&self.app, attribute, false);
+        if err != 0 {
+            log::warn!("restoring \"{attribute}\" on the application failed: AXError {err}");
         }
+    }
+}
+
+/// 唤醒目标应用的无障碍支持（尽力而为）：Electron/Chromium 系应用监听
+/// AXManualAccessibility 属性被设置来激活无障碍树，它没有副作用，每次轮询都设；
+/// AXEnhancedUserInterface 是另一类应用使用的开关，只在前者不被接受、且它原本关闭时才
+/// 开启，并经 `enhanced_restore` 在重试结束时复原。失败忽略——实测 Word/Zotero 对两者
+/// 均不响应（-25205 / -25208），它们的树是被反复查询后异步物化的，不依赖这里；保留此
+/// 机制给其他可能响应的应用一个机会。
+fn wake_app_accessibility(
+    app: &core_foundation::base::CFType,
+    enhanced_restore: &mut Option<EnhancedUiRestore>,
+) {
+    use core_foundation::boolean::CFBoolean;
+
+    let manual = ax_ffi::MANUAL_ACCESSIBILITY_ATTRIBUTE;
+    let err = set_app_bool_attribute(app, manual, true);
+    if err == 0 {
+        return;
+    }
+    log::info!("setting \"{manual}\" on the application failed: AXError {err}");
+    if enhanced_restore.is_some() {
+        return;
+    }
+    let enhanced = ax_ffi::ENHANCED_USER_INTERFACE_ATTRIBUTE;
+    // 已是开启状态（用户的辅助工具打开的）：既不必再设，也不该由本应用复原
+    let already_enabled = copy_element_attribute_by_ax(app, enhanced)
+        .ok()
+        .and_then(|value| value.downcast_into::<CFBoolean>())
+        .is_some_and(bool::from);
+    if already_enabled {
+        return;
+    }
+    let err = set_app_bool_attribute(app, enhanced, true);
+    if err == 0 {
+        *enhanced_restore = Some(EnhancedUiRestore { app: app.clone() });
+    } else {
+        log::info!("setting \"{enhanced}\" on the application failed: AXError {err}");
     }
 }
 
@@ -1232,11 +1372,8 @@ fn find_pdf_pages_in_window(
 /// 选区只能靠 Cmd+C 读到；但它的页面元素仍提供整页文本，词可据此定位（见
 /// find_sentence_in_pdf_pages）。目标不是 PDF 或定位不唯一时返回 None，保持仅录词。
 fn refine_with_pdf_pages(pid: i32, selection: &str) -> Option<SelectedContext> {
-    use core_foundation::base::{CFType, TCFType};
-
     let started = std::time::Instant::now();
-    let app: CFType =
-        unsafe { TCFType::wrap_under_create_rule(ax_ffi::AXUIElementCreateApplication(pid)) };
+    let app = create_application_element(pid)?;
     let window = copy_element_attribute_by_ax(&app, ax_ffi::FOCUSED_WINDOW_ATTRIBUTE).ok()?;
     let Some(pages) = find_pdf_pages_in_window(&window) else {
         log::info!(
@@ -1498,8 +1635,9 @@ fn capture_pdf_occurrence(page: &[u16], start: usize, end: usize) -> Option<Sele
 /// AXAttributedStringForRange 给出整页文本。因此用“选中文本在页面文本中的出现位置”
 /// 反推选区位置，按“宁可降级也不切错句”的原则只在能唯一确定时才取句：
 /// 1. 先只看屏幕上可见的页面（选区必然在用户眼前）：恰好一处出现 → 定位成功；
-/// 2. 可见页面里没有（视口计算失败，或选区已被滚出屏幕）→ 在其余页面（有上限）里找，
-///    同样要求恰好一处；
+/// 2. 可见页面里没有（选区已被滚出屏幕）→ 从可见页向两侧就近在其余页面（有上限）里找，
+///    同样要求恰好一处；没有任何页面可判定为可见（视口未知）时不做这一步、直接降级——
+///    此时无从判断用户在看哪里，文档别处的唯一出现很可能不是用户选的那一处；
 /// 3. 多处出现：若各处切出的句子完全相同也接受，否则判歧义——高频词会降级为仅录词。
 ///
 /// 已知的残余风险：选区被滚出屏幕、而可见页面里恰好有同一个词的唯一出现——会定位到
@@ -1510,6 +1648,28 @@ fn find_sentence_in_pdf_pages(
 ) -> Result<SelectedContext, String> {
     let pages = find_pdf_pages(element).ok_or("not a PDFKit document (no AXPage found)")?;
     return locate_sentence_in_pdf_pages(&pages, word);
+}
+
+/// 可见页面里没找到选中文本时，接着要扫描的不可见页下标：离可见页近的优先（选区多半
+/// 刚被滚出屏幕），最多 `limit` 页。不能按文档顺序取：用户在第 100 页选的词可能恰好在
+/// 前 40 页有唯一出现，会被“自信地”定位到错误的句子。
+///
+/// 没有可见页（视口未知）返回 None：调用方应直接降级，见 find_sentence_in_pdf_pages。
+fn hidden_pages_to_scan(visible: &[bool], limit: usize) -> Option<Vec<usize>> {
+    let visible_pages: Vec<usize> = (0..visible.len()).filter(|i| visible[*i]).collect();
+    if visible_pages.is_empty() {
+        return None;
+    }
+    let mut hidden: Vec<usize> = (0..visible.len()).filter(|i| !visible[*i]).collect();
+    // 稳定排序：距离相同时前面的页优先
+    hidden.sort_by_key(|page| {
+        visible_pages
+            .iter()
+            .map(|visible_page| page.abs_diff(*visible_page))
+            .min()
+    });
+    hidden.truncate(limit);
+    return Some(hidden);
 }
 
 /// find_sentence_in_pdf_pages 的定位部分：已知页面元素列表，按选中文本定位并取句。
@@ -1552,11 +1712,15 @@ fn locate_sentence_in_pdf_pages(
     }
     let mut stage = "visible pages";
     if candidates.is_empty() {
+        let Some(hidden) = hidden_pages_to_scan(&visible, MAX_HIDDEN_PAGES_SCANNED) else {
+            return Err(format!(
+                "none of the {} page(s) is known to be visible (unknown viewport), \
+                 the selection cannot be located",
+                pages.len()
+            ));
+        };
         stage = "other pages";
-        for index in (0..pages.len())
-            .filter(|i| !visible[*i])
-            .take(MAX_HIDDEN_PAGES_SCANNED)
-        {
+        for index in hidden {
             scan(index, &mut texts, &mut candidates);
         }
     }
@@ -1598,58 +1762,127 @@ fn locate_sentence_in_pdf_pages(
 /// 后台重试的互斥标记：0 表示无重试在途，否则为正在重试的应用 pid。
 static RETRYING_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
-/// 后台重试：部分应用（实测 Word）的无障碍树在首次被查询后才异步物化——
-/// 首次划词时是只有百余节点的桩树，反复查询几秒后树才建成（所以第二次划词
-/// 才成功）。此函数在后台按固定间隔轮询目标应用（pid 不随前台切换失效）：
-/// 唤醒属性 → 树搜索 → 取句链路，树就绪后取到句子并通过 `on_finished` 补发。
-/// 总轮询窗口约 RETRY_ATTEMPTS * RETRY_INTERVAL_MS，超时放弃（`on_finished(None)`）。
-fn spawn_selection_retry(pid: i32, callbacks: RetryCallbacks) {
-    use core_foundation::base::{CFType, TCFType};
+/// 重试的收尾守卫：释放互斥槽位并调用 `on_finished`，恰好一次。轮询中途 panic 时由 Drop
+/// 以 `on_finished(None)` 收尾——否则槽位永不释放（此后所有重试都启动不了），界面也会
+/// 一直停在“仍在补取”。
+struct RetryFinishGuard {
+    on_finished: Option<Box<dyn FnOnce(Option<SelectedContext>) + Send>>,
+}
+
+impl RetryFinishGuard {
+    fn finish(&mut self, outcome: Option<SelectedContext>) {
+        // 槽位的释放与回调绑定在同一次 take 上：重复收尾若再释放一次，
+        // 可能释放掉下一个重试已占用的槽位
+        if let Some(on_finished) = self.on_finished.take() {
+            RETRYING_PID.store(0, std::sync::atomic::Ordering::SeqCst);
+            on_finished(outcome);
+        }
+    }
+}
+
+impl Drop for RetryFinishGuard {
+    fn drop(&mut self) {
+        self.finish(None);
+    }
+}
+
+/// 占用重试互斥槽位（同一时间只允许一个轮询线程）；等待期间本次重试已过期则返回 false，
+/// 此时重试未真正启动，不触发任何回调。
+///
+/// 上层的取词互斥保证同一时间只有一次取词，这里遇到的在途重试必然属于更早的取词、已被判为
+/// 过期，下一次轮询前就会退出，因此是等它让出，而不是放弃本次：放弃的话，用户在 Word 里
+/// 重试窗口内再按一次，旧重试被作废、新重试又没启动，就再也补不回句子了。
+fn acquire_retry_slot(pid: i32, is_cancelled: &dyn Fn() -> bool) -> bool {
     use std::sync::atomic::Ordering;
 
+    const WAIT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(20);
+
+    while RETRYING_PID
+        .compare_exchange(0, pid, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        if is_cancelled() {
+            return false;
+        }
+        std::thread::sleep(WAIT_INTERVAL);
+    }
+    return true;
+}
+
+/// 重试的轮询骨架（调用方已占用互斥槽位）：每次轮询前、以及交付结果前都检查是否已过期，
+/// 过期即停止；`on_finished` 恰好调用一次，过期与超时都是 None。
+fn run_selection_retry(
+    callbacks: RetryCallbacks,
+    attempts: usize,
+    interval: std::time::Duration,
+    mut poll: impl FnMut(usize) -> Option<SelectedContext>,
+) {
+    let RetryCallbacks {
+        on_started,
+        on_finished,
+        is_cancelled,
+    } = callbacks;
+    let mut guard = RetryFinishGuard {
+        on_finished: Some(on_finished),
+    };
+    on_started();
+    for attempt in 1..=attempts {
+        std::thread::sleep(interval);
+        if is_cancelled() {
+            log::info!("AX selection retry cancelled before attempt {attempt}");
+            break;
+        }
+        if let Some(context) = poll(attempt) {
+            if is_cancelled() {
+                log::info!(
+                    "AX selection retry cancelled, dropping the result of attempt {attempt}"
+                );
+                break;
+            }
+            guard.finish(Some(context));
+            return;
+        }
+    }
+    guard.finish(None);
+}
+
+/// 后台重试的一次轮询：唤醒属性 → 树搜索 → 取句链路。
+fn poll_selection_once(
+    pid: i32,
+    attempt: usize,
+    enhanced_restore: &mut Option<EnhancedUiRestore>,
+) -> Option<SelectedContext> {
+    let app = create_application_element(pid)?;
+    wake_app_accessibility(&app, enhanced_restore);
+    let window = copy_element_attribute_by_ax(&app, ax_ffi::FOCUSED_WINDOW_ATTRIBUTE).ok()?;
+    let (element, word) = find_element_with_selection_in_window(&window)?;
+    let context = context_from_word_and_element(&element, &word);
+    log::info!(
+        "AX selection retry succeeded on attempt {attempt}: {}",
+        describe_context(&context)
+    );
+    return Some(context);
+}
+
+/// 后台重试：部分应用（实测 Word）的无障碍树在首次被查询后才异步物化——
+/// 首次划词时是只有百余节点的桩树，反复查询几秒后树才建成（所以第二次划词
+/// 才成功）。此函数在后台按固定间隔轮询目标应用（pid 不随前台切换失效），
+/// 树就绪后取到句子并通过 `on_finished` 补发。总轮询窗口约
+/// RETRY_ATTEMPTS * RETRY_INTERVAL，超时或过期放弃（`on_finished(None)`）。
+fn spawn_selection_retry(pid: i32, callbacks: RetryCallbacks) {
     /// 轮询次数与间隔（总计约 3 秒，覆盖实测的树物化耗时）
     const RETRY_ATTEMPTS: usize = 5;
-    const RETRY_INTERVAL_MS: u64 = 600;
+    const RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(600);
 
-    // 同一时间只允许一个重试在途，避免连按快捷键叠加多个轮询线程
-    // （被拦下时不触发任何回调：状态与在途的那个重试保持一致）
-    if RETRYING_PID.swap(pid, Ordering::SeqCst) != 0 {
-        return;
-    }
     std::thread::spawn(move || {
-        let RetryCallbacks {
-            on_started,
-            on_finished,
-        } = callbacks;
-        on_started();
-        for attempt in 1..=RETRY_ATTEMPTS {
-            std::thread::sleep(std::time::Duration::from_millis(RETRY_INTERVAL_MS));
-            unsafe {
-                let app_ref = ax_ffi::AXUIElementCreateApplication(pid);
-                if app_ref.is_null() {
-                    continue;
-                }
-                let app: CFType = TCFType::wrap_under_create_rule(app_ref);
-                wake_app_accessibility(&app);
-                let window =
-                    match copy_element_attribute_by_ax(&app, ax_ffi::FOCUSED_WINDOW_ATTRIBUTE) {
-                        Ok(window) => window,
-                        Err(_) => continue,
-                    };
-                if let Some((element, word)) = find_element_with_selection_in_window(&window) {
-                    let context = context_from_word_and_element(&element, &word);
-                    log::info!(
-                        "AX selection retry succeeded on attempt {attempt}: {}",
-                        describe_context(&context)
-                    );
-                    RETRYING_PID.store(0, Ordering::SeqCst);
-                    on_finished(Some(context));
-                    return;
-                }
-            }
+        if !acquire_retry_slot(pid, callbacks.is_cancelled.as_ref()) {
+            return;
         }
-        RETRYING_PID.store(0, Ordering::SeqCst);
-        on_finished(None);
+        // 随线程结束（重试结束）Drop，复原本次开启的 AXEnhancedUserInterface
+        let mut enhanced_restore = None;
+        run_selection_retry(callbacks, RETRY_ATTEMPTS, RETRY_INTERVAL, |attempt| {
+            return poll_selection_once(pid, attempt, &mut enhanced_restore);
+        });
     });
 }
 
@@ -1827,8 +2060,8 @@ fn copy_string_for_range_by_ax(
     focused: &core_foundation::base::CFType,
     range: core_foundation::base::CFRange,
 ) -> Result<String, String> {
-    use core_foundation::base::{CFGetTypeID, CFRange, CFType, CFTypeRef, TCFType};
-    use core_foundation::string::{CFString, CFStringRef};
+    use core_foundation::base::{CFRange, CFType, CFTypeRef, TCFType};
+    use core_foundation::string::CFString;
 
     unsafe {
         // AXValueCreate 遵循 Create 规则（返回已 retain 的对象）。
@@ -1853,10 +2086,11 @@ fn copy_string_for_range_by_ax(
         if err != 0 || text_ref.is_null() {
             return Err(format!("failed to get string for range: AXError {err}"));
         }
-        if CFGetTypeID(text_ref) != CFString::type_id() {
+        // 先接管所有权（Copy 规则）再判类型：类型不符提前返回时对象也会随 Drop 释放
+        let value: CFType = TCFType::wrap_under_create_rule(text_ref);
+        let Some(text) = value.downcast_into::<CFString>() else {
             return Err("string for range is not a string".to_string());
-        }
-        let text: CFString = TCFType::wrap_under_create_rule(text_ref as CFStringRef);
+        };
         return Ok(text.to_string());
     }
 }
@@ -1869,9 +2103,17 @@ fn copy_string_for_range_by_ax(
 /// 或没有选中内容），`1` 表示复制成功，其后紧跟所选文本。用状态码而不是空串
 /// 表示“未变”，Rust 侧才能按触发场景分流（见 get_selected_text_by_applescript）。
 ///
-/// 轮询而不是固定 delay：每 15ms 查一次 changeCount，最长约 300ms——慢应用不会
-/// 因固定等待太短读到旧内容，快应用也不用白等。检测到变化后再留 30ms 收尾：
-/// 有的应用先 clearContents（计数已变）、稍后才写入数据，立即读取会读到空。
+/// 轮询而不是固定 delay：每 15ms 查一次 changeCount，最长约 1 秒——慢应用不会
+/// 因固定等待太短读到旧内容，快应用也不用白等。上限不能太短：写入晚于上限的话，
+/// 用户的剪贴板被选中文本覆盖后就再没有人恢复了（Word 这类慢应用正是走到这条路径
+/// 的典型）；代价是真没选中时“没有选区”的反馈要等满上限。检测到变化后再留 30ms
+/// 收尾：有的应用先 clearContents（计数已变）、稍后才写入数据，立即读取会读到空。
+///
+/// 静音之后的全部逻辑都包在 try 里、由同一个出口恢复：中途任何一步报错（如有“自动化”
+/// 权限但没有“辅助功能”权限时 keystroke 报 1002）都不能把提示音永久留在静音，也不能
+/// 丢掉用户的剪贴板；报错在恢复之后原样抛出。复制到的内容不是文本（如选中了图片）时
+/// 返回 `0`，同样恢复。恢复音量不经 System Events，不依赖可能正是失败原因的权限；
+/// 恢复剪贴板只在计数确实变了时才做，没变就不去重写（重写可能丢失原内容的其他格式）。
 ///
 /// 剪贴板备份/恢复是尽力而为的：剪贴板当前内容不是文本（如图片、文件）时
 /// `the clipboard` 读取失败，此时跳过备份与恢复、只做复制读取——牺牲“剪贴板
@@ -1894,44 +2136,88 @@ end try
 set thePasteboard to current application's NSPasteboard's generalPasteboard()
 set theCount to thePasteboard's changeCount()
 
-tell application "System Events"
-    set volume alert volume 0
-end tell
+set theResult to "0"
+set didFail to false
+try
+    tell application "System Events"
+        set volume alert volume 0
+    end tell
 
--- Copy selected text to clipboard:
-tell application "System Events" to keystroke "c" using {command down}
+    -- Copy selected text to clipboard:
+    tell application "System Events" to keystroke "c" using {command down}
 
--- Poll the pasteboard change count (up to ~300ms) instead of a fixed delay:
-set didChange to false
-repeat 20 times
-    if thePasteboard's changeCount() is not theCount then
-        set didChange to true
-        exit repeat
+    -- Poll the pasteboard change count (up to ~1s) instead of a fixed delay:
+    set didChange to false
+    repeat 66 times
+        if thePasteboard's changeCount() is not theCount then
+            set didChange to true
+            exit repeat
+        end if
+        delay 0.015
+    end repeat
+
+    if didChange then
+        -- Some apps clear the pasteboard first and write the data a moment later:
+        delay 0.03
+
+        -- The copied content may not be text (e.g. an image): theResult stays "0".
+        try
+            set theResult to "1" & (the clipboard as text)
+        end try
     end if
-    delay 0.015
-end repeat
+on error errorMessage number errorNumber
+    set didFail to true
+    set failureMessage to errorMessage
+    set failureNumber to errorNumber
+end try
 
-tell application "System Events"
+-- Single exit: whatever happened above, put the volume and the clipboard back.
+try
     set volume alert volume savedAlertVolume
-end tell
+end try
 
-if not didChange then
-    return "0"
-end if
-
--- Some apps clear the pasteboard first and write the data a moment later:
-delay 0.03
-
-set theSelectedText to the clipboard as text
-
-if clipboardSaved then
+if clipboardSaved and (thePasteboard's changeCount() is not theCount) then
     try
         set the clipboard to savedClipboard
     end try
 end if
 
-return "1" & theSelectedText
+if didFail then error failureMessage number failureNumber
+
+return theResult
 "#;
+
+/// 模拟 Cmd+C 前等用户松开快捷键的修饰键：快捷键在按下时触发，形如 Cmd+Shift+X 时用户
+/// 多半还按着 Shift，模拟按键会与之合并成 Cmd+Shift+C（Chrome 里是“检查元素”）。
+/// 有界等待：超时照常继续（用户一直按着时总不能不取词）。
+fn wait_for_modifier_release() {
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(300);
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+
+    let read_flags =
+        || unsafe { ax_ffi::CGEventSourceFlagsState(ax_ffi::CG_EVENT_SOURCE_STATE_HID_SYSTEM) };
+    if !modifiers_released_within(read_flags, TIMEOUT, POLL_INTERVAL) {
+        log::info!("modifier keys are still held, simulating Cmd+C anyway");
+    }
+}
+
+/// 轮询修饰键状态直到全部松开（返回 true）或超时（返回 false）。
+fn modifiers_released_within(
+    mut read_flags: impl FnMut() -> u64,
+    timeout: std::time::Duration,
+    poll_interval: std::time::Duration,
+) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if read_flags() & ax_ffi::CG_EVENT_FLAG_MASK_MODIFIERS == 0 {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(poll_interval);
+    }
+}
 
 /// 通过 AppleScript 模拟 Cmd+C 并读取剪贴板，获取当前选中的文本。
 ///
@@ -1940,6 +2226,7 @@ return "1" & theSelectedText
 /// 本身失败）= 没有任何一路能证明目标应用里有选区，剪贴板不变更可能是取词目标
 /// 取错了、焦点在安全输入框、或应用不理会模拟按键，返回 Err 报取词失败。
 fn get_selected_text_by_applescript(silent_if_unchanged: bool) -> Result<String, String> {
+    wait_for_modifier_release();
     let output = std::process::Command::new("osascript")
         .arg("-e")
         .arg(APPLE_SCRIPT)
@@ -2373,6 +2660,439 @@ mod tests {
             ),
             _ => panic!("expected Expanded"),
         }
+    }
+
+    /// 第二阶段的扫描页：视口未知时不扫（直接降级）；否则从可见页向两侧就近、受上限约束
+    #[test]
+    fn hidden_page_scan_order() {
+        // 没有可见页（含视口未知）：绝不按文档顺序扫前若干页
+        assert_eq!(super::hidden_pages_to_scan(&[false; 5], 40), None);
+        assert_eq!(super::hidden_pages_to_scan(&[], 40), None);
+        // 就近：离可见页（下标 5）越近越先扫，距离相同时前面的页优先
+        let mut visible = [false; 8];
+        visible[5] = true;
+        assert_eq!(
+            super::hidden_pages_to_scan(&visible, 40),
+            Some(vec![4, 6, 3, 7, 2, 1, 0])
+        );
+        // 上限截断的是远处的页：用户在文档后部时不会扫到文档开头
+        assert_eq!(
+            super::hidden_pages_to_scan(&visible, 3),
+            Some(vec![4, 6, 3])
+        );
+        // 多个可见页：距离取到最近可见页的距离；全部可见时无需再扫
+        assert_eq!(
+            super::hidden_pages_to_scan(&[true, false, false, false, true], 40),
+            Some(vec![1, 3, 2])
+        );
+        assert_eq!(
+            super::hidden_pages_to_scan(&[true, true], 40),
+            Some(Vec::new())
+        );
+    }
+
+    /// 等修饰键松开：已松开立即返回；中途松开返回 true；一直按着有界超时；Caps Lock 不算
+    #[test]
+    fn modifier_release_wait() {
+        use std::time::{Duration, Instant};
+
+        const SHIFT: u64 = 0x0002_0000;
+        const COMMAND: u64 = 0x0010_0000;
+        const CAPS_LOCK: u64 = 0x0001_0000;
+        let timeout = Duration::from_millis(50);
+        let poll = Duration::from_millis(1);
+
+        assert!(super::modifiers_released_within(|| 0, timeout, poll));
+        // Caps Lock 是锁定键：长期置位也不能让每次取词都白等
+        assert!(super::modifiers_released_within(
+            || CAPS_LOCK,
+            Duration::ZERO,
+            poll
+        ));
+        let mut reads = 0;
+        let released = super::modifiers_released_within(
+            || {
+                reads += 1;
+                return if reads < 3 { COMMAND | SHIFT } else { 0 };
+            },
+            Duration::from_secs(5),
+            poll,
+        );
+        assert!(released);
+        assert_eq!(reads, 3);
+        let started = Instant::now();
+        assert!(!super::modifiers_released_within(|| SHIFT, timeout, poll));
+        assert!(started.elapsed() >= timeout);
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// marker 范围解包前的类型校验：真正的 AXTextMarkerRange 通过，其他 CF 类型被拒
+    #[test]
+    fn text_marker_range_type_check() {
+        use core_foundation::base::{CFType, CFTypeRef, TCFType};
+        use core_foundation::boolean::CFBoolean;
+        use core_foundation::string::CFString;
+
+        #[link(name = "ApplicationServices", kind = "framework")]
+        extern "C" {
+            fn AXTextMarkerCreate(
+                allocator: CFTypeRef,
+                bytes: *const u8,
+                length: isize,
+            ) -> CFTypeRef;
+            fn AXTextMarkerRangeCreate(
+                allocator: CFTypeRef,
+                start: CFTypeRef,
+                end: CFTypeRef,
+            ) -> CFTypeRef;
+        }
+
+        let bytes = [1u8, 2, 3, 4];
+        let range: CFType = unsafe {
+            let marker: CFType = TCFType::wrap_under_create_rule(AXTextMarkerCreate(
+                std::ptr::null(),
+                bytes.as_ptr(),
+                bytes.len() as isize,
+            ));
+            TCFType::wrap_under_create_rule(AXTextMarkerRangeCreate(
+                std::ptr::null(),
+                marker.as_CFTypeRef(),
+                marker.as_CFTypeRef(),
+            ))
+        };
+        assert!(super::ensure_text_marker_range(&range).is_ok());
+        assert!(super::ensure_text_marker_range(&CFString::new("x").as_CFType()).is_err());
+        assert!(super::ensure_text_marker_range(&CFBoolean::true_value().as_CFType()).is_err());
+    }
+
+    /// 重试测试共用全局互斥槽位，须串行
+    static RETRY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// 记录回调情况的 RetryCallbacks：返回 {回调, 开始次数, 各次结束的结果文本, 过期标志}
+    #[allow(clippy::type_complexity)]
+    fn recording_callbacks() -> (
+        super::RetryCallbacks,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+
+        let started = Arc::new(AtomicUsize::new(0));
+        let finished = Arc::new(Mutex::new(Vec::new()));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let callbacks = super::RetryCallbacks {
+            on_started: Box::new({
+                let started = started.clone();
+                move || {
+                    started.fetch_add(1, Ordering::SeqCst);
+                }
+            }),
+            on_finished: Box::new({
+                let finished = finished.clone();
+                move |outcome: Option<super::SelectedContext>| {
+                    finished
+                        .lock()
+                        .unwrap()
+                        .push(outcome.map(|context| context.text));
+                }
+            }),
+            is_cancelled: Box::new({
+                let cancelled = cancelled.clone();
+                move || cancelled.load(Ordering::SeqCst)
+            }),
+        };
+        return (callbacks, started, finished, cancelled);
+    }
+
+    fn plain_context(text: &str) -> super::SelectedContext {
+        return super::SelectedContext {
+            text: text.to_string(),
+            word: None,
+            word_offset: None,
+        };
+    }
+
+    /// 重试轮询：命中即交付并释放槽位；超时给 None；on_finished 恰好一次
+    #[test]
+    fn retry_delivers_or_times_out_exactly_once() {
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+
+        let _lock = RETRY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        super::RETRYING_PID.store(1, Ordering::SeqCst);
+        let (callbacks, started, finished, _) = recording_callbacks();
+        let mut polls = 0;
+        super::run_selection_retry(callbacks, 5, Duration::ZERO, |attempt| {
+            polls += 1;
+            return (attempt == 2).then(|| plain_context("the sentence"));
+        });
+        assert_eq!(polls, 2);
+        assert_eq!(started.load(Ordering::SeqCst), 1);
+        assert_eq!(*finished.lock().unwrap(), vec![Some("the sentence".into())]);
+        assert_eq!(super::RETRYING_PID.load(Ordering::SeqCst), 0);
+
+        super::RETRYING_PID.store(1, Ordering::SeqCst);
+        let (callbacks, _, finished, _) = recording_callbacks();
+        super::run_selection_retry(callbacks, 3, Duration::ZERO, |_| None);
+        assert_eq!(*finished.lock().unwrap(), vec![None]);
+        assert_eq!(super::RETRYING_PID.load(Ordering::SeqCst), 0);
+    }
+
+    /// 重试过期：轮询前过期不再轮询；轮询途中过期丢弃已取到的结果；都恰好一次 None
+    #[test]
+    fn retry_stops_when_cancelled() {
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+
+        let _lock = RETRY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        super::RETRYING_PID.store(1, Ordering::SeqCst);
+        let (callbacks, _, finished, cancelled) = recording_callbacks();
+        cancelled.store(true, Ordering::SeqCst);
+        let mut polls = 0;
+        super::run_selection_retry(callbacks, 5, Duration::ZERO, |_| {
+            polls += 1;
+            return None;
+        });
+        assert_eq!(polls, 0);
+        assert_eq!(*finished.lock().unwrap(), vec![None]);
+        assert_eq!(super::RETRYING_PID.load(Ordering::SeqCst), 0);
+
+        super::RETRYING_PID.store(1, Ordering::SeqCst);
+        let (callbacks, _, finished, cancelled) = recording_callbacks();
+        super::run_selection_retry(callbacks, 5, Duration::ZERO, |_| {
+            cancelled.store(true, Ordering::SeqCst);
+            return Some(plain_context("stale sentence"));
+        });
+        assert_eq!(*finished.lock().unwrap(), vec![None]);
+        assert_eq!(super::RETRYING_PID.load(Ordering::SeqCst), 0);
+    }
+
+    /// 轮询 panic：槽位照样释放，on_finished(None) 恰好一次
+    #[test]
+    fn retry_finishes_when_polling_panics() {
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+
+        let _lock = RETRY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        super::RETRYING_PID.store(1, Ordering::SeqCst);
+        let (callbacks, _, finished, _) = recording_callbacks();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            super::run_selection_retry(callbacks, 5, Duration::ZERO, |_| {
+                panic!("polling failed");
+            });
+        }));
+        assert!(result.is_err());
+        assert_eq!(*finished.lock().unwrap(), vec![None]);
+        assert_eq!(super::RETRYING_PID.load(Ordering::SeqCst), 0);
+    }
+
+    /// 收尾守卫：Drop 不会重复释放——槽位此时可能已被下一个重试占用
+    #[test]
+    fn retry_guard_does_not_release_the_next_retrys_slot() {
+        use std::sync::atomic::Ordering;
+
+        let _lock = RETRY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        super::RETRYING_PID.store(1, Ordering::SeqCst);
+        let mut guard = super::RetryFinishGuard {
+            on_finished: Some(Box::new(|_| {})),
+        };
+        guard.finish(None);
+        super::RETRYING_PID.store(2, Ordering::SeqCst);
+        drop(guard);
+        assert_eq!(super::RETRYING_PID.load(Ordering::SeqCst), 2);
+        super::RETRYING_PID.store(0, Ordering::SeqCst);
+    }
+
+    /// 占用槽位：等到在途重试退出后接手；等待中本次已过期则放弃
+    #[test]
+    fn retry_slot_waits_for_the_stale_retry() {
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+
+        let _lock = RETRY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        assert!(super::acquire_retry_slot(7, &|| false));
+        assert_eq!(super::RETRYING_PID.load(Ordering::SeqCst), 7);
+
+        // 已被占用且本次过期：放弃，不动别人的槽位
+        assert!(!super::acquire_retry_slot(8, &|| true));
+        assert_eq!(super::RETRYING_PID.load(Ordering::SeqCst), 7);
+
+        // 已被占用、未过期：等旧重试释放后接手
+        let releaser = std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(30));
+            super::RETRYING_PID.store(0, Ordering::SeqCst);
+        });
+        assert!(super::acquire_retry_slot(9, &|| false));
+        assert_eq!(super::RETRYING_PID.load(Ordering::SeqCst), 9);
+        releaser.join().unwrap();
+        super::RETRYING_PID.store(0, Ordering::SeqCst);
+    }
+
+    /// 执行打桩后的 APPLE_SCRIPT：真实的控制流（try / 恢复 / 重新抛出 / 输出协议），但把会
+    /// 动用户状态的操作都换成 log——不碰系统音量与通用剪贴板，换成用完即弃的私有 pasteboard
+    ///（按进程与序号命名：实测 pasteboardWithUniqueName 在并行的 osascript 之间会撞名，
+    /// 别的测试的写入会让本测试误判剪贴板变了）。
+    /// `copy`：模拟按键那一行的替身；`read`：读剪贴板表达式的替身。返回 {是否成功, stdout, 日志}。
+    fn run_stubbed_apple_script(
+        copy: &str,
+        read: &str,
+        extra: &[(&str, &str)],
+    ) -> (bool, String, String) {
+        static NEXT_PASTEBOARD: std::sync::atomic::AtomicUsize =
+            std::sync::atomic::AtomicUsize::new(0);
+
+        let pasteboard = format!(
+            "pasteboardWithName:\"anki-marker-test-{}-{}\"",
+            std::process::id(),
+            NEXT_PASTEBOARD.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        );
+        let mut script = APPLE_SCRIPT.to_string();
+        let stubs = [
+            ("generalPasteboard()", pasteboard.as_str()),
+            (
+                "set savedClipboard to the clipboard",
+                "set savedClipboard to \"original\"",
+            ),
+            (
+                "tell application \"System Events\"\n        set volume alert volume 0\n    end tell",
+                "log \"muted\"",
+            ),
+            (
+                "tell application \"System Events\" to keystroke \"c\" using {command down}",
+                copy,
+            ),
+            ("the clipboard as text", read),
+            (
+                "set volume alert volume savedAlertVolume",
+                "log \"volume restored\"",
+            ),
+            (
+                "set the clipboard to savedClipboard",
+                "log \"clipboard restored\"",
+            ),
+            (
+                "if didFail then",
+                "thePasteboard's releaseGlobally()\nif didFail then",
+            ),
+        ];
+        for (from, to) in stubs.iter().chain(extra.iter()) {
+            assert!(
+                script.contains(from),
+                "the script no longer contains {from:?}"
+            );
+            script = script.replace(from, to);
+        }
+        let output = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+            .expect("failed to run osascript");
+        return (
+            output.status.success(),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        );
+    }
+
+    /// 模拟复制成功：文本逐字符完整返回（含换行、以状态码字符开头），音量与剪贴板都恢复
+    #[test]
+    fn apple_script_success_restores_state_and_keeps_text() {
+        let (ok, stdout, log) = run_stubbed_apple_script(
+            "thePasteboard's clearContents()",
+            "\"0 apples\" & linefeed & \"  and pears\"",
+            &[],
+        );
+        assert!(ok, "{log}");
+        assert_eq!(
+            parse_applescript_output(&stdout, false),
+            Ok("0 apples\n  and pears".to_string())
+        );
+        assert!(log.contains("volume restored"), "{log}");
+        assert!(log.contains("clipboard restored"), "{log}");
+    }
+
+    /// 模拟按键报错（有“自动化”无“辅助功能”权限时的 1002）：恢复音量后原样抛出；
+    /// 剪贴板没变就不去重写
+    #[test]
+    fn apple_script_failure_restores_volume_and_rethrows() {
+        let (ok, _, log) = run_stubbed_apple_script(
+            "error \"not allowed to send keystrokes\" number 1002",
+            "\"unused\"",
+            &[],
+        );
+        assert!(!ok);
+        assert!(log.contains("not allowed to send keystrokes"), "{log}");
+        assert!(log.contains("1002"), "{log}");
+        assert!(log.contains("volume restored"), "{log}");
+        assert!(!log.contains("clipboard restored"), "{log}");
+    }
+
+    /// 剪贴板已被覆盖后才报错：音量和剪贴板都要恢复，再抛出
+    #[test]
+    fn apple_script_failure_after_copy_restores_clipboard() {
+        let (ok, _, log) = run_stubbed_apple_script(
+            "thePasteboard's clearContents()\nerror \"boom\" number 1",
+            "\"unused\"",
+            &[],
+        );
+        assert!(!ok);
+        assert!(log.contains("boom"), "{log}");
+        assert!(log.contains("volume restored"), "{log}");
+        assert!(log.contains("clipboard restored"), "{log}");
+    }
+
+    /// 复制到的内容不是文本：返回状态 0，恢复音量与剪贴板
+    #[test]
+    fn apple_script_non_text_copy_returns_unchanged_status() {
+        let (ok, stdout, log) = run_stubbed_apple_script(
+            "thePasteboard's clearContents()",
+            // 记录强转文本必然报错，与“剪贴板是图片时 as text 报错”走同一条路
+            "({a:1} as text)",
+            &[],
+        );
+        assert!(ok, "{log}");
+        assert_eq!(stdout.trim(), "0");
+        assert!(log.contains("volume restored"), "{log}");
+        assert!(log.contains("clipboard restored"), "{log}");
+    }
+
+    /// 应用没理会模拟按键：返回状态 0，恢复音量，不重写剪贴板
+    #[test]
+    fn apple_script_unchanged_clipboard_returns_unchanged_status() {
+        let (ok, stdout, log) = run_stubbed_apple_script("log \"ignored\"", "\"unused\"", &[]);
+        assert!(ok, "{log}");
+        assert_eq!(stdout.trim(), "0");
+        assert!(log.contains("volume restored"), "{log}");
+        assert!(!log.contains("clipboard restored"), "{log}");
+    }
+
+    /// 慢应用写入剪贴板晚于旧上限（第 20 轮约 300ms）：仍判为复制成功并恢复剪贴板。
+    /// 回归：旧实现此时直接返回 0，用户的剪贴板被覆盖且不再恢复
+    #[test]
+    fn apple_script_late_clipboard_write_is_restored() {
+        let (ok, stdout, log) = run_stubbed_apple_script(
+            "set pollCount to 0",
+            "\"late text\"",
+            &[(
+                "delay 0.015",
+                "set pollCount to pollCount + 1\n\
+                 if pollCount = 40 then thePasteboard's clearContents()\n\
+                 delay 0.015",
+            )],
+        );
+        assert!(ok, "{log}");
+        assert_eq!(
+            parse_applescript_output(&stdout, false),
+            Ok("late text".to_string())
+        );
+        assert!(log.contains("clipboard restored"), "{log}");
     }
 
     /// APPLE_SCRIPT 应能被 osacompile 编译（仅语法检查，不执行脚本）。

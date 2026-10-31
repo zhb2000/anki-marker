@@ -35,6 +35,13 @@ export interface SearchResult {
     webTranslations: WebTranslation[];
 }
 
+/** 有道查询的超时（毫秒）：请求挂起时调用方（如 AI 优选等待预取结果）不能无限等下去 */
+const YOUDAO_SEARCH_TIMEOUT_MS = 10000;
+
+/**
+ * 查询有道词典。HTTP 非 2xx、超时、返回内容不是合法 XML（如风控 HTML 页面）时抛出异常，
+ * 不能当作“无结果”返回：调用方依赖异常来触发重试与错误提示。
+ */
 // 参考：https://github.com/g8up/youDaoDict/issues/19
 export async function searchYoudaoDict(query: string): Promise<SearchResult> {
     const params = new URLSearchParams({
@@ -51,20 +58,42 @@ export async function searchYoudaoDict(query: string): Promise<SearchResult> {
         q: query
     });
     const url = `https://dict.youdao.com/fsearch?${params.toString()}`;
-    const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-            'Accept': 'text/xml',
-            // 需要设置 Origin 请求头，
-            // 或者设置为空字符串（Tauri 会移除请求头中的 Origin），
-            // 否则有道词典 API 会返回 Invalid CORS request。
-            'Origin': 'https://dict.youdao.com',
-            'Connection': 'keep-alive'
+    // 超时同时覆盖等待响应头与读取响应体
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), YOUDAO_SEARCH_TIMEOUT_MS);
+    let xmlText: string;
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'text/xml',
+                // 需要设置 Origin 请求头，
+                // 或者设置为空字符串（Tauri 会移除请求头中的 Origin），
+                // 否则有道词典 API 会返回 Invalid CORS request。
+                'Origin': 'https://dict.youdao.com',
+                'Connection': 'keep-alive'
+            },
+            signal: controller.signal
+        });
+        if (!response.ok) {
+            response.body?.cancel().catch(() => { }); // 不读错误页内容，释放底层连接
+            throw new Error(`有道词典查询失败：HTTP ${response.status}`);
         }
-    });
-    const xmlText = await response.text();
+        xmlText = await response.text();
+    } catch (error) {
+        if (controller.signal.aborted) {
+            throw new Error(`有道词典查询超时（${YOUDAO_SEARCH_TIMEOUT_MS / 1000} 秒）`, { cause: error });
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeoutId);
+    }
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+    // XML 解析失败时 DOMParser 不抛异常，而是返回含 <parsererror> 的文档（如服务端返回了 HTML 页面）
+    if (xmlDoc.querySelector('parsererror') != null) {
+        throw new Error('有道词典返回的内容不是合法的 XML');
+    }
     // 提取 return-phrase 节点的内容
     const returnPhrase = decodeHtmlEntities(xmlDoc.querySelector('return-phrase')?.textContent ?? '');
     // 提取 phonetic-symbol 节点的内容

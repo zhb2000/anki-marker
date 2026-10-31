@@ -52,6 +52,8 @@ const cardNoticeTimers = new WeakMap<object, number>();
 const cardNoticeActions = new WeakMap<object, () => void>();
 /** 操作超过这个时长才显示进度与“停止”：正常速度的添加/移除不应闪一下 */
 const SLOW_NOTICE_DELAY_MS = 700;
+/** 写入失败后核对笔记时，按创建时间筛选所留的时钟偏差余量（AnkiConnect 可能在另一台机器上） */
+const WRITE_RECONCILE_CLOCK_SLACK_MS = 10_000;
 
 /**
  * 给某张卡片挂一条就地反馈。
@@ -218,6 +220,9 @@ function onMarkToken(index: number, value: boolean): void {
 
 /** 所选的词典改变时，在所选词典中搜索新单词 */
 watch(selectedDict, async newSelected => {
+    // 上一本词典的手打查询失败提示不属于新词典的结果列表
+    searchNoticeDict = null;
+    clearSearchNotice();
     const succeeded = await searchAndUpdate(searchText.value, newSelected);
     // 切词典后候选总数较 AI 请求时的快照变多，说明此前预取缺货导致 AI 误走 fallback，
     // 值得用更全的候选自动补触发一次优选；候选数不再增长时不会重复触发，无循环风险
@@ -284,19 +289,22 @@ const debouncedAiPick = utils.debounce((word: string) => {
  *
  * 点击“查询”按钮或按下回车键时直接调用此函数。
  *
- * @param options.suppressErrorDialog 为 true 时查询失败只 console.error 不弹 dialog（供 AI 预取静默重试）
+ * @param options.errorFeedback 查询失败时的反馈方式：dialog（默认，显式查询）弹错误框；
+ *   inline 在结果列表上方就地提示（手打查询：逐键弹模态框会打断输入）；
+ *   silent 只 console.error（AI 预取静默重试）
  * @returns 查询失败时返回 false，其余路径（含去重早退、空词清空、成功）返回 true
  */
 async function searchAndUpdate(
     word: string,
     dictionary: 'collins' | 'oxford' | 'youdao',
-    options?: { suppressErrorDialog?: boolean; }
+    options?: { errorFeedback?: 'dialog' | 'inline' | 'silent'; }
 ): Promise<boolean> {
     word = word.trim();
     if (word.length === 0) {
         wordItems[dictionary] = [];
         // 界面上的单词列表已清空，无法复用，因此对于任何单词都要重新搜索
         searchingOrSearchedWords[dictionary] = '';
+        clearSearchNoticeOf(dictionary);
         return true;
     }
     if (word === searchingOrSearchedWords[dictionary]) {
@@ -329,7 +337,14 @@ async function searchAndUpdate(
         if (searchingOrSearchedWords[dictionary] === word) {
             searchingOrSearchedWords[dictionary] = '';
             console.error(error);
-            if (options?.suppressErrorDialog !== true) {
+            const feedback = options?.errorFeedback ?? 'dialog';
+            if (feedback === 'inline') {
+                showSearchNotice(`查询失败：${error instanceof Error ? error.message : String(error)}`, {
+                    severity: 'error',
+                    duration: 0,
+                });
+                searchNoticeDict = dictionary;
+            } else if (feedback === 'dialog') {
                 await dialog.message(String(error), { title: '查询失败', kind: 'error' });
             }
         }
@@ -338,8 +353,24 @@ async function searchAndUpdate(
     // 仅在本次搜索结果有效时更新搜索结果单词列表
     if (searchingOrSearchedWords[dictionary] === word) {
         wordItems[dictionary] = results.map(item => ({ item, status: 'not-added', id: null }) as ItemModel<any>);
+        clearSearchNoticeOf(dictionary);
     }
     return true;
+}
+
+/**
+ * 手打查询失败的就地提示（显示在结果列表上方）。常驻到该词典下一次查询成功、
+ * 查询词被清空或切换词典为止：网络持续故障时边打字边失败，提示保持展开只更新文案，不反复伸缩
+ */
+const { notice: searchNotice, show: showSearchNotice, clear: clearSearchNotice } = useTransientNotice(0);
+/** 当前就地提示属于哪本词典：别的词典查询成功不应收起它 */
+let searchNoticeDict: 'collins' | 'oxford' | 'youdao' | null = null;
+
+function clearSearchNoticeOf(dictionary: 'collins' | 'oxford' | 'youdao'): void {
+    if (searchNoticeDict === dictionary) {
+        searchNoticeDict = null;
+        clearSearchNotice();
+    }
 }
 // #endregion
 
@@ -387,17 +418,32 @@ function replaceSentence(text: string): void {
     tokens.value = utils.string.tokenize(text).map(token => ({ token, marked: false }));
 }
 
+/** 粘贴失败的就地提示：显示在句子面板上方，紧挨着“粘贴”按钮 */
+const { notice: pasteNotice, show: showPasteNotice } = useTransientNotice(3000);
+
 async function pasteToEdit() {
-    const text = await api.clipboard.readText();
-    if (text != null) {
-        // 粘贴属于整体替换句子：分词同步重建为全新状态，不保留旧的标记，编辑草稿一并作废；
-        // 旧句子的查询随之作废（查询不由标记派生，需显式清空）
-        replaceSentence(text.trim());
-        setQueryExplicitly('');
-        userTouched = true;
-        if (showEdit.value) {
-            await changeEditStatus();
-        }
+    let text: string;
+    try {
+        text = await api.clipboard.readText();
+    } catch (error) {
+        // 剪贴板为空或内容不是文本（如图片）时，剪贴板插件直接报错而不是返回空串
+        console.error(error);
+        showPasteNotice('剪贴板中没有文本', { severity: 'error' });
+        return;
+    }
+    const trimmed = text.trim();
+    if (trimmed.length === 0) {
+        // 只有空白：不替换句子，避免一次误粘贴清掉当前工作区
+        showPasteNotice('剪贴板中没有文本', { severity: 'error' });
+        return;
+    }
+    // 粘贴属于整体替换句子：分词同步重建为全新状态，不保留旧的标记，编辑草稿一并作废；
+    // 旧句子的查询随之作废（查询不由标记派生，需显式清空）
+    replaceSentence(trimmed);
+    setQueryExplicitly('');
+    userTouched = true;
+    if (showEdit.value) {
+        await changeEditStatus();
     }
 }
 
@@ -410,6 +456,11 @@ async function changeEditStatus() {
         await nextTick();
         editTextArea.value?.focus();
     } else {
+        // 首尾空白在确认时才裁剪：编辑期间逐键裁剪会吞掉句末刚打的空格（见 fluent-controls/useTextModel.ts）
+        const trimmed = sentence.value.trim();
+        if (trimmed !== sentence.value) {
+            sentence.value = trimmed;
+        }
         // 确认编辑（完成）：以基线分词为基准重建，尽量保留已标记单词。
         // 基线为 null 说明编辑期间句子被整体替换（划词录入、粘贴），分词已是全新状态，无需重建
         if (editBaselineTokens != null) {
@@ -467,6 +518,24 @@ function isAiPicked(source: aiPickLogic.DictSource, index: number): boolean {
     return aiPick.pick != null && aiPick.pick.source === source && aiPick.pick.index === index;
 }
 
+/**
+ * AI 优选卡片上的就地反馈：就是 AI 选中的那条词典条目自己的提示（加卡进度、失败与重试、编辑降级）。
+ * 从 AI 卡加卡时，源条目可能在隐藏的词典标签页或列表下方，只挂在源卡片上用户看不见
+ */
+const aiPickNotice = computed<StatusNotice | null>(() => {
+    if (aiPick.pick == null) {
+        return null;
+    }
+    return wordItems[aiPick.pick.source][aiPick.pick.index]?.notice ?? null;
+});
+
+/** AI 优选卡片上提示的操作（停止 / 重试）：转发给源条目 */
+function handleAiPickNoticeAction(): void {
+    if (aiPick.pick != null) {
+        handleCardNoticeAction(aiPick.pick.source, aiPick.pick.index);
+    }
+}
+
 /** AI 优选命中的词典条目（供 AiPickCard 渲染完整内容）；pick 为空或条目缺失时为 null */
 const aiPickItem = computed(() => {
     if (aiPick.pick == null) return null;
@@ -510,10 +579,10 @@ async function maybeStartAiPick(word: string) {
         // 并行搜索三本词典；searchingOrSearchedWords 去重保证已查过的词典立即返回。
         // 预取失败（多为有道的 HTTP 抖动）时静默重试一次，避免候选缺失导致 AI 误走 fallback
         const prefetch = async (dictionary: 'collins' | 'oxford' | 'youdao'): Promise<void> => {
-            let ok = await searchAndUpdate(trimmed, dictionary, { suppressErrorDialog: true });
+            let ok = await searchAndUpdate(trimmed, dictionary, { errorFeedback: 'silent' });
             if (!ok) {
                 console.warn(`[aiPick] ${dictionary} 预取失败，重试一次`);
-                ok = await searchAndUpdate(trimmed, dictionary, { suppressErrorDialog: true });
+                ok = await searchAndUpdate(trimmed, dictionary, { errorFeedback: 'silent' });
                 if (!ok) {
                     console.warn(`[aiPick] ${dictionary} 候选缺失，本次优选将不含该来源`);
                 }
@@ -550,9 +619,13 @@ async function maybeStartAiPick(word: string) {
     }
 }
 
-/** 只查当前词典，不触发 AI 优选：手打路径专用（AI 由 debouncedAiPick 另行发起） */
+/**
+ * 只查当前词典，不触发 AI 优选：手打路径专用（AI 由 debouncedAiPick 另行发起）。
+ * 失败只就地提示：网络故障时每个节流后的查询都会失败，弹模态框会排队弹出并抢走输入焦点；
+ * 回车或点“查询”时才弹框
+ */
 async function searchDictionary(): Promise<void> {
-    await searchAndUpdate(searchText.value, selectedDict.value);
+    await searchAndUpdate(searchText.value, selectedDict.value, { errorFeedback: 'inline' });
 }
 
 /** 提交一次有效搜索：更新当前词典的搜索结果并立即触发 AI 优选（回车、查询按钮等显式动作） */
@@ -798,31 +871,70 @@ async function initSentenceCapture() {
         console.error(error);
     }
     // 主窗口被关闭后按快捷键会重建窗口，前端就绪之前 emit 的事件会丢失，
-    // 此时通过 take_pending_sentence 取回 Rust 侧暂存的句子
+    // 此时通过 take_pending_sentence 取回 Rust 侧暂存的句子。
+    //
+    // 后端每次捕获都会暂存一份，事件送达后也要取走丢弃：否则暂存一直留着，页面一旦重载
+    // （WebView 重载、内容进程崩溃）就会把旧句子回放一遍。
+    // 事件若恰好落在“挂监听”与“取暂存”之间，同一个结果会经两条路各到一次：
+    // 记下从暂存回放的那份，挂监听后收到的第一个事件与它相同就跳过
+    let sentenceEventSeen = false;
+    let replayedSentence: CapturedSentencePayload | null = null;
     try {
         await api.event.listen<CapturedSentencePayload>('sentence-captured', event => {
+            discardPending('take_pending_sentence');
+            const replayed = replayedSentence;
+            replayedSentence = null;
+            const isFirstEvent = !sentenceEventSeen;
+            sentenceEventSeen = true;
+            if (isFirstEvent && replayed != null && isSameCapturedPayload(replayed, event.payload)) {
+                return;
+            }
             void applyCapturedSentence(event.payload);
         });
         const pending = await utils.invoke<CapturedSentencePayload | null>('take_pending_sentence');
-        if (pending != null) {
+        // 已经收到过事件时，暂存里的不会比它新（暂存只保留最近一次），交给事件即可
+        if (pending != null && !sentenceEventSeen) {
+            replayedSentence = pending;
             await applyCapturedSentence(pending);
         }
     } catch (error) {
         console.error(error);
     }
+    let failureEventSeen = false;
+    let replayedFailure: CaptureFailure | null = null;
     try {
         await api.event.listen<CaptureFailure>('sentence-capture-failed', event => {
+            discardPending('take_pending_capture_failure');
+            const replayed = replayedFailure;
+            replayedFailure = null;
+            const isFirstEvent = !failureEventSeen;
+            failureEventSeen = true;
+            if (isFirstEvent && replayed === event.payload) {
+                return;
+            }
             showCaptureFailureDialog(event.payload);
         });
         // 划词未录入内容时会弹出主窗口并提示；若前端当时尚未就绪，事件已丢失，
         // 此处取回暂存的失败原因补弹提示
         const pendingFailure = await utils.invoke<CaptureFailure | null>('take_pending_capture_failure');
-        if (pendingFailure != null) {
+        if (pendingFailure != null && !failureEventSeen) {
+            replayedFailure = pendingFailure;
             showCaptureFailureDialog(pendingFailure);
         }
     } catch (error) {
         console.error(error);
     }
+}
+
+/** 结果已经由事件送达：取走后端的暂存并丢弃（失败只记日志，不影响本次结果的应用） */
+function discardPending(command: 'take_pending_sentence' | 'take_pending_capture_failure'): void {
+    utils.invoke<unknown>(command).catch((error: unknown) => {
+        console.error(error);
+    });
+}
+
+function isSameCapturedPayload(a: CapturedSentencePayload, b: CapturedSentencePayload): boolean {
+    return a.text === b.text && a.word === b.word && a.wordOffset === b.wordOffset && a.retry === b.retry;
 }
 // #endregion
 
@@ -889,14 +1001,16 @@ async function prepareDeckAndModel(deckName: string, modelName: string, signal?:
  *
  * - 前 700ms 不显示任何提示：正常速度的添加/移除不应闪一下；
  * - 超过阈值才出现“进度 + 停止”，点停止后界面立即退出等待；
- * - signal 交给可在 HTTP 层中断的请求（写入/删除）；无法中断的等待（共享的 Anki 启动、
- *   准备牌组）用 race 退出——共享启动不会因为某一张卡片停止而被打断，只解除本卡片的等待。
+ * - signal 交给可在 HTTP 层中断的请求（删除）；无法中断的等待（共享的 Anki 启动、
+ *   准备牌组）用 race 退出——共享启动不会因为某一张卡片停止而被打断，只解除本卡片的等待；
+ * - disableStop 之后不再提供“停止”（写入笔记阶段，见 changeItemAddedOf）。
  */
 function createCardOperation(item: ItemModel<unknown>, initialMessage: string) {
     const controller = new AbortController();
     let rejectCancelled: ((reason?: unknown) => void) | null = null;
     const cancelledPromise = new Promise<never>((_, reject) => { rejectCancelled = reject; });
     let stopped = false;
+    let stoppable = true;
     let noticeVisible = false;
     let slowTimer: number | null = null;
 
@@ -908,7 +1022,7 @@ function createCardOperation(item: ItemModel<unknown>, initialMessage: string) {
     };
 
     const stop = (): void => {
-        if (stopped) {
+        if (stopped || !stoppable) {
             return;
         }
         stopped = true;
@@ -923,7 +1037,11 @@ function createCardOperation(item: ItemModel<unknown>, initialMessage: string) {
         }
         clearSlowTimer();
         noticeVisible = true;
-        showCardNotice(item, { severity: 'informational', message, progress: true, actionLabel: '停止' }, 0, stop);
+        if (stoppable) {
+            showCardNotice(item, { severity: 'informational', message, progress: true, actionLabel: '停止' }, 0, stop);
+        } else {
+            showCardNotice(item, { severity: 'informational', message, progress: true }, 0);
+        }
     };
 
     /** 仅在提示已经可见时更新文案：避免快操作因为一句“正在写入…”闪一下 */
@@ -931,6 +1049,19 @@ function createCardOperation(item: ItemModel<unknown>, initialMessage: string) {
         if (noticeVisible) {
             showProgress(message);
         }
+    };
+
+    /**
+     * 进入不可中止的阶段，并（在提示已可见时）把文案换成 message、去掉“停止”。
+     * 已经停止时返回 false，调用方不应再继续
+     */
+    const disableStop = (message: string): boolean => {
+        if (stopped) {
+            return false;
+        }
+        stoppable = false;
+        updateProgress(message);
+        return true;
     };
 
     slowTimer = window.setTimeout(() => { slowTimer = null; showProgress(initialMessage); }, SLOW_NOTICE_DELAY_MS);
@@ -941,6 +1072,7 @@ function createCardOperation(item: ItemModel<unknown>, initialMessage: string) {
         race: <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, cancelledPromise]),
         showProgress,
         updateProgress,
+        disableStop,
         dispose: clearSlowTimer,
     };
 }
@@ -959,6 +1091,11 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
     // 上一次操作留下的提示（含失败提示）在这里清掉，避免与新一次操作叠加
     clearCardNotice(item);
     if (item.status === 'not-added') { // add to Anki
+        // 写入内容在第一个 await 之前快照：之后可能要等 Anki 启动几十秒，期间用户可能又划了一句、
+        // 编辑了句子，或得到了新词的 AI 优选（恰好落在同一词典的同一序号上），这些都不能混进这张卡片。
+        // AI 笔记只取已完成的优选：流式输出中的笔记是半截的，提前解析出的 pick 也可能被最终结果推翻
+        const sentenceHTML = makeSentenceHTML();
+        const aiNote = (aiPick.phase === 'done' && isAiPicked(dictionary, index)) ? aiPick.note : null;
         item.status = 'processing-add';
         const operation = createCardOperation(item, '正在添加到 Anki…');
         // 出错或中断时先清掉进行中的提示，再决定显示什么（成功则什么都不显示）
@@ -967,6 +1104,10 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
             clearCardNotice(item);
         };
         let phase: 'connect' | 'prepare' | 'write' = 'connect';
+        /** 写入请求是否已经发出：发出之后的失败不能直接当作“未添加” */
+        let noteSent = false;
+        let fields: ReturnType<typeof anki.makeFields> | null = null;
+        let writeStartedAt = 0;
         try {
             // 确保 AnkiConnect 可用：不可用时按配置自动启动 Anki 并等待其就绪
             await operation.race(globals.ensureAnkiConnect(
@@ -978,31 +1119,29 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
             phase = 'prepare';
             await operation.race(prepareDeckAndModel(deckName, modelName, operation.signal));
             phase = 'write';
-            const fields = anki.makeFields(dictionary, item.item, makeSentenceHTML());
             // AI 优选联动：若所加条目正是 AI 优选命中的条目且带有笔记，则写入“笔记”字段
-            if (aiPick.note.length > 0 && isAiPicked(dictionary, index)) {
-                fields['笔记'] = aiPick.note;
-            }
+            fields = anki.makeFields(dictionary, item.item, sentenceHTML, aiNote);
             const word = ('phrase' in item.item && item.item.phrase != null)
                 ? item.item.phrase
                 : item.item.word;
-            let audioResult = await dict.makePronunciationURL(word, pronunciationType);
-            if (audioResult == null) {
-                audioResult = {
-                    url: dict.makeYoudaoDictVoiceUrl(word, pronunciationType),
-                    dict: 'youdao'
-                };
+            // 发音地址全部不可用时不附带音频（见 addMarkerNote 的说明），不再把已判定不可用的地址交给 AnkiConnect
+            const audioResult = await operation.race(dict.makePronunciationURL(word, pronunciationType));
+            const audio = audioResult != null
+                ? {
+                    url: audioResult.url,
+                    filename: await dict.makePronunciationFilename(word, pronunciationType, audioResult.dict),
+                }
+                : null;
+            // 写入请求一旦发出，Anki 就会照常完成（含下载音频），前端放弃等待并不能撤回：
+            // 从这里起不再提供“停止”，也不把请求挂在可中止的信号上
+            if (!operation.disableStop('正在写入笔记…')) {
+                throw new Error('操作已停止');
             }
-            const audioFilename = await dict.makePronunciationFilename(word, pronunciationType, audioResult.dict);
-            operation.updateProgress('正在写入笔记…');
-            const id = await operation.race(ankiService.addMarkerNote(
-                deckName,
-                modelName,
-                fields,
-                audioResult.url,
-                audioFilename,
-                operation.signal
-            ));
+            // 笔记 id 是创建时刻的毫秒时间戳，核对时据此只看本次写入之后创建的笔记；
+            // 留出余量，容忍 AnkiConnect 在另一台机器上时的时钟偏差
+            writeStartedAt = Date.now() - WRITE_RECONCILE_CLOCK_SLACK_MS;
+            noteSent = true;
+            const id = await ankiService.addMarkerNote(deckName, modelName, fields, audio);
             if (id == null) {
                 throw new Error('addNote returns null');
             }
@@ -1010,21 +1149,28 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
             item.status = 'is-added';
             settle();
         } catch (error) {
-            item.status = 'not-added';
             const stopped = operation.stopped;
             operation.dispose();
             if (stopped) {
                 // 用户主动停止：回到未添加，给一句短提示说明“确实停了”
+                item.status = 'not-added';
                 clearCardNotice(item);
                 showCardNotice(item, { severity: 'informational', message: '已停止添加' }, 1500);
                 return;
             }
             console.error(error);
             if (phase === 'connect') {
+                item.status = 'not-added';
                 clearCardNotice(item);
                 await dialog.message(String(error), { title: '无法连接 Anki', kind: 'error' });
             } else if (phase === 'write') {
+                if (noteSent && fields != null) {
+                    await settleFailedWrite(item, error, { deckName, modelName, fields, writeStartedAt },
+                        () => { void changeItemAddedOf(dictionary, index); });
+                    return;
+                }
                 // 写入类失败通常是偶发的，就地提示并给出重试，不打断连续加卡
+                item.status = 'not-added';
                 clearCardNotice(item);
                 showCardNotice(item, {
                     severity: 'error',
@@ -1033,6 +1179,7 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
                 }, 8000, () => { void changeItemAddedOf(dictionary, index); });
             } else {
                 // 准备牌组/模板：错误框由 prepareDeckAndModel 自己弹出
+                item.status = 'not-added';
                 clearCardNotice(item);
             }
         }
@@ -1063,6 +1210,47 @@ async function changeItemAddedOf(dictionary: 'collins' | 'oxford' | 'youdao', in
             }, 8000, () => { void changeItemAddedOf(dictionary, index); });
         }
     }
+}
+
+/**
+ * 写入请求已发出却报错（超时、连接中断、AnkiConnect 报错）时决定卡片状态。
+ *
+ * 前端没等到响应不代表 Anki 没写入：先向 Anki 核对一次，确实写入了就按已添加处理（并接上笔记 id，
+ * 之后仍能移除）；确认没有才回到未添加并给出重试；连核对都失败时状态未知，回到未添加但不给“重试”，
+ * 提示用户先去 Anki 里确认，避免重复添加
+ */
+async function settleFailedWrite(
+    item: ItemModel<unknown>,
+    error: unknown,
+    write: { deckName: string; modelName: string; fields: ReturnType<typeof anki.makeFields>; writeStartedAt: number; },
+    retry: () => void,
+): Promise<void> {
+    showCardNotice(item, { severity: 'informational', message: '正在核对添加结果…', progress: true }, 0);
+    let foundId: number | null = null;
+    let reconcileFailed = false;
+    try {
+        foundId = await ankiService.findAddedMarkerNote(write.deckName, write.modelName, write.fields, write.writeStartedAt);
+    } catch (reconcileError) {
+        console.error(reconcileError);
+        reconcileFailed = true;
+    }
+    clearCardNotice(item);
+    const message = error instanceof Error ? error.message : String(error);
+    if (foundId != null) {
+        console.warn(`[anki] addNote 报错，但核对发现笔记已写入（id=${foundId}），按已添加处理`);
+        item.id = foundId;
+        item.status = 'is-added';
+        return;
+    }
+    item.status = 'not-added';
+    if (reconcileFailed) {
+        showCardNotice(item, {
+            severity: 'warning',
+            message: `无法确认是否已添加（${message}）。请先在 Anki 中查看，避免重复添加。`,
+        }, 10000);
+        return;
+    }
+    showCardNotice(item, { severity: 'error', message: `添加失败：${message}`, actionLabel: '重试' }, 8000, retry);
 }
 
 /** 词典卡片的加卡入口：操作当前所选词典中的条目 */
@@ -1121,8 +1309,17 @@ async function handleAiPickEdit() {
     }
 }
 
+/**
+ * 生成卡片例句的 HTML（标记的词加粗）。
+ *
+ * 编辑中还没点“完成”时，用户看到的是编辑框里的草稿，而 tokens 在编辑期间刻意不重建、仍是编辑前的句子：
+ * 此时按确认编辑的同一规则从草稿生成分词，加卡内容与用户所见一致，且不打断编辑
+ */
 function makeSentenceHTML(): string {
-    return tokens.value.map(
+    const source = (showEdit.value && editBaselineTokens != null)
+        ? utils.string.rebuildTokensPreservingMarks(editBaselineTokens, sentence.value.trim())
+        : tokens.value;
+    return source.map(
         ({ token, marked }) => marked
             ? `<b>${utils.string.escapeHTML(token)}</b>`
             : utils.string.escapeHTML(token)
@@ -1184,8 +1381,12 @@ onBeforeMount(async () => {
             <SettingButton @click="router.push('/settings')" />
         </div>
         <div class="sentence-container">
-            <SentencePanel :tokens="tokens" v-if="!showEdit" @mark="onMarkToken" @commit="onMarksCommitted" />
-            <FluentTextarea class="sentence-editor" v-model.trim="sentence" v-if="showEdit" ref="editTextArea"
+            <!-- 粘贴失败的就地提示：紧挨着上方的“粘贴”按钮，收起时不占高度 -->
+            <FluentStatusText class="sentence-notice" :severity="pasteNotice?.severity ?? 'error'"
+                :message="pasteNotice?.message ?? null" />
+            <SentencePanel class="sentence-main" :tokens="tokens" v-if="!showEdit" @mark="onMarkToken"
+                @commit="onMarksCommitted" />
+            <FluentTextarea class="sentence-editor sentence-main" v-model="sentence" v-if="showEdit" ref="editTextArea"
                 :placeholder="editPlaceholder" @input="onSentenceEdit" @keydown="handleEditTextAreaKeydown" />
             <SentenceCaptureRing :active="captureSettling" v-if="!showEdit" />
         </div>
@@ -1202,11 +1403,15 @@ onBeforeMount(async () => {
                     :severity="pronunciationNotice?.severity ?? 'error'"
                     :message="pronunciationNotice?.message ?? null" />
             </div>
+            <!-- 手打查询失败的就地提示：位于结果列表上方，收起时不占高度 -->
+            <FluentStatusText class="search-notice" :severity="searchNotice?.severity ?? 'error'"
+                :message="searchNotice?.message ?? null" />
             <ScrollMemory :show="selectedDict === 'collins'" class="words-container-inner">
                 <!-- AI 优选卡随列表内容滚动，每个词典容器内各放一份（内容同源）；active 标记当前可见实例，仅它播放动画 -->
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
-                    :picked-item="aiPickItem" :active="selectedDict === 'collins'" @add-btn-click="handleAiPickAdd"
-                    @edit-btn-click="handleAiPickEdit" @stop="stopAiPick" @regenerate="regenerateAiPick" />
+                    :picked-item="aiPickItem" :notice="aiPickNotice" :active="selectedDict === 'collins'"
+                    @add-btn-click="handleAiPickAdd" @edit-btn-click="handleAiPickEdit" @stop="stopAiPick"
+                    @regenerate="regenerateAiPick" @notice-action="handleAiPickNoticeAction" />
                 <CollinsCard v-for="(item, index) in wordItems['collins']" :key="index" :item="item.item" :index="index"
                     :status="item.status" :notice="item.notice" :ai-picked="isAiPicked('collins', index)"
                     @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog"
@@ -1214,8 +1419,9 @@ onBeforeMount(async () => {
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'oxford'" class="words-container-inner">
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
-                    :picked-item="aiPickItem" :active="selectedDict === 'oxford'" @add-btn-click="handleAiPickAdd"
-                    @edit-btn-click="handleAiPickEdit" @stop="stopAiPick" @regenerate="regenerateAiPick" />
+                    :picked-item="aiPickItem" :notice="aiPickNotice" :active="selectedDict === 'oxford'"
+                    @add-btn-click="handleAiPickAdd" @edit-btn-click="handleAiPickEdit" @stop="stopAiPick"
+                    @regenerate="regenerateAiPick" @notice-action="handleAiPickNoticeAction" />
                 <OxfordCard v-for="(item, index) in wordItems['oxford']" :key="index" :item="item.item" :index="index"
                     :status="item.status" :notice="item.notice" :ai-picked="isAiPicked('oxford', index)"
                     @add-btn-click="changeItemAdded" @edit-btn-click="openEditDialog"
@@ -1223,8 +1429,9 @@ onBeforeMount(async () => {
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'youdao'" class="words-container-inner">
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
-                    :picked-item="aiPickItem" :active="selectedDict === 'youdao'" @add-btn-click="handleAiPickAdd"
-                    @edit-btn-click="handleAiPickEdit" @stop="stopAiPick" @regenerate="regenerateAiPick" />
+                    :picked-item="aiPickItem" :notice="aiPickNotice" :active="selectedDict === 'youdao'"
+                    @add-btn-click="handleAiPickAdd" @edit-btn-click="handleAiPickEdit" @stop="stopAiPick"
+                    @regenerate="regenerateAiPick" @notice-action="handleAiPickNoticeAction" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['concise'].length > 0" class="youdao-title">
                     简明释义
                 </div>
@@ -1297,6 +1504,33 @@ onBeforeMount(async () => {
     overflow-y: hidden;
     /* SentenceCaptureRing 以此为定位基准，钉在句子面板右下角 */
     position: relative;
+    /* 纵向排布：顶部可能有一行粘贴失败提示，句子面板（或编辑框）占满其余高度 */
+    display: flex;
+    flex-direction: column;
+}
+
+/* 句子面板与编辑框：占满提示行之外的高度（flex-basis 0 让自身的 height: 100% 不再生效） */
+.sentence-main {
+    flex: 1 1 0;
+    min-height: 0;
+}
+
+/* 句子区与结果区上方的就地提示：间距放在提示下方，并留在被折叠的区域内，收起时不留空档 */
+.sentence-notice,
+.search-notice {
+    --status-gap: 0px;
+    flex-shrink: 0;
+}
+
+.sentence-notice :deep(.status-text),
+.search-notice :deep(.status-text) {
+    padding-bottom: 8px;
+}
+
+/* 与结果列表左右内边距对齐 */
+.search-notice {
+    padding-left: calc(15px / 2);
+    padding-right: 15px;
 }
 
 .words-container {

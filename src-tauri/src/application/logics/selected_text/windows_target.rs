@@ -61,9 +61,10 @@ use ::windows::Win32::System::Threading::{
 };
 use ::windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    GetClassNameW, GetForegroundWindow, GetMessageW, GetWindowLongPtrW, GetWindowThreadProcessId,
-    IsWindow, IsWindowVisible, SetForegroundWindow, EVENT_SYSTEM_FOREGROUND, GWL_EXSTYLE, MSG,
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GetAncestor, GetClassNameW, GetForegroundWindow, GetMessageW, GetWindowLongPtrW,
+    GetWindowThreadProcessId, IsWindow, IsWindowVisible, SetForegroundWindow,
+    EVENT_SYSTEM_FOREGROUND, GA_ROOT, GWL_EXSTYLE, MSG, WINEVENT_OUTOFCONTEXT,
+    WINEVENT_SKIPOWNPROCESS, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 /// 归还前台的等待上限与轮询间隔。`SetForegroundWindow` 的生效是异步的（前台状态在该
@@ -253,6 +254,72 @@ pub fn foreground_is_own() -> bool {
     return !hwnd.0.is_null() && belongs_to_self(hwnd);
 }
 
+/// 前台窗口是终端时返回其描述（用于日志与错误信息），否则返回 None。
+///
+/// 终端里 Ctrl+C 不是“复制”：Windows Terminal 只在有选区时才当复制，没有选区就把 ^C
+/// 发给 shell，正在跑的构建或服务会被中断，所以注入前必须先判断（见
+/// selected_text::windows 的 copy_via_ctrl_c）。按窗口类判断为主；窗口类没有辨识度或
+/// 不稳定的终端再按进程名判断。
+///
+/// 已知限制：VS Code 集成终端与编辑器同窗口同进程，这里分辨不出，仍会注入。
+pub fn foreground_terminal() -> Option<String> {
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground.0.is_null() {
+        return None;
+    }
+    let root = unsafe { GetAncestor(foreground, GA_ROOT) };
+    for hwnd in [foreground, root] {
+        if hwnd.0.is_null() {
+            continue;
+        }
+        let class = window_class(hwnd);
+        if is_terminal_class(&class) {
+            return Some(format!("window class {class:?}"));
+        }
+    }
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(foreground, Some(&mut pid as *mut u32)) };
+    let name = process_image_name(pid)?;
+    if is_terminal_process(&name) {
+        return Some(format!("process {name:?}"));
+    }
+    return None;
+}
+
+/// 终端的顶层窗口类：conhost、Windows Terminal、mintty（Git Bash/MSYS2/Cygwin）、
+/// PuTTY 系、ConEmu、WezTerm、Tera Term、MobaXterm。
+fn is_terminal_class(class: &str) -> bool {
+    const TERMINAL_CLASSES: [&str; 10] = [
+        "ConsoleWindowClass",
+        "CASCADIA_HOSTING_WINDOW_CLASS",
+        "mintty",
+        "PuTTY",
+        "PuTTYtel",
+        "KiTTY",
+        "VirtualConsoleClass",
+        "org.wezfurlong.wezterm",
+        "VTWin32",
+        "TMobaXtermForm",
+    ];
+    return TERMINAL_CLASSES.contains(&class);
+}
+
+/// 只能靠进程名识别的终端（Windows 文件名不区分大小写）：
+/// 例如 Tabby/Hyper 的窗口类是 Electron 通用的 Chrome_WidgetWin_1。
+fn is_terminal_process(name: &str) -> bool {
+    const TERMINAL_PROCESSES: [&str; 6] = [
+        "alacritty.exe",
+        "tabby.exe",
+        "hyper.exe",
+        "warp.exe",
+        "xshell.exe",
+        "securecrt.exe",
+    ];
+    return TERMINAL_PROCESSES
+        .iter()
+        .any(|terminal| terminal.eq_ignore_ascii_case(name));
+}
+
 /// 丢弃已记录的目标窗口。
 ///
 /// 供非菜单路径（全局快捷键）的取词调用：那条路径不经过托盘菜单，清掉记录可以避免
@@ -369,4 +436,41 @@ fn window_class(hwnd: HWND) -> String {
         return "?".to_string();
     }
     return String::from_utf16_lossy(&buffer[..length as usize]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_terminal_class, is_terminal_process};
+
+    #[test]
+    fn terminal_classes_match_exactly() {
+        for class in [
+            "ConsoleWindowClass",
+            "CASCADIA_HOSTING_WINDOW_CLASS",
+            "mintty",
+            "PuTTY",
+            "org.wezfurlong.wezterm",
+        ] {
+            assert!(is_terminal_class(class), "{class}");
+        }
+        // 浏览器、编辑器、UWP 外框不是终端：误判会让它们失去 Ctrl+C 回退
+        for class in [
+            "Chrome_WidgetWin_1",
+            "Notepad",
+            "ApplicationFrameWindow",
+            "PuTTYConfigBox",
+            "?",
+            "",
+        ] {
+            assert!(!is_terminal_class(class), "{class}");
+        }
+    }
+
+    #[test]
+    fn terminal_processes_match_case_insensitively() {
+        assert!(is_terminal_process("Tabby.exe"));
+        assert!(is_terminal_process("ALACRITTY.EXE"));
+        assert!(!is_terminal_process("chrome.exe"));
+        assert!(!is_terminal_process("Code.exe"));
+    }
 }

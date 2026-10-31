@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, watch } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import FluentDialogShell from './FluentDialogShell.vue';
 import type { ContentDialogHostState } from './ContentDialog';
 import ErrorIcon from '../assets/dialog-icons/error.svg?component';
@@ -23,19 +23,23 @@ const emit = defineEmits<{
     command: [key: string];
 }>();
 
+/** 弹窗外壳（聚焦经外壳暴露的方法转发，只在本宿主自己的弹窗 DOM 内查找） */
+const shell = ref<{ focusDefaultCommand: () => void } | null>(null);
+
 // 打开时聚焦默认（accent）按钮，对齐 WinUI ContentDialog 的 DefaultButton 焦点行为，
-// 使 Enter 直接触发确认、Tab 可在按钮间移动
+// 使 Enter 直接触发确认、Tab 可在按钮间移动。只在本宿主自己的弹窗里找：宿主首次使用时才
+// append 到 body，排在已打开的弹窗之后，全局查询会选中下层弹窗的默认按钮
 watch(() => props.host.open, open => {
     if (open) {
         void nextTick(() => {
-            document.querySelector<HTMLElement>('.fluent-dialog .command-button.accent')?.focus();
+            shell.value?.focusDefaultCommand();
         });
     }
 });
 </script>
 
 <template>
-    <FluentDialogShell :open="host.open" :title="host.request?.title ?? ''"
+    <FluentDialogShell ref="shell" :open="host.open" :title="host.request?.title ?? ''"
         :commands="host.request?.commands ?? []"
         @close="emit('close')" @command="emit('command', $event)">
         <template v-if="host.request?.kind === 'error'" #title-icon>

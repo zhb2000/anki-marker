@@ -1,7 +1,7 @@
 import { AnkiConnectApi } from './anki-connect';
 import { typeAssertion } from './typing';
 import type { CollinsItem, OxfordItem, YoudaoItem } from './dict';
-import { escapeHTML } from './stringutils';
+import { decodeHtmlEntities, escapeHTML } from './stringutils';
 
 /**
  * Anki 服务类，在 Anki Connect API 的基础上针对应用的需求进行了封装。
@@ -67,30 +67,84 @@ export class AnkiService extends AnkiConnectApi {
         return extractCardTemplateVersion(template.qfmt);
     }
 
-    /** 添加一条划词助手单词笔记 */
+    /**
+     * 添加一条划词助手单词笔记。
+     *
+     * audio 为 null 表示没有可用的发音地址，此时不附带音频：AnkiConnect 下载失败时不报错，
+     * 而是把错误信息追加进“发音”字段，卡片上会出现一段错误文本。
+     */
     public async addMarkerNote(
         deckName: string,
         modelName: string,
         fields: Fields,
-        audioURL: string,
-        audioFilename: string,
+        audio: { url: string; filename: string; } | null,
         signal?: AbortSignal
     ): Promise<number | null> {
         return await this.addNote(
             deckName,
             modelName,
             { ...fields }, // fields
-            [
-                {
-                    url: audioURL,
-                    filename: audioFilename,
-                    fields: ['发音']
-                }
-            ], // audio
+            audio != null
+                ? [{ url: audio.url, filename: audio.filename, fields: ['发音'] }]
+                : undefined, // audio
             { allowDuplicate: true }, // options
             signal
         );
     }
+
+    /**
+     * 核对一条划词助手笔记是否其实已经写入 Anki，返回其笔记 id，没有则返回 null。
+     *
+     * 用于 addNote 超时或连接中断之后：前端放弃等待并不会让 Anki 停止写入，若直接按
+     * “未添加”处理，用户重试就会产生重复笔记（allowDuplicate 为 true），且应用已失去对第一条的引用。
+     * AnkiConnect 在 Anki 主线程上逐个处理请求，因此这里的查询会排在那次 addNote 之后执行，
+     * 看到的是它完成后的结果。
+     *
+     * 判定条件：笔记 id（即创建时刻的毫秒时间戳）不早于 since，模板、牌组一致，
+     * 且“单词”“例句”“释义”三个字段与写入的内容逐字一致。
+     */
+    public async findAddedMarkerNote(
+        deckName: string,
+        modelName: string,
+        fields: Fields,
+        since: number
+    ): Promise<number | null> {
+        // added:2 覆盖今天和昨天：写入恰好跨过 Anki 的每日分界点时也不会漏掉。
+        // 不在查询串里写牌组、模板名：它们可能含 Anki 搜索语法的特殊字符，改为取回详情后比对
+        const noteIds = await this.invoke<number[]>('findNotes', { query: 'added:2' });
+        const candidates = noteIds.filter(id => id >= since);
+        if (candidates.length === 0) {
+            return null;
+        }
+        const notes = await this.invoke<{
+            noteId: number;
+            modelName: string;
+            fields: Record<string, { value: string; order: number; }>;
+            cards: number[];
+        }[]>('notesInfo', { notes: candidates });
+        const matched = notes.filter(note => note.modelName === modelName
+            && isSameFieldValue(note.fields['单词']?.value, fields['单词'])
+            && isSameFieldValue(note.fields['例句']?.value, fields['例句'])
+            && isSameFieldValue(note.fields['释义']?.value, fields['释义']));
+        for (const note of matched) {
+            if (note.cards.length === 0) {
+                continue;
+            }
+            const cards = await this.invoke<{ deckName: string; }[]>('cardsInfo', { cards: note.cards });
+            if (cards.some(card => card.deckName === deckName)) {
+                return note.noteId;
+            }
+        }
+        return null;
+    }
+}
+
+/**
+ * 比较 Anki 中存储的字段值与写入值：Anki 默认会把字段文本规范化为 NFC，
+ * 从 PDF 等来源取到的分解形式字符写入后会变样，比较前两边统一规范化
+ */
+function isSameFieldValue(stored: string | undefined, written: string | undefined): boolean {
+    return (stored ?? '').normalize('NFC') === (written ?? '').normalize('NFC');
 }
 
 /** 划词助手笔记模板的字段 */
@@ -144,39 +198,62 @@ function makeMeaningFromYoudao(item: YoudaoItem): string | null {
     return (meaning.length > 0) ? meaning.join('<br>') : null;
 }
 
-/** 根据单词释义和例句生成划词助手单词笔记的字段 */
+/**
+ * 把纯文本转成可安全写入 Anki 字段的 HTML（Anki 字段按 HTML 渲染）。
+ *
+ * 先解码再转义：牛津词库里的部分词条本身已是实体编码（如 `A &amp; E`），直接转义会变成
+ * `&amp;amp;`，卡片上显示出实体原文；先解码成纯文本再转义，对已编码与未编码的输入都只编码一次
+ */
+export function toFieldText(text: string): string {
+    return escapeHTML(decodeHtmlEntities(text));
+}
+
+/**
+ * 根据单词释义和例句生成划词助手单词笔记的字段。
+ *
+ * @param sentence 已是 HTML 的例句（调用方负责转义与加粗标记）
+ * @param note AI 生成的笔记（纯文本），为空时不写“笔记”字段
+ */
 export function makeFields(
     dict: 'collins' | 'oxford' | 'youdao',
     item: CollinsItem | OxfordItem | YoudaoItem,
-    sentence: string
+    sentence: string,
+    note?: string | null
 ): Fields {
+    let fields: Fields;
     if (dict === 'collins') {
         typeAssertion<CollinsItem>(item);
-        return {
-            '单词': item.word,
-            '音标': item.phonetic ?? undefined,
+        fields = {
+            '单词': toFieldText(item.word),
+            '音标': item.phonetic != null ? toFieldText(item.phonetic) : undefined,
             '释义': makeMeaning(item) ?? undefined,
             '例句': sentence
         };
     } else if (dict === 'oxford') {
         typeAssertion<OxfordItem>(item);
-        return {
-            '单词': item.phrase ?? item.word,
-            '音标': item.phonetic ?? undefined,
+        fields = {
+            '单词': toFieldText(item.phrase ?? item.word),
+            '音标': item.phonetic != null ? toFieldText(item.phonetic) : undefined,
             '释义': makeMeaning(item) ?? undefined,
             '例句': sentence
         };
     } else if (dict === 'youdao') {
         typeAssertion<YoudaoItem>(item);
-        return {
-            '单词': item.word,
-            '音标': item.phonetic ?? undefined,
+        fields = {
+            '单词': toFieldText(item.word),
+            '音标': item.phonetic != null ? toFieldText(item.phonetic) : undefined,
             '释义': makeMeaningFromYoudao(item) ?? undefined,
             '例句': sentence
         };
     } else {
         throw new Error(`Unknown dict: ${String(dict)}`);
     }
+    // LLM 输出是纯文本，可能含 sb. < sth.、A & B，也可能被网页里的句子诱导输出标签，
+    // 必须转义后再写入（模板以 {{笔记}} 原样输出 HTML）
+    if (note != null && note.length > 0) {
+        fields['笔记'] = escapeHTML(note);
+    }
+    return fields;
 }
 
 import MODEL_FRONT from '../assets/model-front.html?raw';

@@ -67,20 +67,22 @@ pub fn read_config(
     return logics::config::read_config(config_path);
 }
 
+/// async + 阻塞线程池：原子写入要 sync_all 落盘，慢磁盘上可能耗时较长，不能占住主线程
+/// （快捷键重注册与图标显隐本就会从配置监视线程调用，不要求在主线程执行）
 #[tauri::command(rename_all = "snake_case")]
-pub fn commit_config(
-    modified: PartialConfig,
-    config_path: State<ConfigPath>,
-    app: AppHandle,
-) -> Result<(), String> {
-    let config_path: &Path = config_path.0.as_ref();
-    logics::config::commit_config(config_path, modified)?;
-    // 配置保存后立即更新全局快捷键注册，使设置页获得即时反馈；
-    // 配置文件监视器随后触发的重注册是幂等的兜底
-    super::shortcut::update_from_config(&app);
-    // 保存后若应用正处于后台运行，立即按新配置应用 Dock/菜单栏图标显隐
-    super::menubar::on_config_changed(&app);
-    return Ok(());
+pub async fn commit_config(modified: PartialConfig, app: AppHandle) -> Result<(), String> {
+    return logics::utils::run_blocking(move || {
+        let config_path = app.state::<ConfigPath>();
+        let config_path: &Path = config_path.0.as_ref();
+        logics::config::commit_config(config_path, modified)?;
+        // 配置保存后立即更新全局快捷键注册，使设置页获得即时反馈；
+        // 配置文件监视器随后触发的重注册是幂等的兜底
+        super::shortcut::update_from_config(&app);
+        // 保存后若应用正处于后台运行，立即按新配置应用 Dock/菜单栏图标显隐
+        super::menubar::on_config_changed(&app);
+        return Ok(());
+    })
+    .await;
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -93,19 +95,36 @@ pub fn is_portable(portable: State<Portable>) -> bool {
     return portable.0;
 }
 
-#[tauri::command(rename_all = "snake_case")]
-pub fn show_in_explorer(path: String) -> Result<(), String> {
-    return logics::utils::show_in_explorer(&path);
+/// 前端传入的路径必须是配置文件本身。
+///
+/// 打开/定位文件的命令只为“配置文件”服务（设置页的“打开所在目录”），而系统的打开
+/// 操作可以启动任意程序（macOS 的 .app/.command、Windows 的 .exe/.bat），不能接受
+/// 任意路径，否则网页里的任何一处注入都能借此执行本地程序。
+fn ensure_config_path(path: &str, config_path: &str) -> Result<(), String> {
+    if Path::new(path) != Path::new(config_path) {
+        return Err(format!(
+            "refused to open a path other than the config file: {path}"
+        ));
+    }
+    return Ok(());
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn open_filepath(path: String) -> Result<(), String> {
-    return logics::utils::open_filepath(&path);
+pub async fn show_in_explorer(path: String, app: AppHandle) -> Result<(), String> {
+    ensure_config_path(&path, &app.state::<ConfigPath>().0)?;
+    return logics::utils::run_blocking(move || logics::utils::show_in_explorer(&path)).await;
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn open_in_browser(url: String) -> Result<(), String> {
-    return logics::utils::open_in_browser(&url);
+pub async fn open_filepath(path: String, app: AppHandle) -> Result<(), String> {
+    ensure_config_path(&path, &app.state::<ConfigPath>().0)?;
+    return logics::utils::run_blocking(move || logics::utils::open_filepath(&path)).await;
+}
+
+/// 只允许白名单内的 URL scheme（见 logics::utils::open_in_browser）
+#[tauri::command(rename_all = "snake_case")]
+pub async fn open_in_browser(url: String) -> Result<(), String> {
+    return logics::utils::run_blocking(move || logics::utils::open_in_browser(&url)).await;
 }
 
 pub struct IsWatching(pub Mutex<bool>);
@@ -165,4 +184,30 @@ pub fn start_config_watcher(
 #[tauri::command(rename_all = "snake_case")]
 pub fn rust_in_release() -> Result<bool, String> {
     return Ok(!cfg!(debug_assertions));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_config_path;
+
+    #[test]
+    fn only_config_path_can_be_opened() {
+        let config_path = std::env::temp_dir().join("anki-marker").join("config.toml");
+        let config_path = config_path.to_string_lossy().into_owned();
+        assert!(ensure_config_path(&config_path, &config_path).is_ok());
+        for path in [
+            "/Applications/Calculator.app",
+            "C:\\Windows\\System32\\calc.exe",
+            "",
+        ] {
+            assert!(
+                ensure_config_path(path, &config_path).is_err(),
+                "path = {path}"
+            );
+        }
+        let sibling = std::env::temp_dir()
+            .join("anki-marker")
+            .join("evil.command");
+        assert!(ensure_config_path(&sibling.to_string_lossy(), &config_path).is_err());
+    }
 }

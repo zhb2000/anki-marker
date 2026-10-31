@@ -148,16 +148,12 @@ fn main() {
             // 必须在这里就启动——记录的是用户此前所在的应用，等要用时再跟踪就晚了
             #[cfg(target_os = "windows")]
             application::logics::selected_text::windows_target::install_foreground_watcher();
-            // Windows：监听任务栏（系统“Windows 模式”）深浅变化，托盘图标跟随系统时实时换图。
+            // 主窗口的原生挂载（窗口重建后由 show_and_focus_main_window 重新挂载）：
+            // - Windows：监听任务栏（系统“Windows 模式”）深浅变化，托盘图标跟随系统时实时换图；
+            // - macOS：覆盖式标题栏（Overlay）隐藏了标题，系统不再处理标题栏双击，
+            //   由原生事件监听按系统偏好补上缩放/最小化。
             // 需在窗口创建之后挂载（config 中的窗口在 setup 之前已创建）
-            #[cfg(target_os = "windows")]
-            application::menubar::install_tray_theme_listener(app.handle());
-            // macOS：覆盖式标题栏（Overlay）隐藏了标题，系统不再处理标题栏双击，
-            // 由原生事件监听按系统偏好补上缩放/最小化
-            #[cfg(target_os = "macos")]
-            if let Some(window) = app.get_webview_window("main") {
-                application::window::install_titlebar_monitor(&window);
-            }
+            application::window::install_main_window_hooks(app.handle());
 
             // 静默启动判定：
             // - macOS：AppleScript 登录项带 hidden 标志拉起时，进程自启动起即处于
@@ -231,6 +227,8 @@ fn main() {
             application::shortcut::is_accessibility_trusted,
             application::shortcut::request_accessibility_trust,
             application::shortcut::get_shortcut_registration,
+            application::shortcut::suspend_global_shortcut,
+            application::shortcut::resume_global_shortcut,
             application::window::set_window_background,
         ])
         .build(tauri::generate_context!())

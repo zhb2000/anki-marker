@@ -16,6 +16,10 @@ export class AnkiConnectApi {
     }
 
     public async invoke<T>(action: string, params?: Record<string, any>, signal?: AbortSignal): Promise<T> {
+        // 已中止的信号不会再触发 abort 事件：不提前退出的话，请求会一直跑到超时
+        if (signal?.aborted) {
+            throw new DOMException(`AnkiConnect 请求已取消（动作 ${action}）`, 'AbortError');
+        }
         // 调用方信号与默认超时合并成一个内部信号（WebView 对 AbortSignal.any 支持不一致，手动合并）
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);

@@ -4,8 +4,12 @@
  * - 页面直接 v-model 读写 state，不再手写镜像 ref 与防抖保存逻辑
  * - state 与 Config 单例之间的同步：
  *   1. init / syncFromConfig：Config → state（全键拷贝）
- *   2. watch(state)：state → Config（遍历 CONFIG_KEYS 找 diff 逐键写入），并防抖 commit 落盘
- * - 与现状一致：不监听 'config-changed'，页面驻留期间不同步外部修改，进入设置页时 syncFromConfig
+ *   2. watch(state)：state → Config，只写入本次真正被修改的键（与上一份 state 快照求 diff），
+ *      并防抖 commit 落盘
+ *   3. watch(Config)：Config → state。外部修改配置文件后 'config-changed' 触发 Config.reload，
+ *      reload 更新的是响应式 Config，这里把变化的键回拷到 state，页面驻留期间也能看到外部修改
+ * - 为什么必须只写“真正变化的键”：若按 state 与 Config 的差异全量写回，外部修改过的键在 state
+ *   里仍是旧值，用户随便改一项其他设置，就会把外部修改悄悄改回去并落盘
  */
 
 import { reactive, ref, watch, type Ref } from 'vue';
@@ -51,6 +55,11 @@ function createSettingsStore(): SettingsStore {
     const state = reactive({ ...CONFIG_DEFAULTS }) as ConfigModel;
     const ready = ref(false);
     let config: Config | null = null;
+    /**
+     * 上一次已与 Config 对齐的 state 快照。watch(state) 与它求 diff 得出用户本次修改的键；
+     * Config → state 的回拷同时更新快照，所以回拷本身不会被当成用户修改而写回
+     */
+    const lastSyncedState = { ...CONFIG_DEFAULTS } as ConfigModel;
 
     /** 提交 config 落盘，失败时弹窗报错（文案沿用原设置页） */
     async function commitConfig(): Promise<void> {
@@ -68,12 +77,18 @@ function createSettingsStore(): SettingsStore {
     /** 防抖自动保存：连续修改期间持续触发会重置计时，停止一段时间后自动保存 */
     const debouncedCommitConfig = debounce(() => void commitConfig(), COMMIT_DEBOUNCE_MS);
 
+    /** Config → state 回拷单个键，并同步快照（避免被 watch(state) 当成用户修改写回） */
+    function syncKeyFromConfig<K extends keyof ConfigModel>(source: Config, key: K): void {
+        syncStoreKey(state, source, key);
+        syncStoreKey(lastSyncedState, source, key);
+    }
+
     function syncFromConfig(): void {
         if (config == null) {
             return;
         }
         for (const key of CONFIG_KEYS) {
-            syncStoreKey(state, config, key);
+            syncKeyFromConfig(config, key);
         }
     }
 
@@ -85,15 +100,16 @@ function createSettingsStore(): SettingsStore {
             initPromise = (async () => {
                 config = await globals.getConfig();
                 syncFromConfig();
-                // state 的任何修改：找出与 config 不一致的键写入 config（Config 的 setter 自带脏标记，
-                // 重复写同值无开销），然后防抖保存；键都是原始值，无需 deep watch
+                // state 的修改：与快照求 diff，只把用户本次改动的键写入 config（Config 的 setter
+                // 自带脏标记），然后防抖保存；键都是原始值，无需 deep watch
                 watch(state, () => {
                     if (config == null) {
                         return;
                     }
                     let changed = false;
                     for (const key of CONFIG_KEYS) {
-                        if (state[key] !== config[key]) {
+                        if (state[key] !== lastSyncedState[key]) {
+                            syncStoreKey(lastSyncedState, state, key);
                             syncStoreKey(config, state, key);
                             changed = true;
                         }
@@ -101,6 +117,16 @@ function createSettingsStore(): SettingsStore {
                     if (changed) {
                         debouncedCommitConfig();
                     }
+                });
+                // config 的变化（外部修改配置文件后的 reload，或其他页面直接改 config）：回拷到 state。
+                // 自己刚写入 config 的键回拷的是同一个值，无副作用
+                const cfg = config;
+                watch(() => CONFIG_KEYS.map(key => cfg[key]), (newValues, oldValues) => {
+                    CONFIG_KEYS.forEach((key, index) => {
+                        if (newValues[index] !== oldValues[index]) {
+                            syncKeyFromConfig(cfg, key);
+                        }
+                    });
                 });
                 ready.value = true;
             })();

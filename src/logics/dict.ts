@@ -92,9 +92,7 @@ function splitYoudaoCustomTranslationContent(content: string): [string | null, s
 
 export async function searchYoudao(query: string): Promise<YoudaoItem[]> {
     const searchResult = await youdao.searchYoudaoDict(query);
-    if (searchResult.customTranslations.length === 0) {
-        return [];
-    }
+    // 没有简明释义时（如短语、专有名词）仍继续输出网络释义与短语条目，不能直接返回空
     let phonetic: string | null = null;
     if (searchResult.ukPhoneticSymbol != null) {
         phonetic = `英[${searchResult.ukPhoneticSymbol}]`;
@@ -247,6 +245,11 @@ async function findFirstValidAudio(urls: string[], timeoutMs: number): Promise<n
     });
 }
 
+/**
+ * 按优先级（有道发音 → 有道 dictvoice → 金山 TTS）找出第一个可播放的发音地址。
+ * 所有地址都不可用时返回 null：调用方此时不应再传任何发音地址给 AnkiConnect，
+ * 否则 addMedia 下载失败会把错误信息写进“发音”字段。
+ */
 export async function makePronunciationURL(word: string, pronunciationType: 'en' | 'us'): Promise<{ url: string, dict: 'youdao' | 'iciba'; } | null> {
     const youdaoPronunciationUrl = youdao.makeYoudaoPronounceUrl(word, { type: pronunciationType === 'en' ? '1' : '2' });
     const youdaoDictVoiceUrl = youdao.makeYoudaoDictVoiceUrl(word, pronunciationType);
