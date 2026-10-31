@@ -60,7 +60,8 @@ const tooltipTitle = computed(() => settingsNeedAttention.value ? '设置（有�
     width: 100%;
     height: 100%;
     background-color: var(--control-text-color);
-    mask-image: url('../assets/settings.svg');
+    /* 与设置页侧栏“通用”共用同一个 Fluent 齿轮图标 */
+    mask-image: url('../assets/settings-icons/general.svg');
     mask-repeat: no-repeat;
     mask-position: center center;
     mask-size: 60% 60%;

@@ -265,13 +265,15 @@ onActivated(() => {
     overflow: auto;
 }
 
-/* WinUI NavigationViewItem 规格: 36px 高胶囊、Subtle 系列背景 */
+/* WinUI NavigationViewItem 规格: 36px 高胶囊、Subtle 系列背景。
+   图标列宽 40px（CompactPaneLength 48 - 8）居中、文字左距 44px（40 + ContentPresenter margin 4）:
+   左内边距 10 + 图标 20 → 图标中心 20px；再加间距 14 → 文字起点 44px */
 .nav-item {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 14px;
     min-height: 36px;
-    padding: 0 12px;
+    padding: 0 12px 0 10px;
     margin-bottom: 4px;
     border-radius: var(--border-radius);
     color: var(--control-text-color);

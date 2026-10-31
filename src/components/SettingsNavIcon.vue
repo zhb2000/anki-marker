@@ -27,9 +27,11 @@ defineProps<{ name: SettingsNavIconName }>();
 </template>
 
 <style scoped>
+/* 按 20px 渲染 Fluent System Icons 20_regular 栅格：图形约 16px、线宽 1px，
+   与 WinUI NavigationView 中 Segoe Fluent 字形在 16px IconBox 内的视觉尺寸一致 */
 .settings-nav-svg {
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
     display: block;
 }
 </style>
