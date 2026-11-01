@@ -5,22 +5,24 @@ import {
     captureFailureDialog,
     createCaptureDelivery,
     isSameCapturedPayload,
-    markCapturedWord,
     planCapturedSentence,
+    selectionForCapturedWord,
     type CapturedSentencePayload,
 } from './captureLogic';
-import type { SentenceToken } from './types';
+import { selectionWords } from './selection';
+import type { SentenceToken, TokenSelection } from './types';
 
 function payload(overrides: Partial<CapturedSentencePayload> = {}): CapturedSentencePayload {
     return { text: 'The quick brown fox.', word: 'fox', wordOffset: 16, retry: false, ...overrides };
 }
 
 function tokensOf(text: string): SentenceToken[] {
-    return tokenize(text).map(token => ({ token, marked: false }));
+    return tokenize(text).map(token => ({ token }));
 }
 
-function markedOf(tokens: SentenceToken[]): string[] {
-    return tokens.filter(t => t.marked).map(t => t.token);
+/** 选区命中的单词（顺带证明区间里的词就是取词命中的那些） */
+function selectedOf(tokens: SentenceToken[], selection: TokenSelection | null): string[] {
+    return selectionWords(tokens, selection);
 }
 
 describe('planCapturedSentence', () => {
@@ -108,47 +110,41 @@ describe('createCaptureDelivery', () => {
     });
 });
 
-describe('markCapturedWord', () => {
-    it('按偏移标记真正被选中的那一处', () => {
+describe('selectionForCapturedWord', () => {
+    it('按偏移选中真正被选中的那一处', () => {
         const text = 'fox and fox';
         const tokens = tokensOf(text);
-        markCapturedWord(tokens, 'fox', 8, text);
-        expect(tokens.map(t => t.marked)).toEqual([false, false, false, false, true]);
+        expect(selectionForCapturedWord(tokens, 'fox', 8, text)).toEqual({ start: 4, end: 4 });
     });
 
     it('偏移与文本不符时退回字符串匹配（先精确、再忽略大小写）', () => {
         const text = 'The Fox and the fox';
         const tokens = tokensOf(text);
-        markCapturedWord(tokens, 'fox', 0, text);
-        expect(tokens.findIndex(t => t.marked)).toBe(tokens.length - 1);
+        expect(selectionForCapturedWord(tokens, 'fox', 0, text)).toEqual({ start: tokens.length - 1, end: tokens.length - 1 });
         const caseOnly = tokensOf('The Fox runs');
-        markCapturedWord(caseOnly, 'fox', null, 'The Fox runs');
-        expect(markedOf(caseOnly)).toEqual(['Fox']);
+        expect(selectedOf(caseOnly, selectionForCapturedWord(caseOnly, 'fox', null, 'The Fox runs'))).toEqual(['Fox']);
     });
 
-    it('短语匹配连续的单词词元', () => {
+    it('短语选中连续的单词词元', () => {
         const text = 'He gave up, then gave it up.';
         const tokens = tokensOf(text);
-        markCapturedWord(tokens, 'gave  up', null, text);
-        expect(markedOf(tokens)).toEqual(['gave', 'up']);
-        expect(tokens.findIndex(t => t.marked)).toBe(2);
+        const selection = selectionForCapturedWord(tokens, 'gave  up', null, text);
+        expect(selection).toEqual({ start: 2, end: 4 });
+        expect(selectedOf(tokens, selection)).toEqual(['gave', 'up']);
     });
 
     it('复合词元内按连接符整段命中，不做任意子串匹配', () => {
         const text = 'An encoder-decoder model.';
         const tokens = tokensOf(text);
-        markCapturedWord(tokens, 'encoder', null, text);
-        expect(markedOf(tokens)).toEqual(['encoder-decoder']);
+        expect(selectedOf(tokens, selectionForCapturedWord(tokens, 'encoder', null, text))).toEqual(['encoder-decoder']);
         const none = tokensOf(text);
-        markCapturedWord(none, 'code', null, text);
-        expect(markedOf(none)).toEqual([]);
+        expect(selectionForCapturedWord(none, 'code', null, text)).toBe(null);
     });
 
-    it('选区横跨多个词元时标记所有相交的单词词元', () => {
+    it('选区横跨多个词元时命中所有相交的单词词元', () => {
         const text = 'big brown fox';
         const tokens = tokensOf(text);
-        markCapturedWord(tokens, 'own fo', 6, text);
-        expect(markedOf(tokens)).toEqual(['brown', 'fox']);
+        expect(selectedOf(tokens, selectionForCapturedWord(tokens, 'own fo', 6, text))).toEqual(['brown', 'fox']);
     });
 });
 

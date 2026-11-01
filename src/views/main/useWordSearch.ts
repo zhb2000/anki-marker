@@ -10,13 +10,13 @@ import type { DictName, ItemModel, WordItems } from './types';
 /** 单词搜索：搜索框、词典与发音选项、各词典的搜索结果 */
 export function useWordSearch() {
     /**
-     * 搜索框文本：查询的唯一真源。只由“用户授权的输入”写入——用户手打，或用户标记手势结束时
-     * 把标记词元快送进来（见 MainView 的 onMarksCommitted）；捕获初始化属初始状态的一部分，也直接写入
+     * 搜索框文本：查询的唯一真源。只由“用户授权的输入”写入——用户手打，或选区手势结束时
+     * 把选中的词快送进来（见 MainView 的 onSelectionCommitted）；捕获初始化属初始状态的一部分，也直接写入
      * （见 useCaptureListener 的 applyCapturedSentence）。
      *
-     * 反向不成立：标记状态不是 searchText 的函数变换。标记只是展示状态与“快送”手势的产物，
-     * 程序化写 marked（取句预选、编辑重建分词）绝不改写查询——分词粒度与选区不一致时
-     * （如只选中 encoder-decoder 里的 encoder），那个词元上的标记与查询本就允许不等价。
+     * 反向不成立：选区不是 searchText 的函数变换。选区只是展示状态与“快送”手势的产物，
+     * 程序化写选区（取句预选、编辑重建分词）绝不改写查询——分词粒度与选区不一致时
+     * （如只选中 encoder-decoder 里的 encoder），那个词元上的选区与查询本就允许不等价。
      */
     const searchText = ref('');
     /** 所选的字典 */

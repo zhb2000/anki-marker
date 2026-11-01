@@ -21,6 +21,7 @@ import {
     ScrollMemory
 } from '../components';
 import { createCardNotices } from './main/cardNotices';
+import { selectionQuery } from './main/selection';
 import { useWordSearch } from './main/useWordSearch';
 import { useSentenceEditor } from './main/useSentenceEditor';
 import { useAiPick } from './main/useAiPick';
@@ -60,7 +61,7 @@ const editor = useSentenceEditor({
     },
 });
 const {
-    tokens, sentence, showEdit, editPlaceholder, pasteNotice,
+    tokens, selection, sentence, showEdit, editPlaceholder, pasteNotice,
     changeEditStatus, handleEditTextAreaKeydown,
 } = editor;
 // #endregion
@@ -112,21 +113,18 @@ function onSentenceEdit(): void {
 }
 
 /**
- * 用户标记手势结束（单击松手、拖刷松手、Shift 区间松开）：把当前标记词元按单空格拼接后
- * 写入搜索框，等价于用户手打这段文本。这是有损的快捷输入——只送单词词元，丢原始标点与空白。
+ * 选区手势结束（单击松手、拖选松手、Shift 区间松开）：把选中的单词按单空格拼接后写入搜索框，
+ * 等价于用户手打这段文本。这是有损的快捷输入——只送单词词元，丢掉原始标点与空白。
+ *
+ * 选区被取消（点空白处）时不动搜索框：搜索框是用户可以手写的独立输入，取消选中
+ * 不该抹掉上一个查询（也不该让“想清空选区”变成“想清空查询”）
  */
-function onMarksCommitted(): void {
+function onSelectionCommitted(): void {
     capture.markUserTouched();
-    query.setQueryExplicitly(tokens.value
-        .filter(token => token.marked)
-        .map(token => token.token)
-        .join(' '));
-}
-
-/** SentencePanel 上报的标记写入：tokens 的写入收敛于此（整体替换与编辑重建除外）。标记不触发查询，查询只在手势结束时快送一次 */
-function onMarkToken(index: number, value: boolean): void {
-    capture.markUserTouched();
-    tokens.value[index].marked = value;
+    const text = selectionQuery(tokens.value, selection.value);
+    if (text.length > 0) {
+        query.setQueryExplicitly(text);
+    }
 }
 
 async function pasteToEdit() {
@@ -134,8 +132,8 @@ async function pasteToEdit() {
     if (text == null) {
         return;
     }
-    // 粘贴属于整体替换句子：分词同步重建为全新状态，不保留旧的标记，编辑草稿一并作废；
-    // 旧句子的查询随之作废（查询不由标记派生，需显式清空）
+    // 粘贴属于整体替换句子：分词同步重建为全新状态，清空选区，编辑草稿一并作废；
+    // 旧句子的查询随之作废（查询不由选区派生，需显式清空）
     editor.replaceSentence(text);
     query.setQueryExplicitly('');
     capture.markUserTouched();
@@ -205,8 +203,8 @@ onBeforeMount(async () => {
             <!-- 粘贴失败的就地提示：紧挨着上方的“粘贴”按钮，收起时不占高度 -->
             <FluentStatusText class="sentence-notice" :severity="pasteNotice?.severity ?? 'error'"
                 :message="pasteNotice?.message ?? null" />
-            <SentencePanel class="sentence-main" :tokens="tokens" v-if="!showEdit" @mark="onMarkToken"
-                @commit="onMarksCommitted" />
+            <SentencePanel class="sentence-main" :tokens="tokens" v-model:selection="selection" v-if="!showEdit"
+                @commit="onSelectionCommitted" />
             <FluentTextarea class="sentence-editor sentence-main" v-model="sentence" v-if="showEdit" ref="editTextArea"
                 :placeholder="editPlaceholder" @input="onSentenceEdit" @keydown="handleEditTextAreaKeydown" />
             <SentenceCaptureRing :active="captureSettling" v-if="!showEdit" />

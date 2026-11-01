@@ -24,5 +24,16 @@ export interface WordItems {
 /** 划词面板的词元 */
 export interface SentenceToken {
     token: string;
-    marked: boolean;
+}
+
+/**
+ * 句子面板的选区：端点都是单词词元下标（含首尾），区间恒为一段连续词元。
+ * null 表示没有选中任何词（此时没有查询目标）。
+ *
+ * 用“一段区间”而不是“一组被标记的词元”表达选中：不连续的选中在类型上就不存在，
+ * 不需要在交互或提示里另行约束（见 src/components/SentencePanel.vue 的说明）
+ */
+export interface TokenSelection {
+    start: number;
+    end: number;
 }

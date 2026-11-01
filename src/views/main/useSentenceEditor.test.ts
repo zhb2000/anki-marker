@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { decodeHtmlEntities } from '../../logics/stringutils';
+import { selectionWords } from './selection';
 import { useSentenceEditor } from './useSentenceEditor';
 
 const mocks = vi.hoisted(() => ({
@@ -16,8 +17,8 @@ function setup() {
     const onSentenceEdited = vi.fn<() => void>();
     const editor = useSentenceEditor({ onSentenceEdited });
     editor.replaceSentence('The quick brown fox jumps.');
-    // 用户标记了 fox
-    editor.tokens.value[6].marked = true;
+    // 用户选中了 fox
+    editor.selection.value = { start: 6, end: 6 };
     return { editor, onSentenceEdited };
 }
 
@@ -25,8 +26,8 @@ function joined(editor: ReturnType<typeof useSentenceEditor>): string {
     return editor.tokens.value.map(({ token }) => token).join('');
 }
 
-function marked(editor: ReturnType<typeof useSentenceEditor>): string[] {
-    return editor.tokens.value.filter(t => t.marked).map(t => t.token);
+function selected(editor: ReturnType<typeof useSentenceEditor>): string[] {
+    return selectionWords(editor.tokens.value, editor.selection.value);
 }
 
 beforeEach(() => {
@@ -65,7 +66,7 @@ describe('useSentenceEditor', () => {
         expect(editor.showEdit.value).toBe(false);
         expect(editor.sentence.value).toBe('Yesterday the quick brown fox jumps high.');
         expect(joined(editor)).toBe('Yesterday the quick brown fox jumps high.');
-        expect(marked(editor)).toEqual(['fox']);
+        expect(selected(editor)).toEqual(['fox']);
         expect(onSentenceEdited).toHaveBeenCalledOnce();
     });
 
@@ -73,7 +74,7 @@ describe('useSentenceEditor', () => {
         const { editor, onSentenceEdited } = setup();
         await editor.changeEditStatus();
         await editor.changeEditStatus();
-        expect(marked(editor)).toEqual(['fox']);
+        expect(selected(editor)).toEqual(['fox']);
         expect(onSentenceEdited).not.toHaveBeenCalled();
     });
 
@@ -84,7 +85,7 @@ describe('useSentenceEditor', () => {
         editor.replaceSentence('A brand new fox.');
         await editor.changeEditStatus();
         expect(joined(editor)).toBe('A brand new fox.');
-        expect(marked(editor)).toEqual([]);
+        expect(selected(editor)).toEqual([]);
         expect(onSentenceEdited).not.toHaveBeenCalled();
     });
 

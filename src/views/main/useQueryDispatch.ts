@@ -10,7 +10,7 @@ export interface UseQueryDispatchOptions {
 
 /**
  * 查询的调度：搜索框或所选词典变化时决定查哪本词典、要不要连 AI 一起查。
- * 手打走“节流词典 + 防抖 AI”，显式写入（标记快送、划词捕获、回车/查询按钮）立即连 AI 一起查
+ * 手打走“节流词典 + 防抖 AI”，显式写入（选区快送、划词捕获、回车/查询按钮）立即连 AI 一起查
  */
 export function useQueryDispatch(options: UseQueryDispatchOptions) {
     const { search, ai } = options;
@@ -18,12 +18,12 @@ export function useQueryDispatch(options: UseQueryDispatchOptions) {
 
     /**
      * 本次 searchText 变化的发起方。手打时查询词是暂定值——词典跟随输入更新，AI 优选等停手；
-     * 显式写入（标记快送、划词捕获）表示用户已经确认了这个词，立即连 AI 一起查
+     * 显式写入（选区快送、划词捕获）表示用户已经确认了这个词，立即连 AI 一起查
      */
     let queryOrigin: 'typing' | 'explicit' = 'typing';
 
     /**
-     * 以“显式”语义写入搜索框（标记快送、划词捕获）：值真变了就走 watcher 立即查询 + AI；
+     * 以“显式”语义写入搜索框（选区快送、划词捕获）：值真变了就走 watcher 立即查询 + AI；
      * 值没变时 watcher 不会触发，但语境可能已变（如又划到同一个词），直接按当前语境重跑一次
      */
     function setQueryExplicitly(text: string): void {

@@ -9,8 +9,8 @@ import {
     captureFailureDialog,
     createCaptureDelivery,
     isSameCapturedPayload,
-    markCapturedWord,
     planCapturedSentence,
+    selectionForCapturedWord,
     type CaptureFailure,
     type CapturedSentencePayload,
 } from './captureLogic';
@@ -18,7 +18,7 @@ import type { SentenceEditor } from './useSentenceEditor';
 
 export interface UseCaptureListenerOptions {
     router: Router;
-    editor: Pick<SentenceEditor, 'tokens' | 'showEdit' | 'replaceSentence' | 'changeEditStatus'>;
+    editor: Pick<SentenceEditor, 'tokens' | 'selection' | 'showEdit' | 'replaceSentence' | 'changeEditStatus'>;
     /** 以“显式”语义写入搜索框（见 useQueryDispatch） */
     setQueryExplicitly: (text: string) => void;
 }
@@ -34,12 +34,12 @@ export function useCaptureListener(options: UseCaptureListenerOptions) {
     const captureSettling = ref(false);
 
     /**
-     * 用户是否改动过当前内容（编辑句子、输入查询、手动标记）。迟到的后台补取结果据此丢弃——
+     * 用户是否改动过当前内容（编辑句子、输入查询、手动选词）。迟到的后台补取结果据此丢弃——
      * 补取属于同一次划词的“初始状态”，用户已经动手就不该再被覆盖。新的一次捕获会重置它。
      */
     let userTouched = false;
 
-    /** 记一次用户改动（输入查询、编辑句子、标记、粘贴）：迟到的补取结果不再覆盖工作区 */
+    /** 记一次用户改动（输入查询、编辑句子、选词、粘贴）：迟到的补取结果不再覆盖工作区 */
     function markUserTouched(): void {
         userTouched = true;
     }
@@ -76,10 +76,12 @@ export function useCaptureListener(options: UseCaptureListenerOptions) {
         if (plan.word != null) {
             // 捕获词是查询的权威来源，直接写入搜索框；分词面板的预选只是位置提示，
             // 分词粒度与选区不一致时（如选中的是 encoder-decoder 里的 encoder）
-            // 标记会落在整个复合词元上，与查询不等价是允许的
+            // 选区会落在整个复合词元上，与查询不等价是允许的
             setQueryExplicitly(plan.word);
-            // replaceSentence 已同步重建分词，可直接标记命中的单词
-            markCapturedWord(editor.tokens.value, plan.word, plan.wordOffset, plan.text);
+            // replaceSentence 已同步重建分词，可直接按命中的单词落选区
+            editor.selection.value = selectionForCapturedWord(
+                editor.tokens.value, plan.word, plan.wordOffset, plan.text
+            );
         } else {
             // 未命中单词（如手动跨句选择）：句子已整体替换，旧查询一并清空
             setQueryExplicitly('');

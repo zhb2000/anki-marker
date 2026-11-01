@@ -21,7 +21,7 @@ export interface AddNoteSnapshot {
     dictionary: DictName;
     /** 所加的词典条目 */
     entry: dict.CollinsItem | dict.OxfordItem | dict.YoudaoItem;
-    /** 卡片例句的 HTML（已转义，标记的词加粗） */
+    /** 卡片例句的 HTML（已转义，选区内的词加粗） */
     sentenceHTML: string;
     /** 写入“笔记”字段的 AI 笔记；null 表示不写 */
     aiNote: string | null;
