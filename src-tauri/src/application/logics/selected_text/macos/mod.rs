@@ -224,6 +224,15 @@ pub(super) fn context_from_word_and_element(
     element: &core_foundation::base::CFType,
     word: &str,
 ) -> SelectedContext {
+    // Chromium 系同时经 AXSelectedText 与 marker 暴露选区，但它的 AX 文本在读区间时
+    // 不插分隔符（实测跨 14 行的 1245 个字符里 0 个换行），±N 窗口里块边界完全消失，
+    // 相邻标题会直接粘在句子前面。marker 链路能逐行读取并重建块，优先尝试；只拿到词
+    // （取句失败）时回退到范围链路，保持原有的降级语义。
+    if let Some(context) = marker_selected_context(element) {
+        if context.word.is_some() {
+            return finish_context(context);
+        }
+    }
     let context = match find_sentence_for_word_by_ax(element, word) {
         Ok(SentenceCapture::Expanded {
             sentence,
@@ -232,7 +241,7 @@ pub(super) fn context_from_word_and_element(
             // 范围链路的上下文可能带视觉行硬换行（Chrome 的 PDF 查看器：同时提供
             // AXSelectedText 与 marker 范围，但 AXStringForRange 的文本按行给出），
             // UAX #29 在换行处强制分句，句子被切成碎片。看起来被截断、且元素支持
-            // marker 范围时，改用 marker 链路（带行扩展与抹换行）重试
+            // marker 范围时，改用 marker 链路（带行扩展与拼行）重试
             if looks_truncated(&sentence) {
                 if let Some(refined) = refine_truncated_with_markers(element, word) {
                     return refined;
@@ -269,6 +278,11 @@ pub(super) fn context_from_word_and_element(
             }
         }
     };
+    return finish_context(context);
+}
+
+/// 收尾：去掉正文外字符（伪影），并把 UTF-16 偏移同步到新文本。
+fn finish_context(context: SelectedContext) -> SelectedContext {
     let (text, word_offset) = strip_text_artifacts_with_offset(&context.text, context.word_offset);
     return SelectedContext {
         text,

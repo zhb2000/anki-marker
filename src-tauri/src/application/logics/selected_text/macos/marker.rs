@@ -1,13 +1,16 @@
 //! text marker 提供方（AXTextMarker，如 Safari 网页、Chromium 系）的取词与取句链路。
 
-use super::super::capture::{capture_in_context, SentenceCapture};
+use super::super::capture::{
+    block_looks_cut, can_join_lines, capture_in_segments, SentenceCapture,
+};
 use super::super::SelectedContext;
 use super::ax::{copy_element_attribute_by_ax, copy_parameterized_attribute_by_ax};
 use super::ax_ffi;
-use super::text::{
-    collapse_whitespace, flatten_line_breaks, looks_truncated, strip_text_artifacts,
-    strip_text_artifacts_with_offset,
-};
+use super::text::{looks_truncated, strip_text_artifacts, strip_text_artifacts_with_offset};
+
+/// 行级提供方的行导航扩展半径（行数）：覆盖绝大多数跨行句，同时限制病态文档的读取量。
+/// 真正的块边界由拼行规则决定，这里只是上界。
+const LINE_EXPANSION_LINES: usize = 40;
 
 /// 校验对象确实是 AXTextMarkerRange。AXTextMarkerRangeCopyStart/EndMarker 在本进程内
 /// 解析对象内部结构（不是跨进程调用），而属性值的类型由目标应用决定，非 WebKit/Chromium
@@ -22,6 +25,74 @@ fn ensure_text_marker_range(range: &core_foundation::base::CFType) -> Result<(),
     } else {
         Err("the value is not an AXTextMarkerRange".to_string())
     };
+}
+
+/// 取 marker 范围的起点/终点 marker（Copy 规则包装，调用方负责释放）。
+fn marker_of_range(
+    range: &core_foundation::base::CFType,
+    end: bool,
+) -> Result<core_foundation::base::CFType, String> {
+    use core_foundation::base::TCFType;
+
+    ensure_text_marker_range(range)?;
+    let marker = unsafe {
+        if end {
+            ax_ffi::AXTextMarkerRangeCopyEndMarker(range.as_CFTypeRef())
+        } else {
+            ax_ffi::AXTextMarkerRangeCopyStartMarker(range.as_CFTypeRef())
+        }
+    };
+    if marker.is_null() {
+        return Err("the marker range has no start/end marker".to_string());
+    }
+    return Ok(unsafe { TCFType::wrap_under_create_rule(marker) });
+}
+
+/// 段落之后是否接着同一句话：段落没有结束句子，且下一个行块以续接形态开头。
+///
+/// WebKit 会把行内 MathML 公式、图片等内嵌对象切成独立的块，段落文本到公式处就
+/// 断了——此时“段尾”不是句子边界，必须继续拼行才能拿回完整句子。标题与表格
+/// 单元格的下一块以大写字母开头，这里返回 false，保持“段落即块”的行为。
+fn continues_after_paragraph(
+    element: &core_foundation::base::CFType,
+    paragraph: &core_foundation::base::CFType,
+) -> bool {
+    use core_foundation::array::CFArray;
+    use core_foundation::base::TCFType;
+
+    let Ok(paragraph_text) = string_for_marker_range_by_ax(element, paragraph) else {
+        return false;
+    };
+    // 段落被切断的两种形态：
+    // 1. 停在内嵌对象前的空白上（"…hidden states "）；
+    // 2. 停在引用标注之类的文本片段边界上（"…long short-term memory ["，PDF 里
+    //    "[13]" 往往自成一段）。段落不会以开括号/连字符结尾，出现即说明被截断。
+    // 标题、表格单元格两种形态都不满足，因此不会被误判
+    if !block_looks_cut(&paragraph_text) {
+        return false;
+    }
+    let Ok(paragraph_end) = marker_of_range(paragraph, true) else {
+        return false;
+    };
+    let Ok(next_end) = copy_parameterized_attribute_by_ax(
+        element,
+        ax_ffi::NEXT_LINE_END_MARKER_PARAMETERIZED_ATTRIBUTE,
+        paragraph_end.as_CFTypeRef(),
+    ) else {
+        return false;
+    };
+    let markers = CFArray::from_CFTypes(&[paragraph_end.clone(), next_end]);
+    let Ok(range) = copy_parameterized_attribute_by_ax(
+        element,
+        ax_ffi::RANGE_FOR_UNORDERED_MARKERS_PARAMETERIZED_ATTRIBUTE,
+        markers.as_CFTypeRef(),
+    ) else {
+        return false;
+    };
+    let Ok(next_text) = string_for_marker_range_by_ax(element, &range) else {
+        return false;
+    };
+    return can_join_lines(&paragraph_text, &next_text);
 }
 
 /// 读取元素的选区 marker 范围（AXSelectedTextMarkerRange），并校验其类型。
@@ -137,6 +208,16 @@ fn find_sentence_for_marker_selection(
 }
 
 /// find_sentence_for_marker_selection 的取句部分：选区 marker 范围已知。
+///
+/// 取句单元是“块”，不是“窗口”：
+/// 1. 选区起点所在段落。段落不含换行时就是完整块（网页内容的标题、表格单元格、
+///    列表项都不带句末标点，但它们是完整的块），直接取句，不做任何扩展；
+/// 2. 段落含换行时是行级提供方（Chromium 的 PDF 查看器：段落 = 整段，但文本按
+///    视觉行给出，行间是换行）。UAX #29 会在换行处强制分句，直接取句只能得到一行，
+///    所以先按“块内拼行、块间不拼”的规则重建块（capture::join_block_around_anchor）
+///    再取句——这样跨行整句能取回，而相邻的标题/图注不会被并进来；
+/// 3. 段落本身取不到块（选区跨段、或以文本片段为段落的提供方）时，才退到行导航
+///    扩展：向外扩 LINE_EXPANSION_LINES 行，同样按拼行规则重建块。
 fn find_sentence_for_marker_range(
     element: &core_foundation::base::CFType,
     word: &str,
@@ -144,60 +225,49 @@ fn find_sentence_for_marker_range(
 ) -> Result<(SentenceCapture, String), String> {
     use core_foundation::base::{CFType, TCFType};
 
-    /// 行导航扩展的行数梯度：每级向前后各扩这么多行；上一级仍被截断才升级。
-    /// 一行约 50 到 70 个码元，10 行覆盖绝大多数句子，40 行兜长句。
-    const LINE_EXPANSION_STEPS: [usize; 2] = [10, 40];
+    let selection_start = marker_of_range(selection, false)?;
+    let selection_end = marker_of_range(selection, true)?;
 
-    let marker_of = |range: &CFType, end: bool| -> Result<CFType, String> {
-        ensure_text_marker_range(range)?;
-        let marker = unsafe {
-            if end {
-                ax_ffi::AXTextMarkerRangeCopyEndMarker(range.as_CFTypeRef())
-            } else {
-                ax_ffi::AXTextMarkerRangeCopyStartMarker(range.as_CFTypeRef())
-            }
-        };
-        if marker.is_null() {
-            return Err("the marker range has no start/end marker".to_string());
-        }
-        return Ok(unsafe { TCFType::wrap_under_create_rule(marker) });
-    };
-    let selection_start = marker_of(selection, false)?;
-    let selection_end = marker_of(selection, true)?;
-
-    // 第一轮：选区起点所在段落（网页的段落本来就是整块文本，绝大多数情况止于此）
+    // 第一轮：选区起点所在段落
     let paragraph = copy_parameterized_attribute_by_ax(
         element,
         ax_ffi::PARAGRAPH_TEXT_MARKER_RANGE_PARAMETERIZED_ATTRIBUTE,
         selection_start.as_CFTypeRef(),
     )?;
-    let paragraph_start = marker_of(&paragraph, false)?;
-    let first = capture_in_marker_context(
+    let paragraph_start = marker_of_range(&paragraph, false)?;
+    let paragraph_capture = capture_in_paragraph(
         element,
         word,
-        &paragraph_start,
         &paragraph,
+        &paragraph_start,
         &selection_start,
-        false,
     );
-    // 扩展的触发条件：句子看起来被截断，且成因可能是上下文太短——句子贴着上下文边缘，
-    // 或上下文里有硬换行（视觉行换行会让 UAX #29 在段落内部强制分句，句子不必触边）。
-    // 网页里整块的段落既不含换行、句子也不贴边，不会进入第二轮
-    match &first {
-        Ok((SentenceCapture::Expanded { sentence, .. }, has_line_break, touched_edge))
-            if looks_truncated(sentence) && (*touched_edge || *has_line_break) => {}
-        Ok((capture, _, _)) => return Ok((clone_capture(capture), word.to_string())),
-        Err(_) => {}
+
+    // 段落被内嵌对象（MathML 公式、图片等）截断时，段落边界不等于句子边界：
+    // 若下一块是续接形态（小写/数字/标点/公式字形），交给行扩展把句子接回来。
+    // 标题、表格单元格的下一块以大写开头，不会被误判成截断
+    let block_is_trusted = match &paragraph_capture {
+        Ok((capture, _)) => {
+            let truncated = matches!(
+                capture,
+                SentenceCapture::Expanded { sentence, .. } if looks_truncated(sentence)
+            );
+            !truncated || !continues_after_paragraph(element, &paragraph)
+        }
+        Err(_) => false,
+    };
+    if block_is_trusted {
+        return paragraph_capture;
     }
 
-    // 第二轮起：行导航扩展。锚点是选区所在的整行，向前后各走若干行
+    // 第二轮：段落取不到块时，退到行导航扩展
     let line_start_of = |marker: &CFType, end: bool| -> Result<CFType, String> {
         let line = copy_parameterized_attribute_by_ax(
             element,
             ax_ffi::LINE_TEXT_MARKER_RANGE_PARAMETERIZED_ATTRIBUTE,
             marker.as_CFTypeRef(),
         )?;
-        return marker_of(&line, end);
+        return marker_of_range(&line, end);
     };
     let (anchor_left, anchor_right) = match (
         line_start_of(&selection_start, false),
@@ -205,158 +275,202 @@ fn find_sentence_for_marker_range(
     ) {
         (Ok(left), Ok(right)) => (left, right),
         (Err(error), _) | (_, Err(error)) => {
-            return first
-                .map(|(capture, _, _)| (capture, word.to_string()))
-                .map_err(|first_error| format!("{first_error}; line navigation: {error}"));
+            return Err(format!("{error}; line navigation unavailable"));
         }
     };
-    let flat_word = flatten_line_breaks(word);
-    let mut best: Option<(SentenceCapture, String)> = None;
-    for lines in LINE_EXPANSION_STEPS {
-        let left = step_lines(
-            element,
-            ax_ffi::PREVIOUS_LINE_START_MARKER_PARAMETERIZED_ATTRIBUTE,
-            &anchor_left,
-            lines,
-        );
-        let right = step_lines(
-            element,
-            ax_ffi::NEXT_LINE_END_MARKER_PARAMETERIZED_ATTRIBUTE,
-            &anchor_right,
-            lines,
-        );
-        let markers = core_foundation::array::CFArray::from_CFTypes(&[left.clone(), right]);
-        let Ok(range) = copy_parameterized_attribute_by_ax(
-            element,
-            ax_ffi::RANGE_FOR_UNORDERED_MARKERS_PARAMETERIZED_ATTRIBUTE,
-            markers.as_CFTypeRef(),
-        ) else {
+
+    return match expand_block_around_lines(
+        element,
+        word,
+        &anchor_left,
+        &anchor_right,
+        &selection_start,
+    ) {
+        Ok(result) => Ok(result),
+        Err(error) => Err(format!(
+            "{}; line context: {error}",
+            paragraph_capture.err().unwrap_or_default()
+        )),
+    };
+}
+
+/// 逐行收集选区所在的块（用于读区间不插分隔符的提供方，如 Chromium 系）。
+///
+/// 从选区所在行向两侧逐行步进：每读一行就与相邻行做一次拼行判定（复用
+/// capture::can_join_lines），满足才继续外扩。返回块文本（行间以换行连接）与
+/// 选区起点在块内的 UTF-16 偏移，交给 join_block_around_anchor 统一拼接与去连字符。
+fn collect_block_by_lines(
+    element: &core_foundation::base::CFType,
+    anchor_left: &core_foundation::base::CFType,
+    anchor_right: &core_foundation::base::CFType,
+    selection_start: &core_foundation::base::CFType,
+) -> Result<(Vec<String>, usize, usize), String> {
+    // 选区所在的连续文本（手动跨行选择时可能包含多行，但 Chromium 不插换行）
+    let anchor_text = string_for_marker_range_by_ax(
+        element,
+        &marker_range_between(element, anchor_left, anchor_right)?,
+    )?;
+    let intra = prefix_length_utf16(element, anchor_left, selection_start)?;
+
+    // 向前：逐行取上一行，直到拼行规则判定为块边界
+    let mut before: Vec<String> = Vec::new();
+    let mut cursor = anchor_left.clone();
+    let mut head = anchor_text.clone();
+    for _ in 0..LINE_EXPANSION_LINES {
+        let Some(previous) = previous_line_start(element, &cursor) else {
             break;
         };
-        match capture_in_marker_context(element, &flat_word, &left, &range, &selection_start, true)
-        {
-            Ok((capture, _, touched_edge)) => {
-                let truncated = touched_edge
-                    && matches!(&capture, SentenceCapture::Expanded { sentence, .. } if looks_truncated(sentence));
-                log::info!(
-                    "expanded the context by {lines} line(s) on each side, sentence still \
-                     looks truncated: {truncated}"
-                );
-                let capture = match capture {
-                    // 折叠空白会改写句子，原偏移作废（前端回退到按字符串匹配）
-                    SentenceCapture::Expanded { sentence, .. } => SentenceCapture::Expanded {
-                        sentence: collapse_whitespace(&sentence),
-                        word_offset: None,
-                    },
-                    SentenceCapture::SelectionAsIs(text) => {
-                        SentenceCapture::SelectionAsIs(collapse_whitespace(&text))
-                    }
-                };
-                best = Some((capture, collapse_whitespace(&flat_word)));
-                if !truncated {
-                    break;
-                }
-            }
-            Err(error) => {
-                log::info!("capture with the {lines}-line context failed: {error}");
-            }
+        let Some(text) = line_text(element, &previous, &cursor) else {
+            break;
+        };
+        if !can_join_lines(&text, &head) {
+            break;
         }
+        head = text.clone();
+        before.push(text);
+        cursor = previous;
     }
-    return match (best, first) {
-        (Some(result), _) => Ok(result),
-        // 扩展没有任何进展：沿用第一轮结果（可能是被截断的句子，或锚点失败的错误）
-        (None, Ok((capture, _, _))) => Ok((capture, word.to_string())),
-        (None, Err(error)) => Err(error),
-    };
+    before.reverse();
+
+    // 向后：逐行取下一行
+    let mut after: Vec<String> = Vec::new();
+    let mut cursor = anchor_right.clone();
+    let mut tail = anchor_text.clone();
+    for _ in 0..LINE_EXPANSION_LINES {
+        let Some(next) = next_line_end(element, &cursor) else {
+            break;
+        };
+        let Some(text) = line_text(element, &cursor, &next) else {
+            break;
+        };
+        if !can_join_lines(&tail, &text) {
+            break;
+        }
+        tail = text.clone();
+        after.push(text);
+        cursor = next;
+    }
+
+    let anchor_index = before.len();
+    before.push(anchor_text);
+    before.extend(after);
+    return Ok((before, anchor_index, intra));
 }
 
-fn clone_capture(capture: &SentenceCapture) -> SentenceCapture {
-    return match capture {
-        SentenceCapture::Expanded {
-            sentence,
-            word_offset,
-        } => SentenceCapture::Expanded {
-            sentence: sentence.clone(),
-            word_offset: *word_offset,
-        },
-        SentenceCapture::SelectionAsIs(text) => SentenceCapture::SelectionAsIs(text.clone()),
-    };
-}
-
-/// 从 `from` 起沿 `attribute`（上一行行首 / 下一行行尾）走至多 `steps` 步；
-/// 到头（报错或 marker 不再变化）即停，返回最后一个有效 marker。
-fn step_lines(
+/// 两个 marker 之间的范围对象。
+fn marker_range_between(
     element: &core_foundation::base::CFType,
-    attribute: &'static str,
     from: &core_foundation::base::CFType,
-    steps: usize,
-) -> core_foundation::base::CFType {
-    use core_foundation::base::TCFType;
-
-    let mut current = from.clone();
-    for _ in 0..steps {
-        match copy_parameterized_attribute_by_ax(element, attribute, current.as_CFTypeRef()) {
-            Ok(next) if next != current => current = next,
-            _ => break,
-        }
-    }
-    return current;
-}
-
-/// 在 `context_range` 对应的文本上取句：偏移 = “上下文起点到选区起点”的前缀长度。
-/// `flatten` 为 true 时先抹掉上下文里的换行（`word` 由调用方同步处理）。
-/// 返回 {取句结果, 上下文是否含换行, 句子是否触边}。
-fn capture_in_marker_context(
-    element: &core_foundation::base::CFType,
-    word: &str,
-    context_start: &core_foundation::base::CFType,
-    context_range: &core_foundation::base::CFType,
-    selection_start: &core_foundation::base::CFType,
-    flatten: bool,
-) -> Result<(SentenceCapture, bool, bool), String> {
+    to: &core_foundation::base::CFType,
+) -> Result<core_foundation::base::CFType, String> {
     use core_foundation::array::CFArray;
     use core_foundation::base::TCFType;
 
+    let markers = CFArray::from_CFTypes(&[from.clone(), to.clone()]);
+    return copy_parameterized_attribute_by_ax(
+        element,
+        ax_ffi::RANGE_FOR_UNORDERED_MARKERS_PARAMETERIZED_ATTRIBUTE,
+        markers.as_CFTypeRef(),
+    );
+}
+
+/// 两个 marker 之间的文本；读不到返回 None（调用方按走查结束处理）。
+fn line_text(
+    element: &core_foundation::base::CFType,
+    from: &core_foundation::base::CFType,
+    to: &core_foundation::base::CFType,
+) -> Option<String> {
+    let range = marker_range_between(element, from, to).ok()?;
+    return string_for_marker_range_by_ax(element, &range).ok();
+}
+
+/// 从给定 marker 起上一行的行首 marker。
+fn previous_line_start(
+    element: &core_foundation::base::CFType,
+    marker: &core_foundation::base::CFType,
+) -> Option<core_foundation::base::CFType> {
+    use core_foundation::base::TCFType;
+
+    let next = copy_parameterized_attribute_by_ax(
+        element,
+        ax_ffi::PREVIOUS_LINE_START_MARKER_PARAMETERIZED_ATTRIBUTE,
+        marker.as_CFTypeRef(),
+    )
+    .ok()?;
+    return (next.as_CFTypeRef() != marker.as_CFTypeRef()).then_some(next);
+}
+
+/// 从给定 marker 起下一行的行尾 marker。
+fn next_line_end(
+    element: &core_foundation::base::CFType,
+    marker: &core_foundation::base::CFType,
+) -> Option<core_foundation::base::CFType> {
+    use core_foundation::base::TCFType;
+
+    let next = copy_parameterized_attribute_by_ax(
+        element,
+        ax_ffi::NEXT_LINE_END_MARKER_PARAMETERIZED_ATTRIBUTE,
+        marker.as_CFTypeRef(),
+    )
+    .ok()?;
+    return (next.as_CFTypeRef() != marker.as_CFTypeRef()).then_some(next);
+}
+
+/// 在段落范围内取句：段落作为“一个片段”交给共享层，含换行时由拼行规则合并。
+fn capture_in_paragraph(
+    element: &core_foundation::base::CFType,
+    word: &str,
+    paragraph: &core_foundation::base::CFType,
+    paragraph_start: &core_foundation::base::CFType,
+    selection_start: &core_foundation::base::CFType,
+) -> Result<(SentenceCapture, String), String> {
     /// 上下文的 UTF-16 码元上限：防御病态页面（无块级分隔的巨型文本节点），
     /// 超限降级为仅录词，不为切一句话读取整页文本
     const MAX_CONTEXT_UTF16_UNITS: usize = 50_000;
 
-    let raw_context = string_for_marker_range_by_ax(element, context_range)?;
-    let context_units = raw_context.encode_utf16().count();
+    let context = string_for_marker_range_by_ax(element, paragraph)?;
+    let context_units = context.encode_utf16().count();
     if context_units > MAX_CONTEXT_UTF16_UNITS {
         return Err(format!(
-            "the context is too long ({context_units} utf16 units), skipping sentence extraction"
+            "the paragraph is too long ({context_units} utf16 units), skipping sentence extraction"
         ));
     }
-    let markers = CFArray::from_CFTypes(&[context_start.clone(), selection_start.clone()]);
+    let sel_start_utf16 = prefix_length_utf16(element, paragraph_start, selection_start)?;
+    return capture_in_segments(&[context], 0, sel_start_utf16, word);
+}
+
+/// 以选区所在行为锚逐行收集块，再交给共享层取句。
+fn expand_block_around_lines(
+    element: &core_foundation::base::CFType,
+    word: &str,
+    anchor_left: &core_foundation::base::CFType,
+    anchor_right: &core_foundation::base::CFType,
+    selection_start: &core_foundation::base::CFType,
+) -> Result<(SentenceCapture, String), String> {
+    // 逐行收集，而不是读一个大范围：Chromium 系读区间时不插任何分隔符（实测跨 14 行
+    // 的 1245 个字符里 0 个换行），WebKit 的行结构也只在逐行读取时才最可靠。
+    let (segments, anchor_index, intra) =
+        collect_block_by_lines(element, anchor_left, anchor_right, selection_start)?;
+    return capture_in_segments(&segments, anchor_index, intra, word);
+}
+
+fn prefix_length_utf16(
+    element: &core_foundation::base::CFType,
+    from: &core_foundation::base::CFType,
+    to: &core_foundation::base::CFType,
+) -> Result<usize, String> {
+    use core_foundation::array::CFArray;
+    use core_foundation::base::TCFType;
+
+    let markers = CFArray::from_CFTypes(&[from.clone(), to.clone()]);
     let prefix = copy_parameterized_attribute_by_ax(
         element,
         ax_ffi::RANGE_FOR_UNORDERED_MARKERS_PARAMETERIZED_ATTRIBUTE,
         markers.as_CFTypeRef(),
     )?;
-    let sel_start_utf16 = string_for_marker_range_by_ax(element, &prefix)?
+    return Ok(string_for_marker_range_by_ax(element, &prefix)?
         .encode_utf16()
-        .count() as isize;
-    let has_line_break = raw_context.contains('\n');
-    let context = if flatten {
-        flatten_line_breaks(&raw_context)
-    } else {
-        raw_context
-    };
-
-    // 偏移是本地推导的，与 Windows 同理不用“唯一出现位置”兜底（见 capture::find_anchor）。
-    // window_loc 传 1：上下文起点不是文本开头，句子贴着起点同样算触边
-    return match capture_in_context(&context, word, &[sel_start_utf16], 1, false) {
-        Some((capture, touched_edge)) => Ok((capture, has_line_break, touched_edge)),
-        None => Err(format!(
-            "no validated anchor for the selected text in the context \
-             (selection starts at {sel_start_utf16} utf16 units, context {context_units} utf16 \
-             units, word {} utf16 units, {} occurrence(s) in the context; \
-             a selection spanning several paragraphs lands here too)",
-            word.encode_utf16().count(),
-            context.match_indices(word).count()
-        )),
-    };
+        .count());
 }
 
 /// 范围链路切出的句子被截断时，用 marker 链路重试：元素没有 marker 范围、或重试仍没有
@@ -406,9 +520,19 @@ mod tests {
         unsafe {
             let app: CFType =
                 TCFType::wrap_under_create_rule(super::ax_ffi::AXUIElementCreateApplication(pid));
+            // 取窗口：优先焦点窗口；后台启动的浏览器可能不报焦点窗口，退到第一个窗口
             let window =
                 super::copy_element_attribute_by_ax(&app, super::ax_ffi::FOCUSED_WINDOW_ATTRIBUTE)
-                    .expect("no focused window");
+                    .or_else(|_| {
+                        let windows = super::copy_element_attribute_by_ax(&app, "AXWindows")?;
+                        let count = super::ax_ffi::CFArrayGetCount(windows.as_CFTypeRef());
+                        if count <= 0 {
+                            return Err("no window".to_string());
+                        }
+                        let raw = super::ax_ffi::CFArrayGetValueAtIndex(windows.as_CFTypeRef(), 0);
+                        return Ok(TCFType::wrap_under_get_rule(raw));
+                    })
+                    .expect("no window");
             fn find_role(
                 e: &core_foundation::base::CFType,
                 role: &str,
@@ -433,6 +557,14 @@ mod tests {
                     }
                 }
                 None
+            }
+            // PDF 查看器的选区挂在插件元素（AXGroup）上，不在 web area：也跑一遍
+            if let Ok(focused) = super::copy_element_attribute_by_ax(
+                &app,
+                super::ax_ffi::FOCUSED_UI_ELEMENT_ATTRIBUTE,
+            ) {
+                let result = super::marker_selected_context(&focused);
+                eprintln!("marker_selected_context(focused) -> {result:?}");
             }
             let web = find_role(&window, "AXWebArea", 0).expect("no AXWebArea");
             let result = super::marker_selected_context(&web);
@@ -499,37 +631,6 @@ mod tests {
             cursor = next;
         }
         panic!("word {word:?} (occurrence {nth}) not found");
-    }
-
-    /// 抹换行后，视觉行硬换行不再把跨行整句切碎；偏移（UTF-16）与长度保持不变
-    #[test]
-    fn flattened_pdf_lines_form_one_sentence() {
-        use super::{capture_in_context, flatten_line_breaks, SentenceCapture};
-        let raw = "3.2 Input Layer. The first thing to build a model is to\r\nprepare inputs with abundant information, such as User features\r\ninclude user ID and other user information. Next one.";
-        let flat = flatten_line_breaks(raw);
-        assert_eq!(flat.encode_utf16().count(), raw.encode_utf16().count());
-        let offset = raw
-            .find("abundant")
-            .map(|byte| raw[..byte].encode_utf16().count())
-            .unwrap();
-        // 不抹换行：句子被换行切碎，只剩 "prepare inputs ... features"
-        let (broken, _) =
-            capture_in_context(raw, "abundant", &[offset as isize], 1, false).unwrap();
-        match broken {
-            SentenceCapture::Expanded { sentence, .. } => {
-                assert!(!sentence.contains("The first thing"), "{sentence:?}")
-            }
-            _ => panic!("expected Expanded"),
-        }
-        let (capture, _) =
-            capture_in_context(&flat, "abundant", &[offset as isize], 1, false).unwrap();
-        match capture {
-            SentenceCapture::Expanded { sentence, .. } => assert_eq!(
-                sentence,
-                "The first thing to build a model is to  prepare inputs with abundant information, such as User features  include user ID and other user information."
-            ),
-            _ => panic!("expected Expanded"),
-        }
     }
 
     /// marker 范围解包前的类型校验：真正的 AXTextMarkerRange 通过，其他 CF 类型被拒

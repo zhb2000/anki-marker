@@ -179,6 +179,340 @@ pub fn find_anchor(
     };
 }
 
+/// 块内的文本片段（提供方切好的段落、视觉行、文本 run）。
+///
+/// 这是三端共用的“块来源”抽象：平台层只负责把选区所在的块收集成若干片段、
+/// 给出选区落在哪个片段及其片内偏移；段与段怎么合并、句子怎么切，都归这里。
+/// 片段之间视为软换行——是否真能接回去由下面的拼行规则决定。
+pub fn assemble_block_segments<S: AsRef<str>>(
+    segments: &[S],
+    anchor_segment: usize,
+    anchor_offset_utf16: usize,
+) -> (String, usize) {
+    let mut block = String::new();
+    let mut position = 0usize;
+    let mut selection = 0usize;
+    for (index, segment) in segments.iter().enumerate() {
+        if index > 0 {
+            block.push('\n');
+            position += 1;
+        }
+        if index == anchor_segment {
+            selection = position + anchor_offset_utf16;
+        }
+        block.push_str(segment.as_ref());
+        position += segment.as_ref().encode_utf16().count();
+    }
+    return (block, selection);
+}
+
+/// 由块片段直接取句：组装片段 → 按拼行规则合并 → 切句。
+///
+/// 返回 {取句结果, 应上报的词}——拼行会把换行折成空格，词也折成同一形态，
+/// 才能通过锚点校验并与句子保持同一文本形态。
+pub fn capture_in_segments<S: AsRef<str>>(
+    segments: &[S],
+    anchor_segment: usize,
+    anchor_offset_utf16: usize,
+    word: &str,
+) -> Result<(SentenceCapture, String), String> {
+    let (block, sel_start) = assemble_block_segments(segments, anchor_segment, anchor_offset_utf16);
+    let block_word = collapse_whitespace(word);
+    let sel_end = sel_start + block_word.encode_utf16().count();
+    let (joined, joined_start) = join_block_around_anchor(&block, sel_start, sel_end)
+        .ok_or_else(|| "the selection is not inside the block".to_string())?;
+    // 偏移是本地推导的，与 Windows 同理不用“唯一出现位置”兜底（见 find_anchor）；
+    // window_loc 传 0：上下文就是块本身，句子贴着块的起点/终点不是“被窗口截断”
+    return match capture_in_context(&joined, &block_word, &[joined_start as isize], 0, false) {
+        Some((capture, _)) => Ok((capture, block_word)),
+        None => Err(anchor_error(
+            &joined,
+            &block_word,
+            joined_start,
+            joined.encode_utf16().count(),
+        )),
+    };
+}
+
+/// 锚点校验失败时的诊断串：带坐标系关键参数，便于实机定位（日志只写本机文件）。
+pub fn anchor_error(context: &str, word: &str, sel_start: usize, context_units: usize) -> String {
+    return format!(
+        "no validated anchor for the selected text in the context \
+         (selection starts at {sel_start} utf16 units, context {context_units} utf16 units, \
+         word {} utf16 units, {} occurrence(s) in the context; \
+         a selection spanning several paragraphs lands here too)",
+        word.encode_utf16().count(),
+        context.match_indices(word).count()
+    );
+}
+
+/// 折叠连续空白为单个空格（行首行尾空白一并收拾）。
+pub fn collapse_whitespace(text: &str) -> String {
+    return text.split_whitespace().collect::<Vec<_>>().join(" ");
+}
+
+/// 段落文本是否在中间被切断：提供方会在内嵌对象（公式、图片）前停下（"…states "），
+/// 或在引用标注这类文本片段边界上停下（"…memory ["，PDF 里 "[13]" 常自成一段）。
+/// 两种情况都不可能是完整的块，需要继续拼行；标题、表格单元格两种形态都不满足。
+pub fn block_looks_cut(text: &str) -> bool {
+    let cut_at_object = text.ends_with(char::is_whitespace);
+    let cut_at_fragment = matches!(
+        text.chars().next_back(),
+        Some('[' | '(' | '{' | '“' | '‘' | '-' | '\u{2010}')
+    );
+    return cut_at_object || cut_at_fragment;
+}
+
+/// 把以换行分隔的上下文按“块”重建：从选区所在行出发逐行外扩，只在允许连接处合并。
+///
+/// 行级提供方（Chromium 的 PDF 查看器等）把文本按视觉行吐出，行间是换行；UAX #29
+/// 在换行处强制分句（SB4），直接分句只能得到一行。但也不能像早期实现那样先把所有
+/// 换行抹成空格再分句——那会把不带句末标点的块（标题、表格单元格、列表项）与相邻
+/// 块粘成一句。这里改成“块内拼行、块间不拼”：
+/// - 外扩时只有上一行未结束句子、且下一行以续接形态开头才合并；
+/// - 行尾软连字符（per- + centage）合并时去掉连字符；
+/// - 空行不算块边界：Chromium 的 PDF 查看器用连续换行分隔视觉行，同一窗口里空行
+///   并不代表段落（实测两种形态都出现），块边界交给文本规则判断。
+///
+/// 返回合并后的上下文与选区起点在新上下文中的 UTF-16 偏移；选区定位失败返回 None
+/// （调用方降级，不猜位置）。
+#[cfg(any(target_os = "macos", test))]
+pub fn join_block_around_anchor(
+    raw: &str,
+    sel_start_utf16: usize,
+    sel_end_utf16: usize,
+) -> Option<(String, usize)> {
+    let lines = split_lines_utf16(raw);
+    // 空行不参与拼接判定：Chromium 的 PDF 查看器用连续换行分隔视觉行，空行不代表段落
+    let usable: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, text))| !text.trim().is_empty())
+        .map(|(index, _)| index)
+        .collect();
+    if usable.is_empty() {
+        return None;
+    }
+    // 选区起点所在行（起点落在行尾、等于下一行起点时归下一行；越界时取最后一行）
+    let anchor_pos = usable
+        .iter()
+        .position(|index| {
+            let (start, text) = &lines[*index];
+            let end = start + text.encode_utf16().count();
+            *start <= sel_start_utf16 && sel_start_utf16 < end
+        })
+        .unwrap_or(usable.len() - 1);
+    // 选区终点所在行：手动跨行选择时整段保留，不受连接规则约束
+    let anchor_end_pos = usable
+        .iter()
+        .enumerate()
+        .skip(anchor_pos)
+        .take_while(|(_, index)| lines[**index].0 < sel_end_utf16)
+        .map(|(position, _)| position)
+        .last()
+        .unwrap_or(anchor_pos);
+
+    let mut first_pos = anchor_pos;
+    while first_pos > 0
+        && can_join_lines(lines[usable[first_pos - 1]].1, lines[usable[first_pos]].1)
+    {
+        first_pos -= 1;
+    }
+    let mut last_pos = anchor_end_pos;
+    while last_pos + 1 < usable.len()
+        && can_join_lines(lines[usable[last_pos]].1, lines[usable[last_pos + 1]].1)
+    {
+        last_pos += 1;
+    }
+    let first = usable[first_pos];
+    let last = usable[last_pos];
+
+    let mut output = String::new();
+    let mut output_utf16 = 0usize;
+    let mut output_sel: Option<usize> = None;
+    for (index, (start, raw_line)) in lines.iter().enumerate() {
+        if index < first || index > last {
+            continue;
+        }
+        let text = raw_line.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if !output.is_empty() {
+            let previous = output.chars().next_back();
+            let next = text.chars().next();
+            let hyphenated =
+                matches!(previous, Some('-' | '\u{2010}')) && next.is_some_and(char::is_lowercase);
+            if hyphenated {
+                // 行尾软连字符：去掉连字符直接相接（per- + centage → percentage）
+                output.pop();
+                output_utf16 -= 1;
+                if let Some(offset) = output_sel {
+                    if offset > output_utf16 {
+                        output_sel = Some(offset - 1);
+                    }
+                }
+            } else if needs_space(previous, next) {
+                output.push(' ');
+                output_utf16 += 1;
+            }
+        }
+        if output_sel.is_none() {
+            let line_utf16 = raw_line.encode_utf16().count();
+            if *start <= sel_start_utf16 && sel_start_utf16 <= *start + line_utf16 {
+                let lead_trim = raw_line.len() - raw_line.trim_start().len();
+                let lead_utf16 = raw_line[..lead_trim].encode_utf16().count();
+                output_sel = Some(
+                    output_utf16
+                        + sel_start_utf16
+                            .saturating_sub(*start)
+                            .saturating_sub(lead_utf16),
+                );
+            }
+        }
+        output.push_str(text);
+        output_utf16 += text.encode_utf16().count();
+    }
+    return Some((output, output_sel?));
+}
+
+/// 上下文的行序列：每行给出它在原文中的 UTF-16 起点与内容（不含换行符）。
+#[cfg(any(target_os = "macos", test))]
+fn split_lines_utf16(raw: &str) -> Vec<(usize, &str)> {
+    let mut lines = Vec::new();
+    let mut start_byte = 0usize;
+    let mut start_utf16 = 0usize;
+    let mut utf16 = 0usize;
+    for (byte, ch) in raw.char_indices() {
+        if ch == '\n' {
+            lines.push((start_utf16, &raw[start_byte..byte]));
+            start_byte = byte + 1;
+            start_utf16 = utf16 + 1;
+        }
+        utf16 += ch.len_utf16();
+    }
+    lines.push((start_utf16, &raw[start_byte..]));
+    return lines;
+}
+
+/// 两行能否合并成同一块：上一行未结束句子，且下一行是续接形态。
+///
+/// 这是“标题/表格单元格不被并进句子”的核心判据：标题与单元格都不带句末标点，
+/// 但它们的下一行以大写字母开头（新块），因此不会被合并。
+#[cfg(any(target_os = "macos", test))]
+pub fn can_join_lines(previous: &str, next: &str) -> bool {
+    let previous = previous.trim_end();
+    let next = next.trim_start();
+    if previous.is_empty() || next.is_empty() {
+        return false;
+    }
+    if ends_sentence(previous) {
+        return false;
+    }
+    return starts_continuation(next);
+}
+
+/// 行尾是否结束了一个句子：去掉尾随引号/括号后以句末标点结尾。
+/// 缩写（Fig. / Eq. / et al. / 单字母缩写等）不算句末——论文里极常见。
+#[cfg(any(target_os = "macos", test))]
+fn ends_sentence(text: &str) -> bool {
+    let trimmed = text.trim_end_matches(|c: char| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                '"' | '\'' | '”' | '’' | ')' | ']' | '»' | '）' | '】' | '》'
+            )
+    });
+    let Some(last) = trimmed.chars().next_back() else {
+        return false;
+    };
+    if !matches!(last, '.' | '!' | '?' | '…' | '。' | '！' | '？') {
+        return false;
+    }
+    if last == '.' && ends_with_abbreviation(trimmed) {
+        return false;
+    }
+    return true;
+}
+
+/// 行尾的点号是缩写还是句号：点号前的“词”是 1 到 3 个字母（Fig./Eq./al./U.S.）时
+/// 按缩写处理，允许继续拼行。
+#[cfg(any(target_os = "macos", test))]
+fn ends_with_abbreviation(text: &str) -> bool {
+    let head = text.trim_end_matches('.').trim_end();
+    let token: Vec<char> = head
+        .chars()
+        .rev()
+        .take_while(|c| c.is_alphabetic())
+        .collect();
+    return !token.is_empty() && token.len() <= 3;
+}
+
+/// 下一行是否为续接形态：除大写字母开头（新块：标题、新句子）外都算续接。
+///
+/// 这条规则要覆盖行级提供方的各种切法：小写单词、数字、CJK、以及被公式/标点
+/// 切开的碎片（"," "−" "1" "."）。判断“上一行是否结束句子”已经挡掉了真正的
+/// 句子边界，剩下的非大写开头都应当接回去。
+#[cfg(any(target_os = "macos", test))]
+fn starts_continuation(text: &str) -> bool {
+    let Some(first) = text.chars().next() else {
+        return false;
+    };
+    return !first.is_uppercase();
+}
+
+/// CJK 字符：判断拼行要不要补空格，以及“无大小写”的续接行。
+#[cfg(any(target_os = "macos", test))]
+fn is_cjk(c: char) -> bool {
+    return matches!(
+        c as u32,
+        0x3040..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF
+    );
+}
+
+/// 拼行时两行之间要不要插空格：闭合标点前不插、开括号后不插、CJK 之间不插，
+/// 其余插一个空格。
+#[cfg(any(target_os = "macos", test))]
+fn needs_space(previous: Option<char>, next: Option<char>) -> bool {
+    let (Some(previous), Some(next)) = (previous, next) else {
+        return false;
+    };
+    if matches!(
+        next,
+        '.' | ','
+            | ';'
+            | ':'
+            | '!'
+            | '?'
+            | '…'
+            | ')'
+            | ']'
+            | '}'
+            | '、'
+            | '，'
+            | '；'
+            | '：'
+            | '。'
+            | '！'
+            | '？'
+            | '）'
+            | '】'
+            | '」'
+            | '』'
+            | '”'
+            | '’'
+    ) {
+        return false;
+    }
+    if matches!(previous, '(' | '[' | '{' | '“' | '‘') {
+        return false;
+    }
+    if is_cjk(previous) && is_cjk(next) {
+        return false;
+    }
+    return true;
+}
+
 /// 将字符（Unicode codepoint）偏移换算为 UTF-16 码元偏移。
 ///
 /// AT-SPI 的文本偏移按字符计，而共享分句逻辑（sentence 模块）以 UTF-16 码元计；
@@ -437,9 +771,10 @@ pub fn reconcile_with_primary(
 #[cfg(test)]
 mod tests {
     use super::{
-        capture_in_context, capture_with_embedded_objects, char_offset_to_utf16,
-        expand_embedded_objects, find_anchor, reconcile_with_primary, remember_primary,
-        EmbeddedCapture, EmbeddedObject, SentenceCapture, EMBEDDED_OBJECT_CHAR,
+        assemble_block_segments, block_looks_cut, capture_in_context, capture_in_segments,
+        capture_with_embedded_objects, char_offset_to_utf16, expand_embedded_objects, find_anchor,
+        join_block_around_anchor, reconcile_with_primary, remember_primary, EmbeddedCapture,
+        EmbeddedObject, SentenceCapture, EMBEDDED_OBJECT_CHAR,
     };
 
     /// 锚点候选 1：提供方忠实响应请求窗口（窗口偏移有效）
@@ -937,6 +1272,188 @@ mod tests {
                 .unwrap();
         assert!(result.touched_edge);
         assert_eq!(expanded_of(&result), ("cut off word", 8));
+    }
+
+    /// 子串在文本中的 UTF-16 偏移（测试辅助）
+    fn utf16_of(text: &str, needle: &str) -> usize {
+        let byte = text.find(needle).expect("needle not found");
+        return text[..byte].encode_utf16().count();
+    }
+
+    /// 块片段组装：片段间以换行连接，选区偏移按“前面的片段 + 换行”累计
+    #[test]
+    fn assemble_block_segments_maps_the_selection_offset() {
+        let segments = ["first line", "second line", "third"];
+        let (block, offset) = assemble_block_segments(&segments, 1, 3);
+        assert_eq!(block, "first line\nsecond line\nthird");
+        assert_eq!(offset, 11 + 3);
+
+        let (head_block, head_offset) = assemble_block_segments(&segments, 0, 0);
+        assert_eq!(head_block, block);
+        assert_eq!(head_offset, 0);
+    }
+
+    /// 块片段直接取句：引用标注把段落切成片段时也要接回整句
+    /// （PDF 文本层在链接标注处切分，段落会停在 "…memory ["）
+    #[test]
+    fn capture_in_segments_rejoins_citations() {
+        let segments = [
+            "Recurrent neural networks, long short-term memory [",
+            "13] and gated recurrent networks.",
+        ];
+        let offset = utf16_of(segments[0], "memory");
+        let (capture, word) = capture_in_segments(&segments, 0, offset, "memory").unwrap();
+        assert_eq!(word, "memory");
+        let SentenceCapture::Expanded { sentence, .. } = capture else {
+            panic!("expected an expanded sentence");
+        };
+        assert_eq!(
+            sentence,
+            "Recurrent neural networks, long short-term memory [13] and gated recurrent networks."
+        );
+    }
+
+    /// 段落是否被切断：内嵌对象前的空白、引用标注处的开括号都算；标题与单元格不算
+    #[test]
+    fn block_looks_cut_detection() {
+        assert!(block_looks_cut("…a sequence of hidden states "));
+        assert!(block_looks_cut("…long short-term memory ["));
+        assert!(block_looks_cut("…the Transformer ("));
+        assert!(!block_looks_cut("1 Introduction"));
+        assert!(!block_looks_cut("91"));
+        assert!(!block_looks_cut("A complete sentence."));
+    }
+
+    /// 块拼接：行内公式被拆成多个字符块（"h" "t" "−" "1"），仍要接回同一句。
+    /// 回归：公式之后的符号/数字曾被当成新块，句子在公式处被截断
+    #[test]
+    fn block_join_reconnects_formula_fragments() {
+        let raw = "they generate a sequence of hidden states \nh\nt\n, as a function of the previous hidden state \nh\nt\n−\n1\n and the input for position \nt\n. This inherently";
+        let offset = utf16_of(raw, "function");
+        let (block, block_sel) = join_block_around_anchor(raw, offset, offset + 8).unwrap();
+        assert_eq!(
+            block,
+            "they generate a sequence of hidden states h t, as a function of the previous hidden \
+             state h t − 1 and the input for position t. This inherently"
+        );
+        assert_eq!(block_sel, utf16_of(&block, "function"));
+        // 拼回块后句子完整：不被公式切断，也不把下一句并进来
+        let (capture, _) =
+            capture_in_context(&block, "function", &[block_sel as isize], 0, false).unwrap();
+        let SentenceCapture::Expanded { sentence, .. } = capture else {
+            panic!("expected an expanded sentence");
+        };
+        assert_eq!(
+            sentence,
+            "they generate a sequence of hidden states h t, as a function of the previous hidden \
+             state h t − 1 and the input for position t."
+        );
+    }
+
+    /// 块拼接：网页段落本身是完整块，下一行的标题（大写开头）不被并进句子。
+    /// 回归：早期实现把换行抹平后重新分句，“…lazy dog Results We evaluate…” 会被并成一句
+    #[test]
+    fn block_join_stops_at_heading() {
+        let raw = "The quick brown fox jumps over the lazy dog\nResults\nWe evaluate the model on three datasets.";
+        let offset = utf16_of(raw, "lazy");
+        let (block, block_sel) = join_block_around_anchor(raw, offset, offset + 4).unwrap();
+        assert_eq!(block, "The quick brown fox jumps over the lazy dog");
+        assert_eq!(block_sel, offset);
+    }
+
+    /// 块拼接：PDF 的软换行（行切开同一个句子）要接回去，行间只留一个空格
+    #[test]
+    fn block_join_continues_soft_wrapped_lines() {
+        let raw = "3.2 Input Layer. The first thing to build a model is to\r\nprepare inputs with abundant information, such as User features\r\ninclude user ID and other user information. Next one.";
+        let offset = utf16_of(raw, "abundant");
+        let (block, block_sel) = join_block_around_anchor(raw, offset, offset + 8).unwrap();
+        assert_eq!(
+            block,
+            "3.2 Input Layer. The first thing to build a model is to prepare inputs with abundant \
+             information, such as User features include user ID and other user information. Next one."
+        );
+        assert_eq!(block_sel, utf16_of(&block, "abundant"));
+        // 折行后的块里能取回跨行整句（PDF 选词取句的核心能力）
+        let (capture, _) =
+            capture_in_context(&block, "abundant", &[block_sel as isize], 0, false).unwrap();
+        let SentenceCapture::Expanded { sentence, .. } = capture else {
+            panic!("expected an expanded sentence");
+        };
+        assert_eq!(
+            sentence,
+            "The first thing to build a model is to prepare inputs with abundant information, \
+             such as User features include user ID and other user information."
+        );
+    }
+
+    /// 块拼接：上一行已经结束句子时不再向上合并（哪怕下一行以小写开头）
+    #[test]
+    fn block_join_stops_after_sentence_end() {
+        let raw = "Done.\nnext line here";
+        let offset = utf16_of(raw, "line");
+        let (block, block_sel) = join_block_around_anchor(raw, offset, offset + 4).unwrap();
+        assert_eq!(block, "next line here");
+        assert_eq!(block_sel, 5);
+    }
+
+    /// 块拼接：行尾软连字符合并时去掉连字符，选区偏移同步前移
+    #[test]
+    fn block_join_dehyphenates() {
+        let raw = "The per-\ncentage improves.";
+        let offset = utf16_of(raw, "centage");
+        let (block, block_sel) = join_block_around_anchor(raw, offset, offset + 7).unwrap();
+        assert_eq!(block, "The percentage improves.");
+        assert_eq!(block_sel, utf16_of(&block, "centage"));
+    }
+
+    /// 块拼接：Chromium 在折行处插入 U+2010 连字符（原文没有），也要去掉
+    #[test]
+    fn block_join_dehyphenates_unicode_hyphen() {
+        let raw = "such as lan‐
+guage modeling";
+        let offset = utf16_of(raw, "lan");
+        let (block, block_sel) = join_block_around_anchor(raw, offset, offset + 3).unwrap();
+        assert_eq!(block, "such as language modeling");
+        assert_eq!(block_sel, 8);
+    }
+
+    /// 块拼接：缩写（Fig. / Eq. / et al.）不是句末，跨行仍要接回去
+    #[test]
+    fn block_join_keeps_abbreviation_lines_together() {
+        let raw = "as shown in Fig.\n3 the curve rises";
+        let offset = utf16_of(raw, "curve");
+        let (block, _) = join_block_around_anchor(raw, offset, offset + 5).unwrap();
+        assert_eq!(block, "as shown in Fig. 3 the curve rises");
+    }
+
+    /// 块拼接：空行不算块边界（Chromium 的 PDF 查看器用连续换行分隔视觉行）
+    #[test]
+    fn block_join_ignores_blank_lines() {
+        let raw = "The quick brown fox\n\njumps over the lazy dog";
+        let offset = utf16_of(raw, "lazy");
+        let (block, _) = join_block_around_anchor(raw, offset, offset + 4).unwrap();
+        assert_eq!(block, "The quick brown fox jumps over the lazy dog");
+    }
+
+    /// 块拼接：CJK 折行直接相接，不补空格
+    #[test]
+    fn block_join_cjk_without_space() {
+        let raw = "这是第一句话\n第二行继续写完";
+        let offset = utf16_of(raw, "第二行");
+        let (block, block_sel) = join_block_around_anchor(raw, offset, offset + 3).unwrap();
+        assert_eq!(block, "这是第一句话第二行继续写完");
+        assert_eq!(block_sel, 6);
+    }
+
+    /// 块拼接：手动跨行选择时整段保留，不受“不能并块”的规则约束
+    #[test]
+    fn block_join_keeps_multiline_selection() {
+        let raw = "Results\nThe quick brown fox jumps over the lazy dog";
+        let start = utf16_of(raw, "Results");
+        let end = utf16_of(raw, "lazy") + 4;
+        let (block, block_sel) = join_block_around_anchor(raw, start, end).unwrap();
+        assert_eq!(block, "Results The quick brown fox jumps over the lazy dog");
+        assert_eq!(block_sel, 0);
     }
 
     /// PRIMARY 变化判定：首次与内容变化都算变化，内容不变不算；变回旧内容也算变化

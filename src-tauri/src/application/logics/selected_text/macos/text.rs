@@ -63,22 +63,6 @@ pub(super) fn looks_truncated(sentence: &str) -> bool {
     return starts_lowercase || !ends_terminal;
 }
 
-/// 把换行符逐个换成空格（长度不变，UTF-16 偏移不受影响）。
-///
-/// 视觉行硬换行（Chromium 的 PDF 查看器等把文本按视觉行给出，行间是 `\r\n`）会使
-/// UAX #29 强制分句（SB4），把跨行整句切成碎片；扩大上下文取句时先抹掉换行。
-pub(super) fn flatten_line_breaks(text: &str) -> String {
-    return text
-        .chars()
-        .map(|c| if c == '\r' || c == '\n' { ' ' } else { c })
-        .collect();
-}
-
-/// 折叠连续空白为单个空格（抹换行产生的双空格、行首行尾空白一并收拾）。
-pub(super) fn collapse_whitespace(text: &str) -> String {
-    return text.split_whitespace().collect::<Vec<_>>().join(" ");
-}
-
 #[cfg(test)]
 mod tests {
     use super::strip_text_artifacts_with_offset;
@@ -143,13 +127,6 @@ mod tests {
             super::strip_text_artifacts("a\tb\nc, d-e."),
             "a\tb\nc, d-e."
         );
-    }
-
-    /// 折叠空白：换行抹成的双空格合并，首尾空白去掉
-    #[test]
-    fn collapse_whitespace_merges_runs() {
-        assert_eq!(super::collapse_whitespace("a  b \r\n c "), "a b c");
-        assert_eq!(super::collapse_whitespace(""), "");
     }
 
     /// 截断判定：小写开头或不以句末标点（含其后的引号括号）结尾
