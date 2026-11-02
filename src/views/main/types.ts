@@ -5,6 +5,13 @@ import type * as dict from '../../logics/dict';
 /** 主界面的三本词典 */
 export type DictName = 'collins' | 'oxford' | 'youdao';
 
+/** 词典的显示名（就地提示、AI 卡片、失败文案共用同一套称呼） */
+export const DICT_LABELS: Record<DictName, string> = {
+    collins: '柯林斯',
+    oxford: '牛津',
+    youdao: '有道'
+};
+
 /** 单词列表的单词卡片 */
 export interface ItemModel<T> {
     item: T;

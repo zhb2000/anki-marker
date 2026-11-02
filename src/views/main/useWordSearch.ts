@@ -3,9 +3,8 @@ import { computed, reactive, ref, watch } from 'vue';
 import * as utils from '../../logics/utils';
 import * as dict from '../../logics/dict';
 import * as preference from '../../logics/preference';
-import { dialog } from '../../fluent-controls';
 import { useTransientNotice } from '../../fluent-controls/useTransientNotice';
-import type { DictName, ItemModel, WordItems } from './types';
+import { DICT_LABELS, type DictName, type ItemModel, type WordItems } from './types';
 
 /** 单词搜索：搜索框、词典与发音选项、各词典的搜索结果 */
 export function useWordSearch() {
@@ -53,6 +52,16 @@ export function useWordSearch() {
         'oxford': '',
         'youdao': ''
     };
+    /**
+     * 进行中的请求。同一个词典同一个词被重复请求时，后来的调用等这一次结束再返回——
+     * 界面刷新不关心这个差别，但 AI 预取拿到返回值后会立刻读 wordItems，
+     * 若这里直接按“已查过”返回，它读到的是还没填上的空列表，会把“还没回来”当成“词典没收录”
+     */
+    const searchJobs: Record<DictName, { word: string; promise: Promise<boolean>; } | null> = {
+        'collins': null,
+        'oxford': null,
+        'youdao': null
+    };
 
     /** 发音失败的就地提示：挂在发音行末尾，不挤动按钮与单选项 */
     const { notice: pronunciationNotice, show: showPronunciationNotice } = useTransientNotice(3000);
@@ -88,15 +97,16 @@ export function useWordSearch() {
      *
      * 点击“查询”按钮或按下回车键时直接调用此函数。
      *
-     * @param options.errorFeedback 查询失败时的反馈方式：dialog（默认，显式查询）弹错误框；
-     *   inline 在结果列表上方就地提示（手打查询：逐键弹模态框会打断输入）；
-     *   silent 只 console.error（AI 预取静默重试）
-     * @returns 查询失败时返回 false，其余路径（含去重早退、空词清空、成功）返回 true
+     * @param options.errorFeedback 查询失败时的反馈方式：inline（默认）在结果列表上方就地提示；
+     *   silent 只 console.error（AI 预取）。不用模态框：查询失败是“这个列表为什么是空的”的
+     *   原因，贴在列表上比抢焦点弹窗更贴合语境，也不会在连续失败时排队弹框
+     * @returns 查询失败时返回 false，其余路径（含去重命中、空词清空、成功）返回 true。
+     *   同一个词正在请求时等待那次请求结束：返回 true 即表示 wordItems 已更新完毕
      */
     async function searchAndUpdate(
         word: string,
         dictionary: DictName,
-        options?: { errorFeedback?: 'dialog' | 'inline' | 'silent'; }
+        options?: { errorFeedback?: 'inline' | 'silent'; }
     ): Promise<boolean> {
         word = word.trim();
         if (word.length === 0) {
@@ -106,12 +116,35 @@ export function useWordSearch() {
             clearSearchNoticeOf(dictionary);
             return true;
         }
+        const pending = searchJobs[dictionary];
+        if (pending != null && pending.word === word) {
+            // 同一个词正在请求：等它结束再返回，不要当成“已查过”。
+            // 错误反馈沿用最初那次调用，重复调用不再弹第二次提示
+            return pending.promise;
+        }
         if (word === searchingOrSearchedWords[dictionary]) {
-            // 无需重复搜索
-            // - 若 word 正在被搜索，则等待搜索结果即可
-            // - 若 word 上次已被搜索成功，则复用界面上的单词列表
+            // 上次已搜到：复用界面上的单词列表
             return true;
         }
+
+        const job = { word, promise: runSearch(word, dictionary, options) };
+        searchJobs[dictionary] = job;
+        try {
+            return await job.promise;
+        } finally {
+            // 只清理自己那一份：期间可能已被新的查询顶替
+            if (searchJobs[dictionary] === job) {
+                searchJobs[dictionary] = null;
+            }
+        }
+    }
+
+    /** searchAndUpdate 的请求部分：去重与在途等待都在调用方，这里只管查一次并更新列表 */
+    async function runSearch(
+        word: string,
+        dictionary: DictName,
+        options?: { errorFeedback?: 'inline' | 'silent'; }
+    ): Promise<boolean> {
         // 新单词的搜索请求，清空界面上的已有的搜索结果
         wordItems[dictionary] = [];
         // 函数体此前无 await，因此此处更新 searchingOrSearchedWords 遵循 searchAndUpdate 的调用顺序
@@ -136,15 +169,13 @@ export function useWordSearch() {
             if (searchingOrSearchedWords[dictionary] === word) {
                 searchingOrSearchedWords[dictionary] = '';
                 console.error(error);
-                const feedback = options?.errorFeedback ?? 'dialog';
-                if (feedback === 'inline') {
-                    showSearchNotice(`查询失败：${error instanceof Error ? error.message : String(error)}`, {
-                        severity: 'error',
-                        duration: 0,
-                    });
+                if ((options?.errorFeedback ?? 'inline') === 'inline') {
+                    // 点名是哪本词典：提示位于整个结果区顶部，不写来源就分不清是哪个列表失败了
+                    showSearchNotice(
+                        `${DICT_LABELS[dictionary]}词典查询失败：${error instanceof Error ? error.message : String(error)}`,
+                        { severity: 'error', duration: 0 }
+                    );
                     searchNoticeDict = dictionary;
-                } else if (feedback === 'dialog') {
-                    await dialog.message(String(error), { title: '查询失败', kind: 'error' });
                 }
             }
             return false;

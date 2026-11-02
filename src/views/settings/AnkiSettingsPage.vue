@@ -23,21 +23,21 @@ useHighlight();
                     <ResetButton setting-key="ankiConnectURL" />
                 </template>
                 <FluentInput class="card-input" :placeholder="`默认：${TEXT_SETTING_FALLBACKS.ankiConnectURL}`"
-                    v-bind="bind('ankiConnectURL')" />
+                    v-bind="bind('ankiConnectURL')" no-auto-correct />
             </FluentSettingCard>
             <FluentSettingCard header="牌组名称" setting-id="deckName" description="将划词结果添加到哪个牌组">
                 <template #header-extra>
                     <ResetButton setting-key="deckName" />
                 </template>
                 <FluentInput class="card-input" :placeholder="`默认：${TEXT_SETTING_FALLBACKS.deckName}`"
-                    v-bind="bind('deckName')" />
+                    v-bind="bind('deckName')" no-auto-correct />
             </FluentSettingCard>
             <FluentSettingCard header="笔记模板名称" setting-id="modelName" description="使用的笔记模板名称">
                 <template #header-extra>
                     <ResetButton setting-key="modelName" />
                 </template>
                 <FluentInput class="card-input" :placeholder="`默认：${TEXT_SETTING_FALLBACKS.modelName}`"
-                    v-bind="bind('modelName')" />
+                    v-bind="bind('modelName')" no-auto-correct />
             </FluentSettingCard>
         </div>
 
@@ -54,7 +54,7 @@ useHighlight();
                 <template #header-extra>
                     <ResetButton setting-key="ankiExecutablePath" />
                 </template>
-                <FluentInput class="card-input" placeholder="默认：自动检测" v-bind="bind('ankiExecutablePath')" />
+                <FluentInput class="card-input" placeholder="默认：自动检测" v-bind="bind('ankiExecutablePath')" no-auto-correct />
             </FluentSettingCard>
         </div>
     </div>

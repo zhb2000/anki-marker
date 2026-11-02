@@ -26,6 +26,11 @@ export interface LlmRequestConfig {
     maxTokens: number;
     /** 推理强度；非空时以 OpenAI 风格 reasoning_effort 字段透传（统一转小写），空/undefined 不传 */
     reasoningEffort?: string;
+    /**
+     * 采样温度。缺省不传，由服务端使用默认值——新一代模型（GPT-5、Claude Opus 4.6 之后）
+     * 只接受默认值，传别的会直接 400；推理模型调温度也基本不改变结果的多样性
+     */
+    temperature?: number;
 }
 
 /** 单条聊天消息 */
@@ -33,6 +38,19 @@ export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: stri
 
 /** max_tokens 配置的内置默认值：足以容纳思考模型（如 DeepSeek V4 默认档位）的思维链加正文 */
 export const LLM_DEFAULT_MAX_TOKENS = 8192;
+
+/**
+ * 解析用户配置的采样温度。留空/非数字/超出 0–2 都返回 undefined（不传该参数），
+ * 错误的值不发送，避免把请求打成 400
+ */
+export function parseTemperature(raw: string): number | undefined {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) {
+        return undefined;
+    }
+    const value = Number(trimmed);
+    return Number.isFinite(value) && value >= 0 && value <= 2 ? value : undefined;
+}
 
 /**
  * 解析用户配置的最大生成 token 数。
@@ -62,7 +80,13 @@ export interface StreamChatOptions {
     onReasoning?: (fullReasoning: string, delta: string) => void;
     /** true 时请求体加 response_format: { type: 'json_object' }，强制模型输出 JSON */
     jsonMode?: boolean;
-    /** 采样温度，默认 0.2 */
+    /**
+     * 结构化输出 schema。服务端支持 strict 模式时，它会取代 json_object——
+     * 语义上保证输出符合 schema（例如 pick 只能取候选编号），"编号非法"变成不可能事件。
+     * 不支持的服务（如 DeepSeek）会在第一次失败后自动降级为 json_object，并按端点+模型记住
+     */
+    jsonSchema?: { name: string; schema: Record<string, unknown>; };
+    /** 采样温度；缺省不传，交给服务端默认值（新一代模型普遍只接受默认值，传别的会 400） */
     temperature?: number;
     /**
      * 首字节超时（毫秒）：发出请求到收到响应头的最长等待，默认 LLM_FIRST_BYTE_TIMEOUT_MS。
@@ -160,7 +184,7 @@ function buildModelsUrl(baseUrl: string): string {
  * gpt-5 系列拒绝 max_tokens（要求 max_completion_tokens）、只接受默认 temperature；
  * 部分第三方服务不认 reasoning_effort 或 response_format。遇到 400/422 时逐项降级重试。
  */
-type CompatStep = 'omit_temperature' | 'max_completion_tokens' | 'omit_response_format' | 'omit_reasoning_effort';
+type CompatStep = 'omit_temperature' | 'max_completion_tokens' | 'json_object_only' | 'omit_response_format' | 'omit_reasoning_effort';
 
 /** 推理强度 trim 并转小写；为空时返回 null（不传该字段） */
 function normalizeReasoningEffort(cfg: LlmRequestConfig): string | null {
@@ -177,13 +201,26 @@ function normalizeReasoningEffort(cfg: LlmRequestConfig): string | null {
 const COMPAT_STEPS: readonly {
     step: CompatStep;
     hint: RegExp;
-    applicable: (cfg: LlmRequestConfig, opts: StreamChatOptions) => boolean;
+    /**
+     * 某项对本次请求是否有意义。第三个参数是当前已应用的降级集合，
+     * 用于让“先降级成 json_object、再考虑整体去掉”有先后顺序
+     */
+    applicable: (cfg: LlmRequestConfig, opts: StreamChatOptions, current: ReadonlySet<CompatStep>) => boolean;
 }[] = [
     { step: 'omit_reasoning_effort', hint: /reasoning[_ ]?effort/, applicable: cfg => normalizeReasoningEffort(cfg) != null },
-    { step: 'omit_temperature', hint: /temperature/, applicable: () => true },
+    { step: 'omit_temperature', hint: /temperature/, applicable: (_, opts) => opts.temperature != null },
     // OpenAI 的报错原文：“Unsupported parameter: 'max_tokens' ... Use 'max_completion_tokens' instead.”
     { step: 'max_completion_tokens', hint: /max_tokens/, applicable: () => true },
-    { step: 'omit_response_format', hint: /response_format|json_object/, applicable: (_, opts) => opts.jsonMode === true },
+    // schema 不被接受时先降级为 json_object，仍然不行才整体去掉 response_format
+    { step: 'json_object_only', hint: /json[ _]?schema|structured output|response_format/, applicable: (_, opts) => opts.jsonSchema != null },
+    // 本地推理服务（如 Ollama 的 mlx 引擎）会用 “structured output is unavailable” 这类说法拒绝 response_format
+    {
+        step: 'omit_response_format',
+        hint: /response_format|json_object|json[ _]?schema|structured output/,
+        // 用了 schema 时先走 json_object_only，不要一步跳到“不带任何约束”
+        applicable: (_, opts, current) => opts.jsonMode === true
+            && (opts.jsonSchema == null || current.has('json_object_only')),
+    },
 ];
 
 /**
@@ -207,10 +244,14 @@ function nextCompat(
     opts: StreamChatOptions,
     current: ReadonlySet<CompatStep>
 ): Set<CompatStep> | null {
-    if (!(error instanceof LlmError) || error.kind !== 'http' || (error.status !== 400 && error.status !== 422)) {
+    // 400/422 是标准的“参数不被接受”；501 是本地服务常用的“这个能力没实现”，同样可以通过省略参数绕过。
+    // 其余状态码（鉴权、限流、服务端错误）不是参数问题，降级没用
+    const canDowngrade = error instanceof LlmError && error.kind === 'http'
+        && (error.status === 400 || error.status === 422 || error.status === 501);
+    if (!canDowngrade) {
         return null;
     }
-    const pending = COMPAT_STEPS.filter(item => !current.has(item.step) && item.applicable(cfg, opts));
+    const pending = COMPAT_STEPS.filter(item => !current.has(item.step) && item.applicable(cfg, opts, current));
     if (pending.length === 0) {
         return null;
     }
@@ -232,16 +273,29 @@ function buildRequestBody(
         messages: opts.messages,
         stream: true,
     };
-    if (!compat.has('omit_temperature')) {
-        body.temperature = opts.temperature ?? 0.2;
+    // 未显式指定时整体省略：推理模型与新一代非推理模型（GPT-5、Claude Opus 4.6 之后）只接受
+    // 服务端默认值，传自定义温度会直接 400，白白多触发一次降级重试
+    if (opts.temperature != null && !compat.has('omit_temperature')) {
+        body.temperature = opts.temperature;
     }
     if (compat.has('max_completion_tokens')) {
         body.max_completion_tokens = cfg.maxTokens;
     } else {
         body.max_tokens = cfg.maxTokens;
     }
-    if (opts.jsonMode === true && !compat.has('omit_response_format')) {
-        body.response_format = { type: 'json_object' };
+    if (!compat.has('omit_response_format')) {
+        if (opts.jsonSchema != null && !compat.has('json_object_only')) {
+            body.response_format = {
+                type: 'json_schema',
+                json_schema: {
+                    name: opts.jsonSchema.name,
+                    strict: true,
+                    schema: opts.jsonSchema.schema,
+                },
+            };
+        } else if (opts.jsonMode === true) {
+            body.response_format = { type: 'json_object' };
+        }
     }
     // 推理强度为空/空白时整体省略该字段，交由模型使用其默认值
     const reasoningEffort = normalizeReasoningEffort(cfg);
@@ -460,8 +514,9 @@ async function streamChatCompletionOnce(
         fireTimeout(`LLM request exceeded the overall limit of ${totalTimeoutMs / 1000}s`);
     }, totalTimeoutMs);
 
+    const requestUrl = buildChatCompletionsUrl(cfg.baseUrl);
     try {
-        const response = await fetch(buildChatCompletionsUrl(cfg.baseUrl), {
+        const response = await fetch(requestUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -475,7 +530,7 @@ async function streamChatCompletionOnce(
         if (!response.ok) {
             // 读取响应文本并截取前 300 字符放进 message，便于定位鉴权/参数等错误
             const text = await response.text();
-            throw new LlmError('http', response.status, `HTTP ${response.status}: ${text.slice(0, 300)}`);
+            throw new LlmError('http', response.status, `HTTP ${response.status}（${requestUrl}）: ${text.slice(0, 300)}`);
         }
         const { content, reasoning } = await readSseStream(response, resetIdleTimer, opts.onDelta, opts.onReasoning);
         if (content.length === 0) {
@@ -495,9 +550,11 @@ async function streamChatCompletionOnce(
         if (error instanceof LlmError) {
             throw error; // 已归一化的业务错误（http/bad_response）直接透传
         }
-        // 其余为真正的网络层失败（DNS、连接拒绝、TLS 等）
-        const detail = error instanceof Error ? error.message : String(error);
-        throw new LlmError('network', undefined, detail);
+        // 其余为真正的网络层失败（DNS、连接拒绝、TLS 等）。
+        // 底层报错是 reqwest 的英文原文（error sending request for url ...），直接上屏没人看得懂，
+        // 换成“连不上这个地址”的说法，原文留在控制台
+        console.warn('[llm] 网络请求失败:', error);
+        throw new LlmError('network', undefined, `无法连接到 ${requestUrl}（请确认该地址上有服务在运行、端口正确）`);
     } finally {
         // 函数返回前务必清除超时定时器
         clearTimeout(phaseTimerId);
@@ -577,8 +634,8 @@ async function fetchWithTimeout<T>(
         if (error instanceof LlmError) {
             throw error;
         }
-        const detail = error instanceof Error ? error.message : String(error);
-        throw new LlmError('network', undefined, detail);
+        console.warn('[llm] 网络请求失败:', error);
+        throw new LlmError('network', undefined, `无法连接到 ${url}（请确认该地址上有服务在运行、端口正确）`);
     } finally {
         clearTimeout(timeoutId);
         externalSignal?.removeEventListener('abort', onExternalAbort);
@@ -599,7 +656,8 @@ export async function fetchAvailableModels(
     cfg: Pick<LlmRequestConfig, 'baseUrl' | 'apiKey'>,
     signal?: AbortSignal
 ): Promise<RemoteModelInfo[]> {
-    const payload = await fetchWithTimeout(buildModelsUrl(cfg.baseUrl), {
+    const url = buildModelsUrl(cfg.baseUrl);
+    const payload = await fetchWithTimeout(url, {
         method: 'GET',
         headers: {
             'Accept': 'application/json',
@@ -608,7 +666,8 @@ export async function fetchAvailableModels(
     }, FETCH_MODELS_TIMEOUT_MS, signal, async (response): Promise<unknown> => {
         if (!response.ok) {
             const text = await response.text();
-            throw new LlmError('http', response.status, `HTTP ${response.status}: ${text.slice(0, 300)}`);
+            // 报错带上实际请求的地址：地址少写 /v1 这类错误，看地址一眼就能定位
+            throw new LlmError('http', response.status, `HTTP ${response.status}（${url}）: ${text.slice(0, 300)}`);
         }
         try {
             return await response.json();
@@ -645,14 +704,15 @@ export async function fetchAvailableModels(
  * 发送一条极小的补全请求以验证 API 地址、Key 与模型真实可用，返回耗时（毫秒）。
  *
  * 与 AI 优选走完全相同的路径：同为 streamChatCompletion，同样带 temperature、max_tokens、
- * response_format（json_object）与 reasoning_effort，同样的超时与 400/422 参数降级，
+ * response_format（结构化输出 schema）与 reasoning_effort，同样的超时与 400/422 参数降级，
  * 降级结果也写入同一缓存。这样“测试通过”即意味着真实请求的参数也被接受，
- * 不会再出现测试通过、实际优选失败的情况。
+ * 不会再出现测试通过、实际优选失败的情况；测试同时充当一次结构化输出能力探测。
  * 调用方应传入与真实请求一致的 maxTokens/reasoningEffort；缺省时 maxTokens 取默认值、不传推理强度。
  * 非 2xx 抛 'http'（message 含上游错误原文，便于定位 key/额度/模型名问题）。
  */
 export async function testLlmConnection(
-    cfg: Pick<LlmRequestConfig, 'baseUrl' | 'apiKey' | 'model'> & Partial<Pick<LlmRequestConfig, 'maxTokens' | 'reasoningEffort'>>,
+    cfg: Pick<LlmRequestConfig, 'baseUrl' | 'apiKey' | 'model'>
+        & Partial<Pick<LlmRequestConfig, 'maxTokens' | 'reasoningEffort' | 'temperature'>>,
     signal?: AbortSignal
 ): Promise<number> {
     const startedAt = performance.now();
@@ -662,11 +722,23 @@ export async function testLlmConnection(
         model: cfg.model,
         maxTokens: cfg.maxTokens ?? LLM_DEFAULT_MAX_TOKENS,
         reasoningEffort: cfg.reasoningEffort,
+        temperature: cfg.temperature,
     }, {
         // OpenAI 的 json_object 模式要求消息中出现 “JSON” 字样，否则直接 400
         messages: [{ role: 'user', content: 'Reply with the JSON object {"ok":true} and nothing else.' }],
         signal,
         jsonMode: true,
+        // 顺带探测结构化输出能力：支持 strict 的端点这里就走 schema，不支持的在这里降级，
+        // 结果按“端点 + 模型”缓存，真实优选请求直接沿用，不再各自撞一次
+        jsonSchema: {
+            name: 'ping',
+            schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['ok'],
+                properties: { ok: { type: 'boolean' } },
+            },
+        },
     });
     return Math.round(performance.now() - startedAt);
 }

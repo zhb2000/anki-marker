@@ -101,7 +101,7 @@ watch(() => props.open, open => {
         @close="emit('close')" @command="onCommand">
         <div class="dialog-toolbar">
             <FluentInput ref="searchRef" class="search-input" placeholder="搜索模型或归属方"
-                clearable v-model="search" />
+                clearable no-auto-correct v-model="search" />
             <!-- 仅在列表加载成功时展示：加载中/失败时 models 可能是残留数据，无从判断是否存在隐藏条目 -->
             <label v-if="!loading && error == null && hasHiddenModels" class="show-all">
                 <FluentToggleSwitch v-model="showAll" />

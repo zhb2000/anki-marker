@@ -75,6 +75,7 @@ pub struct Config {
     llm_model: String,
     llm_max_tokens: String,
     llm_reasoning_effort: String,
+    llm_temperature: String,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -99,6 +100,7 @@ pub struct PartialConfig {
     llm_model: Option<String>,
     llm_max_tokens: Option<String>,
     llm_reasoning_effort: Option<String>,
+    llm_temperature: Option<String>,
 }
 
 impl Config {
@@ -160,6 +162,7 @@ impl Default for Config {
             llm_model: String::new(),
             llm_max_tokens: String::new(),
             llm_reasoning_effort: String::new(),
+            llm_temperature: String::new(),
         };
     }
 }
@@ -328,6 +331,12 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        // 采样温度（字符串存储，空串表示不传该参数，由服务端使用默认值）
+        let llm_temperature = doc
+            .get("llm-temperature")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         return Ok(Config {
             theme,
             anki_connect_url,
@@ -347,6 +356,7 @@ pub fn read_config(config_path: impl AsRef<Path>) -> Result<Config, String> {
             llm_model,
             llm_max_tokens,
             llm_reasoning_effort,
+            llm_temperature,
         });
     }
     return inner(config_path.as_ref());
@@ -418,6 +428,9 @@ pub fn commit_config(config_path: impl AsRef<Path>, modified: PartialConfig) -> 
         }
         if let Some(llm_reasoning_effort) = modified.llm_reasoning_effort {
             doc["llm-reasoning-effort"] = toml_edit::value(llm_reasoning_effort);
+        }
+        if let Some(llm_temperature) = modified.llm_temperature {
+            doc["llm-temperature"] = toml_edit::value(llm_temperature);
         }
         // 原子写入：std::fs::write 先截断再写，中途崩溃会留下空文件或残缺文件
         super::utils::write_file_atomically(config_path, doc.to_string().as_bytes()).map_err(

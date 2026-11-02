@@ -7,6 +7,7 @@ import {
     LlmError,
     fetchAvailableModels,
     parseMaxTokens,
+    parseTemperature,
     testLlmConnection,
     type RemoteModelInfo,
 } from '../../logics/llm';
@@ -44,6 +45,9 @@ const maxTokensDescription = `单次请求的生成上限；思考模型的思�
 
 /** 思考强度卡片的常驻说明（禁用时让位于禁用原因） */
 const reasoningEffortDescription = '常见取值 low / medium / high，实际支持因所配服务而异；留空则不传参';
+
+/** 采样温度卡片的常驻说明 */
+const temperatureDescription = '0–2 之间；留空则不传参，由服务端使用默认值（多数新模型只接受默认值，改动可能被忽略或报错）';
 
 // #region 模型列表拉取（“获取模型列表”按钮 + ModelListDialog）
 const modelDialogOpen = ref(false);
@@ -120,7 +124,8 @@ function describeFetchModelsError(error: LlmError): string {
             return `鉴权失败（HTTP ${error.status}），请检查 API Key 是否正确`;
         }
         if (error.status === 404 || error.status === 405) {
-            return `该服务未提供模型列表接口（HTTP ${error.status}），可直接手动输入模型名`;
+            // 报错里已带上实际请求的地址：地址少写 /v1（本地服务最常见）时看地址就能定位
+            return `${error.message}；OpenAI 兼容接口通常以 /v1 结尾，请检查 API 地址是否完整，也可以直接手动输入模型名`;
         }
         return error.message;
     }
@@ -247,6 +252,7 @@ async function runConnectionTest(): Promise<void> {
                 model: state.llmModel,
                 maxTokens: parseMaxTokens(state.llmMaxTokens),
                 reasoningEffort: state.llmReasoningEffort,
+                temperature: parseTemperature(state.llmTemperature),
             },
             controller.signal
         );
@@ -298,7 +304,7 @@ function describeTestError(error: LlmError): string {
                     <ResetButton setting-key="llmBaseUrl" :disabled="llmConfigDisabled" />
                 </template>
                 <div class="field-actions">
-                    <FluentInput class="card-input" placeholder="如 https://api.deepseek.com"
+                    <FluentInput class="card-input" placeholder="如 https://api.deepseek.com" no-auto-correct
                         v-bind="bind('llmBaseUrl')" :disabled="llmConfigDisabled" />
                     <FluentButton class="action-button" :disabled="llmConfigDisabled"
                         title="从预设服务商列表填充官方 API 地址" @click="presetDialogOpen = true">
@@ -323,7 +329,7 @@ function describeTestError(error: LlmError): string {
                     <ResetButton setting-key="llmModel" :disabled="llmConfigDisabled" />
                 </template>
                 <div class="field-actions">
-                    <FluentInput class="card-input" placeholder="如 deepseek-v4-flash"
+                    <FluentInput class="card-input" placeholder="如 deepseek-flash" no-auto-correct
                         v-bind="bind('llmModel')" :disabled="llmConfigDisabled" />
                     <FluentButton class="action-button" :disabled="fetchModelsDisabled" :title="fetchModelsTitle"
                         @click="openModelDialog">获取模型列表</FluentButton>
@@ -340,15 +346,23 @@ function describeTestError(error: LlmError): string {
                 <template #header-extra>
                     <ResetButton setting-key="llmMaxTokens" :disabled="llmConfigDisabled" />
                 </template>
-                <FluentInput class="card-input" :placeholder="`默认：${LLM_DEFAULT_MAX_TOKENS}`"
+                <FluentInput class="card-input" :placeholder="`默认：${LLM_DEFAULT_MAX_TOKENS}`" no-auto-correct
                     v-bind="bind('llmMaxTokens')" :disabled="llmConfigDisabled" />
+            </FluentSettingCard>
+            <FluentSettingCard header="采样温度" setting-id="llmTemperature"
+                :disabled="llmConfigDisabled" :description="llmConfigDisabledReason ?? temperatureDescription">
+                <template #header-extra>
+                    <ResetButton setting-key="llmTemperature" :disabled="llmConfigDisabled" />
+                </template>
+                <FluentInput class="card-input" placeholder="留空则不传参" no-auto-correct
+                    v-bind="bind('llmTemperature')" :disabled="llmConfigDisabled" />
             </FluentSettingCard>
             <FluentSettingCard header="思考强度" setting-id="llmReasoningEffort"
                 :disabled="llmConfigDisabled" :description="llmConfigDisabledReason ?? reasoningEffortDescription">
                 <template #header-extra>
                     <ResetButton setting-key="llmReasoningEffort" :disabled="llmConfigDisabled" />
                 </template>
-                <FluentInput class="card-input" placeholder="留空则不传参"
+                <FluentInput class="card-input" placeholder="留空则不传参" no-auto-correct
                     v-bind="bind('llmReasoningEffort')" :disabled="llmConfigDisabled" />
             </FluentSettingCard>
         </div>

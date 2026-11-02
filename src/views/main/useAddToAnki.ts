@@ -4,7 +4,7 @@ import * as anki from '../../logics/anki';
 import * as cfg from '../../logics/config';
 import * as dict from '../../logics/dict';
 import * as globals from '../../logics/globals';
-import type * as aiPickLogic from '../../logics/aiPick';
+import * as aiPickLogic from '../../logics/aiPick';
 import { dialog } from '../../fluent-controls';
 import { createCardOperation, type CardNotices } from './cardNotices';
 import type { DictName, ItemModel, WordItems } from './types';
@@ -17,18 +17,39 @@ const WRITE_RECONCILE_CLOCK_SLACK_MS = 10_000;
  * 期间用户可能又划了一句、编辑了句子，或得到了新词的 AI 优选（恰好落在同一词典的同一序号上），
  * 这些都不能混进这张卡片。加卡流程只读这份快照，不回读界面的当前状态
  */
-export interface AddNoteSnapshot {
-    dictionary: DictName;
-    /** 所加的词典条目 */
-    entry: dict.CollinsItem | dict.OxfordItem | dict.YoudaoItem;
+interface AddNoteSnapshotBase {
+    /** 写入“单词”字段、并据以查找发音的词 */
+    word: string;
     /** 卡片例句的 HTML（已转义，选区内的词加粗） */
     sentenceHTML: string;
-    /** 写入“笔记”字段的 AI 笔记；null 表示不写 */
-    aiNote: string | null;
     pronunciationType: 'en' | 'us';
     deckName: string;
     modelName: string;
 }
+
+/**
+ * 一次加卡的写入内容。两种来源：命中了词典条目，或三本词典都没有合适义项时由 AI 自己生成
+ * 的释义——后者没有条目可挂，字段要另行构造，但入库、发音、失败核对的流程完全相同
+ */
+export type AddNoteSnapshot = AddNoteSnapshotBase & (
+    | {
+        kind: 'dict';
+        dictionary: DictName;
+        /** 所加的词典条目 */
+        entry: dict.CollinsItem | dict.OxfordItem | dict.YoudaoItem;
+        /** 写入“笔记”字段的 AI 笔记；null 表示不写 */
+        aiNote: string | null;
+    }
+    | {
+        kind: 'ai';
+        /** AI 生成的语境化释义（写“释义”字段） */
+        gloss: string;
+        /** AI 生成的笔记；null 表示不写 */
+        note: string | null;
+        /** 候选来源有词典查询失败：释义未经核对，来源标注要说清 */
+        unverified: boolean;
+    }
+);
 
 /** 加卡/移除流程的协作方 */
 export interface CardActionContext {
@@ -116,7 +137,7 @@ export async function addCardToAnki(
     context: CardActionContext
 ): Promise<void> {
     const { ankiService, notices, retry } = context;
-    const { dictionary, entry, sentenceHTML, aiNote, pronunciationType, deckName, modelName } = snapshot;
+    const { sentenceHTML, pronunciationType, deckName, modelName, word } = snapshot;
     item.status = 'processing-add';
     const operation = createCardOperation(notices, item, '正在添加到 Anki…');
     // 出错或中断时先清掉进行中的提示，再决定显示什么（成功则什么都不显示）
@@ -140,11 +161,11 @@ export async function addCardToAnki(
         phase = 'prepare';
         await operation.race(prepareDeckAndModel(ankiService, deckName, modelName, operation.signal));
         phase = 'write';
-        // AI 优选联动：若所加条目正是 AI 优选命中的条目且带有笔记，则写入“笔记”字段
-        fields = anki.makeFields(dictionary, entry, sentenceHTML, aiNote);
-        const word = ('phrase' in entry && entry.phrase != null)
-            ? entry.phrase
-            : entry.word;
+        // 命中词典条目时写条目的完整内容（并于 AI 选中的正是它时补一条笔记）；
+        // 未命中时写 AI 自己生成的释义，并在“笔记”字段标注来源
+        fields = snapshot.kind === 'dict'
+            ? anki.makeFields(snapshot.dictionary, snapshot.entry, sentenceHTML, snapshot.aiNote)
+            : anki.makeAiFields(word, sentenceHTML, snapshot.gloss, snapshot.note, snapshot.unverified);
         // 发音地址全部不可用时不附带音频（见 addMarkerNote 的说明），不再把已判定不可用的地址交给 AnkiConnect
         const audioResult = await operation.race(dict.makePronunciationURL(word, pronunciationType));
         const audio = audioResult != null
@@ -283,6 +304,10 @@ export interface UseAddToAnkiOptions {
     selectedPronunciation: Ref<'en' | 'us'>;
     /** AI 优选卡片的状态（只在加卡快照时读取） */
     aiPick: aiPickLogic.AiPickState;
+    /** AI 生成卡片自己的条目状态（未命中词典条目时，加卡/移除/编辑都作用在它身上） */
+    aiGeneratedItem: ItemModel<null>;
+    /** 当前查询词：AI 生成卡片的“单词”字段与发音都取它 */
+    searchText: Ref<string>;
     /** 生成卡片例句的 HTML（只在加卡快照时调用） */
     makeSentenceHTML: () => string;
     notices: CardNotices;
@@ -292,16 +317,45 @@ export interface UseAddToAnkiOptions {
 
 /** 词典卡片与 AI 优选卡片上的加卡、移除、编辑笔记 */
 export function useAddToAnki(options: UseAddToAnkiOptions) {
-    const { wordItems, selectedDict, selectedPronunciation, aiPick, makeSentenceHTML, notices, services } = options;
+    const { wordItems, selectedDict, selectedPronunciation, aiPick, aiGeneratedItem, searchText,
+        makeSentenceHTML, notices, services } = options;
+
+    /** 词条写入“单词”字段、并据以查发音的词（牛津的部分条目以短语为词头） */
+    function wordOf(entry: dict.CollinsItem | dict.OxfordItem | dict.YoudaoItem): string {
+        return ('phrase' in entry && entry.phrase != null) ? entry.phrase : entry.word;
+    }
 
     /** 在第一个 await 之前快照一次加卡的全部写入内容（见 AddNoteSnapshot） */
-    function takeSnapshot(dictionary: DictName, index: number, item: ItemModel<AddNoteSnapshot['entry']>): AddNoteSnapshot {
+    function takeSnapshot(
+        dictionary: DictName,
+        index: number,
+        item: ItemModel<dict.CollinsItem | dict.OxfordItem | dict.YoudaoItem>
+    ): AddNoteSnapshot {
         const { config } = services();
         return {
+            kind: 'dict',
             dictionary,
             entry: item.item,
+            word: wordOf(item.item),
             sentenceHTML: makeSentenceHTML(),
             aiNote: aiNoteFor(aiPick, dictionary, index),
+            pronunciationType: selectedPronunciation.value,
+            deckName: cfg.effectiveTextSetting('deckName', config.deckName),
+            modelName: cfg.effectiveTextSetting('modelName', config.modelName),
+        };
+    }
+
+    /** AI 生成卡片的快照：没有词典条目，释义与笔记都来自这次 AI 输出 */
+    function takeAiSnapshot(): AddNoteSnapshot {
+        const { config } = services();
+        return {
+            kind: 'ai',
+            word: searchText.value.trim(),
+            // 整句卡片的“单词”字段本身就是整句，例句再放一遍只会重复
+            sentenceHTML: aiPick.kind === 'sentence' ? '' : makeSentenceHTML(),
+            gloss: aiPick.contextualDef,
+            note: aiPick.note.length > 0 ? aiPick.note : null,
+            unverified: aiPick.sourceIssues.length > 0,
             pronunciationType: selectedPronunciation.value,
             deckName: cfg.effectiveTextSetting('deckName', config.deckName),
             modelName: cfg.effectiveTextSetting('modelName', config.modelName),
@@ -335,10 +389,29 @@ export function useAddToAnki(options: UseAddToAnkiOptions) {
         await changeItemAddedOf(selectedDict.value, index);
     }
 
-    /** AI 优选卡片的加卡入口：操作 AI 选中的那条真实词典条目，可能与当前 tab 不同词典 */
+    /**
+     * AI 优选卡片的加卡入口：命中词典条目时操作那条真实条目（可能与当前 tab 不同词典）；
+     * 未命中时添加的是 AI 自己生成的释义，状态挂在 aiGeneratedItem 上
+     */
     async function handleAiPickAdd() {
         if (aiPick.pick != null) {
             await changeItemAddedOf(aiPick.pick.source, aiPick.pick.index);
+            return;
+        }
+        if (aiPick.phase !== 'done' || !aiPickLogic.isAiPickAddable(aiPick)) {
+            return;
+        }
+        const item = aiGeneratedItem;
+        const context: CardActionContext = {
+            ankiService: services().ankiService,
+            notices,
+            retry: () => { void handleAiPickAdd(); },
+        };
+        notices.clear(item);
+        if (item.status === 'not-added') {
+            await addCardToAnki(item, takeAiSnapshot(), context);
+        } else if (item.status === 'is-added') {
+            await removeCardFromAnki(item, context);
         }
     }
 
@@ -351,7 +424,11 @@ export function useAddToAnki(options: UseAddToAnkiOptions) {
      * 因此在 guiEditNote 失败时降级为打开 Anki 卡片浏览器并定位到该笔记，卡片浏览器中可直接编辑。
      */
     async function openEditDialogOf(dictionary: DictName, index: number) {
-        const item = wordItems[dictionary][index];
+        await openEditNoteOf(wordItems[dictionary][index]);
+    }
+
+    /** 打开指定条目（词典条目或 AI 生成卡片）对应的 Anki 笔记编辑器 */
+    async function openEditNoteOf(item: ItemModel<unknown>) {
         if (item.id == null) {
             console.error('item.id is null when openEditDialog, item:', item);
             return;
@@ -380,11 +457,13 @@ export function useAddToAnki(options: UseAddToAnkiOptions) {
         await openEditDialogOf(selectedDict.value, index);
     }
 
-    /** AI 优选卡片的编辑入口：操作 AI 选中的那条真实词典条目，可能与当前 tab 不同词典 */
+    /** AI 优选卡片的编辑入口：命中条目时改那条条目对应的笔记，否则改 AI 生成的那张卡片 */
     async function handleAiPickEdit() {
         if (aiPick.pick != null) {
             await openEditDialogOf(aiPick.pick.source, aiPick.pick.index);
+            return;
         }
+        await openEditNoteOf(aiGeneratedItem);
     }
 
     return { changeItemAddedOf, changeItemAdded, handleAiPickAdd, openEditDialogOf, openEditDialog, handleAiPickEdit };

@@ -210,6 +210,13 @@ export const SETTING_ENTRIES: SettingEntry[] = [
         keywords: ['最大', 'token', 'tokens', 'max tokens', '生成上限', '生成', '截断', '思维链', '思考', 'max_tokens'],
     },
     {
+        id: 'llmTemperature',
+        page: 'ai',
+        title: '采样温度',
+        description: '0–2 之间；留空则不传参，由服务端使用默认值（多数新模型只接受默认值，改动可能被忽略或报错）',
+        keywords: ['温度', 'temperature', '采样', '随机', '随机性', 'top_p'],
+    },
+    {
         id: 'llmReasoningEffort',
         page: 'ai',
         title: '思考强度',

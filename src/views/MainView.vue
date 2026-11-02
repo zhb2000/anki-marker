@@ -74,7 +74,8 @@ const ai = useAiPick({
     searchAndUpdate: search.searchAndUpdate,
     getConfig: () => config,
 });
-const { aiPick, showAiPickCard, aiPickCardStatus, aiPickNotice, aiPickItem, isAiPicked, stopAiPick, regenerateAiPick } = ai;
+const { aiPick, aiPickSourceIssues, slowFetchSources, showAiPickCard, aiPickCardStatus, aiPickNotice, aiPickItem,
+    isAiPicked, stopAiPick, skipAiFetch, regenerateAiPick } = ai;
 // #endregion
 
 // #region 查询调度
@@ -93,6 +94,8 @@ const cards = useAddToAnki({
     selectedDict,
     selectedPronunciation,
     aiPick,
+    aiGeneratedItem: ai.aiGeneratedItem,
+    searchText: search.searchText,
     makeSentenceHTML: editor.makeSentenceHTML,
     notices,
     services: () => ({ config, ankiService }),
@@ -188,6 +191,7 @@ onBeforeMount(async () => {
             </FluentButton>
             <FluentButton class="header-button" @click="pasteToEdit">粘贴</FluentButton>
             <FluentInput class="header-input-text" type="text" v-model="searchText" placeholder="回车查询单词" name="search"
+                no-auto-correct
                 @input="onUserEdit"
                 autocomplete="off" @keydown.enter="submitSearch()" />
             <FluentButton class="header-button" @click="submitSearch()">查询
@@ -222,14 +226,15 @@ onBeforeMount(async () => {
                     :severity="pronunciationNotice?.severity ?? 'error'"
                     :message="pronunciationNotice?.message ?? null" />
             </div>
-            <!-- 手打查询失败的就地提示：位于结果列表上方，收起时不占高度 -->
+            <!-- 查询失败的就地提示：位于结果列表上方，收起时不占高度 -->
             <FluentStatusText class="search-notice" :severity="searchNotice?.severity ?? 'error'"
                 :message="searchNotice?.message ?? null" />
             <ScrollMemory :show="selectedDict === 'collins'" class="words-container-inner">
                 <!-- AI 优选卡随列表内容滚动，每个词典容器内各放一份（内容同源）；active 标记当前可见实例，仅它播放动画 -->
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
-                    :picked-item="aiPickItem" :notice="aiPickNotice" :active="selectedDict === 'collins'"
-                    @add-btn-click="handleAiPickAdd" @edit-btn-click="handleAiPickEdit" @stop="stopAiPick"
+                    :picked-item="aiPickItem" :notice="aiPickNotice" :source-issues="aiPickSourceIssues"
+                    :slow-sources="slowFetchSources" :active="selectedDict === 'collins'"
+                    @add-btn-click="handleAiPickAdd" @edit-btn-click="handleAiPickEdit" @stop="stopAiPick" @skip-fetch="skipAiFetch"
                     @regenerate="regenerateAiPick" @notice-action="handleAiPickNoticeAction" />
                 <CollinsCard v-for="(item, index) in wordItems['collins']" :key="index" :item="item.item" :index="index"
                     :status="item.status" :notice="item.notice" :ai-picked="isAiPicked('collins', index)"
@@ -238,8 +243,9 @@ onBeforeMount(async () => {
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'oxford'" class="words-container-inner">
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
-                    :picked-item="aiPickItem" :notice="aiPickNotice" :active="selectedDict === 'oxford'"
-                    @add-btn-click="handleAiPickAdd" @edit-btn-click="handleAiPickEdit" @stop="stopAiPick"
+                    :picked-item="aiPickItem" :notice="aiPickNotice" :source-issues="aiPickSourceIssues"
+                    :slow-sources="slowFetchSources" :active="selectedDict === 'oxford'"
+                    @add-btn-click="handleAiPickAdd" @edit-btn-click="handleAiPickEdit" @stop="stopAiPick" @skip-fetch="skipAiFetch"
                     @regenerate="regenerateAiPick" @notice-action="handleAiPickNoticeAction" />
                 <OxfordCard v-for="(item, index) in wordItems['oxford']" :key="index" :item="item.item" :index="index"
                     :status="item.status" :notice="item.notice" :ai-picked="isAiPicked('oxford', index)"
@@ -248,8 +254,9 @@ onBeforeMount(async () => {
             </ScrollMemory>
             <ScrollMemory :show="selectedDict === 'youdao'" class="words-container-inner">
                 <AiPickCard v-if="showAiPickCard" :state="aiPick" :status="aiPickCardStatus"
-                    :picked-item="aiPickItem" :notice="aiPickNotice" :active="selectedDict === 'youdao'"
-                    @add-btn-click="handleAiPickAdd" @edit-btn-click="handleAiPickEdit" @stop="stopAiPick"
+                    :picked-item="aiPickItem" :notice="aiPickNotice" :source-issues="aiPickSourceIssues"
+                    :slow-sources="slowFetchSources" :active="selectedDict === 'youdao'"
+                    @add-btn-click="handleAiPickAdd" @edit-btn-click="handleAiPickEdit" @stop="stopAiPick" @skip-fetch="skipAiFetch"
                     @regenerate="regenerateAiPick" @notice-action="handleAiPickNoticeAction" />
                 <div v-if="selectedDict === 'youdao' && wordItemsYoudao['concise'].length > 0" class="youdao-title">
                     简明释义

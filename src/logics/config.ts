@@ -21,9 +21,10 @@ export interface ConfigModel {
     llmModel: string;
     llmMaxTokens: string;
     llmReasoningEffort: string;
+    llmTemperature: string;
 }
 
-export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'ankiExecutablePath', 'globalShortcut', 'wordToSentence', 'keepRunningOnClose', 'showMenuBarIcon', 'keepDockIconInBackground', 'trayIconStyle', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmMaxTokens', 'llmReasoningEffort'] as const;
+export const CONFIG_KEYS = ['theme', 'ankiConnectURL', 'deckName', 'modelName', 'autoLaunchAnki', 'ankiExecutablePath', 'globalShortcut', 'wordToSentence', 'keepRunningOnClose', 'showMenuBarIcon', 'keepDockIconInBackground', 'trayIconStyle', 'llmEnabled', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'llmMaxTokens', 'llmReasoningEffort', 'llmTemperature'] as const;
 
 /**
  * 配置项的默认值（即“未设置”状态下的存储值）。
@@ -50,6 +51,7 @@ export const CONFIG_DEFAULTS: Record<keyof ConfigModel, string | boolean> = {
     llmModel: '',
     llmMaxTokens: '',
     llmReasoningEffort: '',
+    llmTemperature: '',
 };
 
 /**
@@ -128,6 +130,8 @@ export class Config implements ConfigModel {
     public llmMaxTokens!: string;
     /** LLM 的推理强度（reasoning effort），留空表示使用模型默认值 */
     public llmReasoningEffort!: string;
+    /** LLM 的采样温度（字符串存储），留空表示不传该参数 */
+    public llmTemperature!: string;
     /** 存储配置项的对象 */
     private config: ConfigModel;
     /** 被修改过的配置项 */

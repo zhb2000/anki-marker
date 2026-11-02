@@ -256,6 +256,34 @@ export function makeFields(
     return fields;
 }
 
+/**
+ * 根据 AI 自己生成的释义构造字段（三本词典都没有合适义项时的兜底）。
+ *
+ * 不写音标：模型给的国际音标错误率高且无法核验，宁可留空（模板里那一栏自然为空），
+ * 也不要把一个看起来权威的错音标写进卡片。来源标注放进“笔记”字段，随卡片长期保留
+ */
+export function makeAiFields(
+    word: string,
+    sentence: string,
+    gloss: string,
+    note?: string | null,
+    unverified?: boolean
+): Fields {
+    // 两种来源要分清：词典确实没收录这个义项，还是这次根本没拿到完整的词典结果
+    // （查询失败、被熔断跳过、用户跳过等待，都归入后者——卡片上再细分，卡片里只写“未核对”）
+    const provenance = unverified === true
+        ? 'AI 生成，词典结果未核对，仅供参考'
+        : 'AI 生成，词典未收录，仅供参考';
+    return {
+        '单词': toFieldText(word),
+        '释义': `<span class="cndef">${escapeHTML(gloss)}</span>`,
+        '例句': sentence,
+        '笔记': note != null && note.length > 0
+            ? `${escapeHTML(provenance)}<br>${escapeHTML(note)}`
+            : escapeHTML(provenance),
+    };
+}
+
 import MODEL_FRONT from '../assets/model-front.html?raw';
 import MODEL_BACK from '../assets/model-back.html?raw';
 import MODEL_CSS from '../assets/model-css.css?raw';

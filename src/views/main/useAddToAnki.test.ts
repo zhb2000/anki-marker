@@ -8,7 +8,7 @@ import type { CollinsItem } from '../../logics/dict';
 import { decodeHtmlEntities } from '../../logics/stringutils';
 import { createCardNotices } from './cardNotices';
 import { aiNoteFor, useAddToAnki } from './useAddToAnki';
-import type { DictName, WordItems } from './types';
+import type { DictName, ItemModel, WordItems } from './types';
 
 const mocks = vi.hoisted(() => ({
     ensureAnkiConnect: vi.fn<(onProgress?: (message: string) => void, options?: { signal?: AbortSignal; }) => Promise<void>>(),
@@ -57,6 +57,9 @@ function setup() {
         contextualDef: '狐狸',
         note: 'sly as a <fox> & co.',
         fallback: false,
+        kind: 'word',
+        sourceIssues: [],
+        errorMessage: '',
     });
     const page = { sentenceHTML: 'The quick <b>fox</b>.' };
     const config = { deckName: '  ', modelName: 'Marker Model' } as Config;
@@ -71,16 +74,20 @@ function setup() {
         guiBrowse: vi.fn<(query: string) => Promise<number>>(() => Promise.resolve(1)),
     };
     const notices = createCardNotices();
+    const searchText = ref('fox');
+    const aiGeneratedItem = reactive<ItemModel<null>>({ item: null, status: 'not-added', id: null });
     const cards = useAddToAnki({
         wordItems,
         selectedDict,
         selectedPronunciation,
         aiPick,
+        aiGeneratedItem,
+        searchText,
         makeSentenceHTML: () => page.sentenceHTML,
         notices,
         services: () => ({ config, ankiService: ankiService as unknown as AnkiService }),
     });
-    return { wordItems, selectedDict, selectedPronunciation, aiPick, page, config, ankiService, notices, cards };
+    return { wordItems, selectedDict, selectedPronunciation, aiPick, aiGeneratedItem, searchText, page, config, ankiService, notices, cards };
 }
 
 /** addMarkerNote 第 n 次调用的参数 */
@@ -101,7 +108,7 @@ beforeEach(() => {
 
 describe('aiNoteFor', () => {
     const state = (overrides: Partial<AiPickState>): AiPickState => ({
-        phase: 'done', pick: { source: 'oxford', index: 2 }, contextualDef: '', note: 'note', fallback: false, ...overrides,
+        phase: 'done', pick: { source: 'oxford', index: 2 }, contextualDef: '', note: 'note', fallback: false, kind: 'word', sourceIssues: [], errorMessage: '', ...overrides,
     });
 
     it('仅在优选已完成且命中所加条目时返回笔记', () => {
@@ -257,5 +264,82 @@ describe('useAddToAnki：AI 优选卡片入口', () => {
         ctx.selectedDict.value = 'youdao';
         await ctx.cards.handleAiPickAdd();
         expect(ctx.wordItems.collins[0].status).toBe('is-added');
+    });
+});
+
+describe('useAddToAnki：AI 生成卡片（未命中词典条目）', () => {
+    function fallbackCtx() {
+        const ctx = setup();
+        Object.assign(ctx.aiPick, {
+            phase: 'done',
+            pick: null,
+            contextualDef: '狐狸（比喻狡猾的人）',
+            note: 'sly as a fox',
+            fallback: true,
+            kind: 'word',
+        });
+        return ctx;
+    }
+
+    it('把 AI 释义写进“释义”，来源标注写进“笔记”，不写音标', async () => {
+        const ctx = fallbackCtx();
+        await ctx.cards.handleAiPickAdd();
+
+        const call = addNoteCall(ctx);
+        expect(call.fields['单词']).toBe('fox');
+        expect(decodeHtmlEntities(call.fields['释义']!)).toContain('狐狸（比喻狡猾的人）');
+        expect(call.fields['音标']).toBeUndefined();
+        const note = decodeHtmlEntities(call.fields['笔记']!);
+        expect(note).toContain('词典未收录');
+        expect(note).toContain('sly as a fox');
+        expect(mocks.makePronunciationURL).toHaveBeenCalledWith('fox', 'us');
+        // 加的是 AI 卡片，不应动任何词典条目
+        expect(ctx.wordItems.collins[0].status).toBe('not-added');
+        expect(ctx.aiGeneratedItem).toMatchObject({ status: 'is-added', id: 1001 });
+    });
+
+    it('已添加后再点一次从 Anki 移除', async () => {
+        const ctx = fallbackCtx();
+        await ctx.cards.handleAiPickAdd();
+        await ctx.cards.handleAiPickAdd();
+
+        expect(ctx.ankiService.deleteNotes.mock.calls[0][0]).toEqual([1001]);
+        expect(ctx.aiGeneratedItem).toMatchObject({ status: 'not-added', id: null });
+    });
+
+    it('有词典查询失败时，来源标注写明未核对', async () => {
+        const ctx = fallbackCtx();
+        ctx.aiPick.sourceIssues = [{ source: 'youdao', kind: 'failed', count: 0 }];
+        await ctx.cards.handleAiPickAdd();
+
+        expect(decodeHtmlEntities(addNoteCall(ctx).fields['笔记']!)).toContain('词典结果未核对');
+    });
+
+    it('整句输入复用同一套字段：单词是整句、释义是译文、例句留空', async () => {
+        const ctx = setup();
+        ctx.searchText.value = 'The quick brown fox jumps over the lazy dog.';
+        Object.assign(ctx.aiPick, {
+            phase: 'done', pick: null, kind: 'sentence',
+            contextualDef: '敏捷的棕色狐狸跳过了那只懒狗。',
+            note: '', fallback: true, sourceIssues: [],
+        });
+
+        await ctx.cards.handleAiPickAdd();
+        const call = addNoteCall(ctx);
+        expect(call.fields['单词']).toBe('The quick brown fox jumps over the lazy dog.');
+        expect(decodeHtmlEntities(call.fields['释义']!)).toContain('敏捷的棕色狐狸跳过了那只懒狗');
+        // 单词字段已经是整句，例句再放一遍只会重复
+        expect(call.fields['例句']).toBe('');
+        expect(ctx.aiGeneratedItem.status).toBe('is-added');
+    });
+
+    it('“未收录”没有可入库的内容，不写卡片', async () => {
+        const ctx = setup();
+        Object.assign(ctx.aiPick, {
+            phase: 'done', pick: null, contextualDef: '', note: '疑似拼写错误', fallback: false, kind: 'misspelling',
+        });
+        await ctx.cards.handleAiPickAdd();
+        expect(ctx.ankiService.addMarkerNote).not.toHaveBeenCalled();
+        expect(ctx.aiGeneratedItem.status).toBe('not-added');
     });
 });

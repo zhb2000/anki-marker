@@ -82,6 +82,7 @@ function handlePeekEnd() {
     <HoverWrapper>
         <div class="fluent-password-input" :class="[$attrs.class, { disabled }]" :style="$attrs.style">
             <input v-model="text" class="inner-input" spellcheck="false" autocomplete="off"
+                autocapitalize="off" autocorrect="off"
                 @wheel="handleInputWheel" @change="commitTrim" v-bind="restAttrs()" :type="inputType"
                 :disabled="disabled" />
             <!-- @mousedown.prevent 阻止按钮抢夺输入框焦点，避免触发外部绑定的 blur 保存逻辑 -->

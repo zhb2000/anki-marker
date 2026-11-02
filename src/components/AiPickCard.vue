@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch, type PropType } from 'vue';
 
-import type { AiPickState, DictSource } from '../logics/aiPick';
+import { isAiPickAddable, type AiPickSourceIssue, type AiPickState, type DictSource } from '../logics/aiPick';
+import { DICT_LABELS } from '../views/main/types';
 import type { CollinsItem, OxfordItem, YoudaoItem } from '../logics/dict';
 import AddButton from './AddButton.vue';
 import EditButton from './EditButton.vue';
@@ -36,6 +37,19 @@ const props = defineProps({
     active: {
         type: Boolean,
         required: true
+    },
+    /**
+     * 候选来源问题：本次查询失败的词典，或连续多次返空的词典。
+     * 有了 AI 卡片后用户很少再翻词典 tab，这些状态必须在这一张卡上看得见
+     */
+    sourceIssues: {
+        type: Array as PropType<AiPickSourceIssue[]>,
+        default: () => []
+    },
+    /** 仍在等待结果的词典：非空表示这次预取已经慢到值得明说，并允许跳过 */
+    slowSources: {
+        type: Array as PropType<DictSource[]>,
+        default: () => []
     }
 });
 
@@ -43,20 +57,41 @@ const emit = defineEmits<{
     'add-btn-click': [];
     'edit-btn-click': [];
     'stop': [];
+    'skip-fetch': [];
     'regenerate': [];
     /** 就地反馈里的操作（如“停止”“重试”），由父组件转发给源条目 */
     'notice-action': [];
 }>();
 
-/** 完成态且命中真实词典条目（非 fallback）时才显示加号，语义等同该条目卡片上的加号 */
-const showAddButton = computed(() => props.state.phase === 'done' && props.state.pick != null);
+/**
+ * 完成态可加卡：命中词典条目时加的是那条条目；未命中时加的是 AI 自己生成的释义（同样是一次真实入库）。
+ * 仅“未收录”（模型判定不是真实词条）时没有可加的内容
+ */
+const showAddButton = computed(() => props.state.phase === 'done' && isAiPickAddable(props.state));
+
+/** 拼写错误与乱码：没有可写的内容，只展示结论 */
+const isUnknown = computed(() =>
+    props.state.kind === 'misspelling' || props.state.kind === 'gibberish');
 
 /** 已添加到 Anki 且命中真实词典条目时显示编辑按钮，语义等同该条目卡片上的编辑按钮 */
 const showEditButton = computed(() => showAddButton.value && props.status === 'is-added');
 
 /** AI 请求进行中的阶段：显示停止按钮 */
 const inProgress = computed(() =>
-    props.state.phase === 'loading' || props.state.phase === 'thinking' || props.state.phase === 'streaming');
+    props.state.phase === 'fetching' || props.state.phase === 'loading'
+    || props.state.phase === 'thinking' || props.state.phase === 'streaming');
+
+/** 正在等待结果的词典名，用于“正在查询有道词典…” */
+const slowLabels = computed(() => props.slowSources.map(source => DICT_LABELS[source]).join('、'));
+
+/**
+ * 正文的重挂载 key：fetching 与 loading 共用一张骨架屏，若按 phase 逐字变化会在
+ * “取候选 → 请求模型”这一瞬间重挂载一次，看起来像闪了一下
+ */
+const bodyKey = computed(() => {
+    const stage = props.state.phase === 'fetching' ? 'loading' : props.state.phase;
+    return `${stage}:${props.state.pick != null}`;
+});
 
 /** 已添加（含处理中）：与 WordCard 一致，整卡描边转为强调色 */
 const isAdded = computed(() =>
@@ -76,12 +111,26 @@ function emitEditBtnClick() {
     emit('edit-btn-click');
 }
 
-/** 词典来源的显示名 */
-const DICT_LABELS: Record<DictSource, string> = {
-    collins: '柯林斯',
-    oxford: '牛津',
-    youdao: '有道'
-};
+/**
+ * 来源问题的文案。返空只陈述事实与次数：那也可能是用户正在连查生僻词，
+ * 替用户下“词典坏了”的结论反而会误导
+ */
+function sourceIssueText(issue: AiPickSourceIssue): string {
+    const label = DICT_LABELS[issue.source];
+    if (issue.kind === 'empty') {
+        return `${label}连续 ${issue.count} 次查询返空`;
+    }
+    if (issue.kind === 'abandoned') {
+        return `${label}查询较慢，已跳过等待`;
+    }
+    const head = issue.kind === 'skipped'
+        ? `${label}连续失败，本次跳过查询`
+        : `${label}查询失败`;
+    if (props.state.pick != null) {
+        return issue.kind === 'skipped' ? head : `${head}，本次未参与优选`;
+    }
+    return isUnknown.value ? `${head}，未能核对` : `${head}，释义未经核对`;
+}
 
 /** 完成态且命中词典条目时的来源名 */
 const sourceLabel = computed(() => {
@@ -92,7 +141,10 @@ const sourceLabel = computed(() => {
 /** 左上角徽标：生成阶段显示“AI”，结果明确后为“AI 优选”（含流式中提前解析出 pick）或“AI 生成”（done 且 fallback） */
 const badgeLabel = computed(() => {
     if (props.state.pick != null) return 'AI 优选';
-    return props.state.phase === 'done' ? 'AI 生成' : 'AI';
+    if (props.state.phase === 'error') return 'AI 失败';
+    if (props.state.phase !== 'done') return 'AI';
+    if (isUnknown.value) return '未收录';
+    return props.state.kind === 'sentence' ? 'AI 译文' : 'AI 生成';
 });
 
 /** 按来源窄化后的被优选条目，三者至多一个非空（模板按此选择对应词典的内容版式） */
@@ -139,7 +191,7 @@ function onBodyAnimationEnd(event: AnimationEvent) {
 
 <template>
     <div class="ai-pick-card" :class="{
-        'is-fallback': state.phase === 'done' && state.fallback,
+        'is-fallback': state.phase === 'done' && state.fallback && state.kind !== 'sentence',
         'is-added': isAdded,
         'anim-card-in': cardAnimIn,
         'use-add-box-shadow-animation': boxShadowAnimation === 'use-add-box-shadow-animation',
@@ -153,6 +205,9 @@ function onBodyAnimationEnd(event: AnimationEvent) {
                     <span v-if="state.phase === 'done' && sourceLabel != null" class="ai-source-badge">
                         {{ sourceLabel }}
                     </span>
+                    <span v-else-if="state.phase === 'done' && state.kind === 'sentence'" class="ai-source-badge">
+                        整句
+                    </span>
                     <span v-else-if="state.phase === 'done' && state.fallback" class="ai-source-badge ai-source-warning">
                         非词典条目
                     </span>
@@ -162,9 +217,22 @@ function onBodyAnimationEnd(event: AnimationEvent) {
                         <button v-else-if="state.phase === 'done'" class="ai-action-btn" @click="emit('regenerate')">重新生成</button>
                     </span>
                 </div>
-                <div v-if="state.phase === 'loading'" class="ai-skeleton" aria-hidden="true">
-                    <div class="ai-skeleton-line"></div>
-                    <div class="ai-skeleton-line ai-skeleton-line-short"></div>
+                <!-- fetching 与 loading 共用骨架屏：取候选和等模型首字节对用户是同一件事 -->
+                <template v-if="state.phase === 'fetching' || state.phase === 'loading'">
+                    <div class="ai-skeleton" aria-hidden="true">
+                        <div class="ai-skeleton-line"></div>
+                        <div class="ai-skeleton-line ai-skeleton-line-short"></div>
+                    </div>
+                    <!-- 只有慢到一定程度才说明在等哪本词典：正常几百毫秒就回来的查询不该出现这行 -->
+                    <div v-if="slowLabels.length > 0" class="ai-fetch-hint">
+                        <span>正在查询{{ slowLabels }}词典…</span>
+                        <button class="ai-action-btn" @click="emit('skip-fetch')">跳过</button>
+                    </div>
+                </template>
+                <!-- 失败：把原因留在卡片上，并给一次重试；不要让卡片闪一下骨架屏就消失 -->
+                <div v-else-if="state.phase === 'error'" class="ai-error">
+                    <span class="ai-error-text">{{ state.errorMessage.length > 0 ? state.errorMessage : 'AI 优选失败' }}</span>
+                    <button class="ai-action-btn" @click="emit('regenerate')">重试</button>
                 </div>
                 <!-- 思考模型正在输出思维链：三圆点错峰跳动，区别于首字节前的骨架屏与正文打字机 -->
                 <div v-else-if="state.phase === 'thinking'" class="ai-thinking" aria-hidden="true">
@@ -172,7 +240,7 @@ function onBodyAnimationEnd(event: AnimationEvent) {
                     <span class="ai-thinking-dots"><span></span><span></span><span></span></span>
                 </div>
                 <!-- key 随 phase 与 pick 是否出现变化：内容形态切换时重挂载，重放淡入动画 -->
-                <div v-else class="ai-pick-body" :key="`${state.phase}:${state.pick != null}`"
+                <div v-else class="ai-pick-body" :key="bodyKey"
                     :class="{ 'anim-body-in': bodyAnimIn }" @animationend="onBodyAnimationEnd">
                     <!-- 命中真实词典条目：渲染该条目的完整内容（内容模板复刻自三张词典卡，无卡片外壳与编辑按钮） -->
                     <template v-if="state.pick != null && collinsItem != null">
@@ -195,12 +263,20 @@ function onBodyAnimationEnd(event: AnimationEvent) {
                         <span v-if="youdaoItem.sense != null"><span v-html="' '"></span><i>{{ youdaoItem.sense }}</i></span>
                         <div v-if="youdaoItem.cnDef != null">{{ youdaoItem.cnDef }}</div>
                     </template>
+                    <!-- 模型判定该输入不是真实词条：结论本身也要告诉用户，而不是让卡片消失 -->
+                    <div v-else-if="isUnknown" class="ai-contextual-def ai-unknown-word">
+                        {{ state.note.length > 0 ? state.note : '词典未收录，可能拼写有误' }}
+                    </div>
                     <!-- fallback 或 pick 尚未解析出的过渡期：打字机渲染语境化释义；
                          也兜底 pick 非空但条目数据缺失的理论分支（只显示笔记/释义区，不 crash） -->
                     <div v-else class="ai-contextual-def">
                         {{ state.contextualDef }}<span v-if="state.phase === 'streaming'" class="ai-caret"></span>
                     </div>
-                    <div v-if="state.note.length > 0" class="ai-note">
+                    <!-- 候选来源的状态：失败会让结果缺依据，连续返空可能是接口静默失效，都要在这张卡上说清 -->
+                    <div v-for="issue in sourceIssues" :key="issue.source" class="ai-dict-warning">
+                        {{ sourceIssueText(issue) }}
+                    </div>
+                    <div v-if="state.note.length > 0 && !isUnknown" class="ai-note">
                         笔记：{{ state.note }}<span
                             v-if="state.phase === 'streaming' && state.pick != null && pickedItem != null"
                             class="ai-caret"></span>
@@ -389,6 +465,45 @@ function onBodyAnimationEnd(event: AnimationEvent) {
 
 .ai-contextual-def {
     overflow-wrap: break-word;
+}
+
+/* “未收录”是结论而不是错误：用常规文字色，不与 fallback 的警告色混为一谈 */
+.ai-unknown-word {
+    color: var(--control-text-color-active);
+}
+
+/* 失败提示：与正文同宽，错误色，右侧跟一个重试 */
+.ai-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--warning-text-color);
+    user-select: text;
+}
+
+.ai-error-text {
+    flex-grow: 1;
+    overflow-wrap: break-word;
+    cursor: text;
+}
+
+/* 等词典结果时的一行提示：与骨架屏同处，弱于正文 */
+.ai-fetch-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--control-text-color-active);
+    user-select: none;
+}
+
+/* 候选来源缺失：比正文弱一级，但用警示色说明“这条释义没有词典可核对” */
+.ai-dict-warning {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--warning-text-color);
 }
 
 .ai-caret {

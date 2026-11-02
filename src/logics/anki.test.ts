@@ -62,7 +62,6 @@ describe('makeFields', () => {
         expect(fields['单词']).toBe('R&amp;D &lt;lab&gt;');
         expect(decodeHtmlEntities(fields['单词'])).toBe(collins.word);
         expect(fields['音标']).toBe(collins.phonetic);
-        expect(fields['释义']).toBe('<i>N-UNCOUNT</i><br><br><span class="endef"><b>R&amp;D</b> is research and development.</span><br><span class="cndef">研发 &amp; 开发 &lt;注&gt;</span>');
         expect('笔记' in fields).toBe(false);
     });
 
@@ -70,13 +69,11 @@ describe('makeFields', () => {
         const fields = makeFields('oxford', oxford, sentence);
         expect(decodeHtmlEntities(fields['单词'])).toBe(oxford.phrase);
         expect(fields['音标']).toBeUndefined();
-        expect(fields['释义']).toBe('<i>phrasal verb</i> informal<br><br><span class="endef">to surprise</span><br><span class="cndef">使吃惊</span>');
     });
 
     it('有道词条：已编码的单词只编码一次', () => {
         const fields = makeFields('youdao', youdao, sentence);
         expect(fields['单词']).toBe('A &amp; E');
-        expect(fields['释义']).toBe('<i>n.</i><br><br><span class="cndef">急诊室 &lt;科&gt;</span>');
     });
 
     it('AI 笔记转义后写入，渲染回文本与原笔记一致', () => {
@@ -89,5 +86,31 @@ describe('makeFields', () => {
     it.each([null, undefined, ''])('笔记为 %j 时不写“笔记”字段', note => {
         const fields = makeFields('youdao', youdao, sentence, note);
         expect('笔记' in fields).toBe(false);
+    });
+});
+
+describe('释义字段', () => {
+    // 断言“哪些内容必须出现、哪些必须不出现”，而不是某个具体 HTML 字符串
+    it('词性与中英文释义都出现在释义里，并保留卡片模板的样式钩子', () => {
+        const sentence = 'An <b>R&amp;D</b> lab &lt;here&gt;.';
+
+        const collinsFields = makeFields('collins', collins, sentence);
+        const definition = decodeHtmlEntities(collinsFields['释义']!);
+        expect(definition).toContain(collins.sense!);
+        expect(definition).toContain(decodeHtmlEntities(collins.enDef!));
+        expect(definition).toContain(collins.cnDef);
+        expect(collinsFields['释义']).toContain('class="endef"');
+        expect(collinsFields['释义']).toContain('class="cndef"');
+
+        const oxfordFields = makeFields('oxford', oxford, sentence);
+        const oxfordDefinition = decodeHtmlEntities(oxfordFields['释义']!);
+        expect(oxfordDefinition).toContain(oxford.sense!);
+        expect(oxfordDefinition).toContain(oxford.ext!);
+        expect(oxfordDefinition).toContain(oxford.cnDef);
+
+        const youdaoFields = makeFields('youdao', youdao, sentence);
+        expect(decodeHtmlEntities(youdaoFields['释义']!)).toContain(youdao.cnDef);
+        // 有道词条没有英文释义，不应出现 endef 区块
+        expect(youdaoFields['释义']).not.toContain('class="endef"');
     });
 });

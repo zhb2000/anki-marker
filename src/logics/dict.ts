@@ -275,7 +275,9 @@ export async function makePronunciationFilename(
     if (dict === 'iciba') {
         pronunciationType = 'en'; // iciba only supports English pronunciation
     }
-    const originalPrefix = `${word}_${dict}_${pronunciationType}`;
+    // 整句查询会把整句塞进文件名，过长会碰到文件系统上限；截断后仍带哈希，唯一性不受影响
+    const prefixWord = word.length > 40 ? word.slice(0, 40) : word;
+    const originalPrefix = `${prefixWord}_${dict}_${pronunciationType}`;
     const hash = new MD5(new TextEncoder().encode(originalPrefix)).hexdigest();
     const originalFilename = `${originalPrefix}_${hash.slice(0, 7)}.mp3`;
     return await sanitizeFilename(originalFilename);

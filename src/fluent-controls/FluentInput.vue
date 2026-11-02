@@ -14,9 +14,15 @@ const props = withDefaults(defineProps<{
     clearable?: boolean;
     /** 禁用输入：禁止编辑并弱化显示；清空按钮同时隐藏（避免禁用状态下仍可清空内容） */
     disabled?: boolean;
+    /**
+     * 值是标识符、URL、数字这类字面量时置 true：关闭自动大写、自动纠正、拼写检查与自动填充。
+     * 中文输入法不受影响；桌面 WebView 上最直接的收益是 "deepseek"、"low" 这类词不再被画红波浪线
+     */
+    noAutoCorrect?: boolean;
 }>(), {
     clearable: false,
     disabled: false,
+    noAutoCorrect: false,
 });
 
 const [model, modifiers] = defineModel({
@@ -64,14 +70,22 @@ function restAttrs() {
          @wheel 在 v-bind 之前，外部显式传入的 @wheel 可覆盖内部的滚轮横滚兼容层 -->
     <HoverWrapper v-if="!clearable">
         <input v-model="text" class="fluent-input" :disabled="disabled" @wheel="handleInputWheel"
+            :autocapitalize="noAutoCorrect ? 'off' : undefined"
+            :autocorrect="noAutoCorrect ? 'off' : undefined"
+            :spellcheck="noAutoCorrect ? 'false' : undefined"
+            :autocomplete="noAutoCorrect ? 'off' : undefined"
             @change="commitTrim" v-bind="$attrs" />
     </HoverWrapper>
     <!-- clearable：包一层相对定位容器，× 按钮绝对定位在输入框内部右侧；class/style 落在容器上 -->
     <div v-else class="fluent-input-clearable" :class="$attrs.class" :style="$attrs.style">
         <HoverWrapper>
             <input ref="inputEl" v-model="text" class="fluent-input" :disabled="disabled"
-                :class="{ 'with-clear-button': showClearButton }" @wheel="handleInputWheel" @change="commitTrim"
-                v-bind="restAttrs()" />
+                :class="{ 'with-clear-button': showClearButton }" @wheel="handleInputWheel"
+                :autocapitalize="noAutoCorrect ? 'off' : undefined"
+                :autocorrect="noAutoCorrect ? 'off' : undefined"
+                :spellcheck="noAutoCorrect ? 'false' : undefined"
+                :autocomplete="noAutoCorrect ? 'off' : undefined"
+                @change="commitTrim" v-bind="restAttrs()" />
         </HoverWrapper>
         <!-- mousedown.prevent 避免点击时夺走输入框焦点；tabindex="-1" 不进入 Tab 序列 -->
         <button v-if="showClearButton" type="button" tabindex="-1" class="clear-button" title="清空"
