@@ -171,10 +171,18 @@ struct AxAttemptError {
 /// AX 成功路径，不再回退 AppleScript）；连词都取不到时才返回 Err（携带
 /// 后台重试句柄——部分应用的无障碍树在被查询后异步物化，如 Word）。
 fn get_selected_context_by_ax() -> Result<SelectedContext, AxAttemptError> {
-    let focused = get_focused_ui_element_by_ax().map_err(|error| AxAttemptError {
-        message: error,
-        retry_pid: None,
-    })?;
+    let focused = match get_focused_ui_element_by_ax() {
+        Ok(focused) => focused,
+        Err(error) => {
+            // 连焦点元素都取不到：Chromium 系（实测 Edge）的无障碍树在后台休眠，
+            // 系统级查询返回 kAXErrorNoValue（-25212），反复查询才会唤醒。用前台
+            // 应用 pid 起后台重试，树就绪后补发完整句子；没有 pid 才直接降级
+            return Err(AxAttemptError {
+                message: error,
+                retry_pid: frontmost_application_pid(),
+            });
+        }
+    };
     let word = match copy_string_attribute_by_ax(&focused, ax_ffi::SELECTED_TEXT_ATTRIBUTE) {
         Ok(word) => word,
         Err(focused_error) => {

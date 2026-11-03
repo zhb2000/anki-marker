@@ -222,6 +222,33 @@ mod tests {
     /// 重试测试共用全局互斥槽位，须串行
     static RETRY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    /// 实机诊断（AX_TEST_PID=目标应用 pid，且其中已选中文字）：跑一次后台重试并打印
+    /// 补发结果。用来验证“无障碍树休眠、需反复查询才物化”的应用（实测 Edge）
+    /// 能否在重试窗口内恢复。
+    #[test]
+    fn selection_retry_by_pid_diagnostic() {
+        let Some(pid) = std::env::var("AX_TEST_PID")
+            .ok()
+            .and_then(|value| value.parse::<i32>().ok())
+        else {
+            return;
+        };
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let callbacks = super::RetryCallbacks {
+            on_started: Box::new(|| {}),
+            on_finished: Box::new(move |context| {
+                let _ = sender.send(context);
+            }),
+            is_cancelled: Box::new(|| false),
+        };
+        super::spawn_selection_retry(pid, callbacks);
+        match receiver.recv_timeout(std::time::Duration::from_secs(6)) {
+            Ok(Some(context)) => eprintln!("RETRY RESULT: {context:?}"),
+            Ok(None) => eprintln!("RETRY RESULT: none"),
+            Err(error) => eprintln!("RETRY TIMEOUT: {error}"),
+        }
+    }
+
     /// 记录回调情况的 RetryCallbacks：返回 {回调, 开始次数, 各次结束的结果文本, 过期标志}
     #[allow(clippy::type_complexity)]
     fn recording_callbacks() -> (
