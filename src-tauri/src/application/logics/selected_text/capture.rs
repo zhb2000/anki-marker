@@ -82,8 +82,29 @@ pub fn capture_in_context(
             false,
         ));
     }
-    let (sentence, sent_start, sent_end) =
+    let (_, sent_start, sent_end) =
         find_sentence_with_range(context, sel_start_utf16, sel_end_utf16)?;
+    // 引用标注的另一侧：UAX #29 在 “...[” 处断句，下一句会以 “30] …” 开头。
+    // 标注属于上一句，把句首这段残留丢掉
+    let selection_byte_start = {
+        let mut units = 0usize;
+        let mut byte = 0usize;
+        for (offset, ch) in context.char_indices() {
+            if units >= sel_start_utf16 {
+                byte = offset;
+                break;
+            }
+            units += ch.len_utf16();
+            byte = offset + ch.len_utf8();
+        }
+        byte
+    };
+    let sent_start =
+        skip_citation_continuation(context, sent_start, sent_end, selection_byte_start);
+    // UAX #29 会在缩写处断句（"as visible in Fig. 2" → "…Fig. " + "2. "）：
+    // 句尾不是真正的句末、后一段又是续接形态时并回来
+    let sent_end = extend_abbreviation_tail(context, sent_start, sent_end);
+    let sentence = context[sent_start..sent_end].trim().to_string();
     // 不变量守门：切出的句子必须包含所选文本——锚点经逐码元校验、句子围绕选区
     // 切出，数学上必然成立；若不成立，说明读取间隙提供方的文本模型发生了偏移
     // （动态页面）或实现存在缺陷。宁可降级为仅录词（返回 None），也不录入一句
@@ -223,15 +244,27 @@ pub fn capture_in_segments<S: AsRef<str>>(
         .ok_or_else(|| "the selection is not inside the block".to_string())?;
     // 偏移是本地推导的，与 Windows 同理不用“唯一出现位置”兜底（见 find_anchor）；
     // window_loc 传 0：上下文就是块本身，句子贴着块的起点/终点不是“被窗口截断”
-    return match capture_in_context(&joined, &block_word, &[joined_start as isize], 0, false) {
-        Some((capture, _)) => Ok((capture, block_word)),
-        None => Err(anchor_error(
-            &joined,
-            &block_word,
-            joined_start,
-            joined.encode_utf16().count(),
-        )),
-    };
+    // 提供方报的选区偶尔差一个码元（Chromium 在行内节点边界上实测会偏 1），
+    // 候选偏移带上 ±1：仍要逐码元校验等于词，不会因此切出别的句子
+    let candidates = [
+        joined_start as isize,
+        joined_start as isize - 1,
+        joined_start as isize + 1,
+    ];
+    // Chromium 的自动断行会在视觉折行处插入 U+2010，而 AX 树里的原文没有这个字符：
+    // 选中 "em‐bedding" 时词里带连字符，块文本里是 "embeddings"，校验会对不上。
+    // 原文匹配不到时，用去掉折行连字符的形态再试一次
+    for candidate in word_variants(&block_word) {
+        if let Some((capture, _)) = capture_in_context(&joined, &candidate, &candidates, 0, false) {
+            return Ok((capture, complete_word_at(&joined, joined_start, &candidate)));
+        }
+    }
+    return Err(anchor_error(
+        &joined,
+        &block_word,
+        joined_start,
+        joined.encode_utf16().count(),
+    ));
 }
 
 /// 锚点校验失败时的诊断串：带坐标系关键参数，便于实机定位（日志只写本机文件）。
@@ -255,12 +288,190 @@ pub fn collapse_whitespace(text: &str) -> String {
 /// 或在引用标注这类文本片段边界上停下（"…memory ["，PDF 里 "[13]" 常自成一段）。
 /// 两种情况都不可能是完整的块，需要继续拼行；标题、表格单元格两种形态都不满足。
 pub fn block_looks_cut(text: &str) -> bool {
-    let cut_at_object = text.ends_with(char::is_whitespace);
-    let cut_at_fragment = matches!(
+    return text.ends_with(char::is_whitespace) || block_ends_with_open_marker(text);
+}
+
+/// 段落以开括号/连字符结尾：不可能是一个完整的块。网页的行内引用链接、PDF 的引用
+/// 标注都常以 "(" 或 "[" 开头，段落文本会在那里断掉。
+pub fn block_ends_with_open_marker(text: &str) -> bool {
+    return matches!(
         text.chars().next_back(),
         Some('[' | '(' | '{' | '“' | '‘' | '-' | '\u{2010}')
     );
-    return cut_at_object || cut_at_fragment;
+}
+
+/// 词的可能形态：原文，以及去掉折行连字符（U+2010 / U+2011 / 软连字符）后的形态。
+/// 视觉折行处的连字符由浏览器排版插入，AX 树里的原文并没有它。
+fn word_variants(word: &str) -> Vec<String> {
+    let cleaned: String = word
+        .chars()
+        .filter(|c| !matches!(c, '\u{2010}' | '\u{2011}' | '\u{00AD}'))
+        .collect();
+    if cleaned == word || cleaned.is_empty() {
+        return vec![word.to_string()];
+    }
+    return vec![word.to_string(), cleaned];
+}
+
+/// 把词补到完整单词边界：提供方偶尔少报选区末尾的字符（Chromium 在行内节点边界
+/// 实测把 "Examples" 报成 "Example"），偏移不变，只把预选词补全，避免词典查错词。
+fn complete_word_at(text: &str, start_utf16: usize, word: &str) -> String {
+    let mut utf16 = 0usize;
+    let mut start_byte = None;
+    for (byte, ch) in text.char_indices() {
+        if utf16 >= start_utf16 {
+            start_byte = Some(byte);
+            break;
+        }
+        utf16 += ch.len_utf16();
+    }
+    let Some(start_byte) = start_byte else {
+        return word.to_string();
+    };
+    let rest = &text[start_byte..];
+    if !rest.starts_with(word) {
+        return word.to_string();
+    }
+    let mut end = start_byte + word.len();
+    while let Some(ch) = text[end..].chars().next() {
+        if !ch.is_alphanumeric() {
+            break;
+        }
+        end += ch.len_utf8();
+    }
+    return text[start_byte..end].to_string();
+}
+
+/// 缩写处的伪句末（"Fig. 2"、"Eq. 3"、"et al. 2020"）：分句在缩写后断开，后一段
+/// 若以数字/小写/续接标点开头，就把它并回本句，返回新的句子结束字节偏移。
+///
+/// unicode_sentences() 会过滤掉不含字母数字的句段，切片不连续，偏移一律按指针换算，
+/// 并允许两段之间只隔空白。
+fn extend_abbreviation_tail(context: &str, start: usize, end: usize) -> usize {
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let base = context.as_ptr() as usize;
+    let mut end = end;
+    // 连续多个缩写也不多见，限制次数防御死循环
+    for _ in 0..4 {
+        let current = &context[start..end];
+        if ends_sentence(current.trim_end()) {
+            return end;
+        }
+        let rest = &context[end..];
+        // 引用标注被 UAX #29 当成新句起点（“...conserve 1758.[” + “23][24] In 2007”）。
+        // 句号在标注之前就结束了句子，标注属于上一句：并回标注并在此收句
+        if current.ends_with('[') {
+            if let Some(length) = citation_marker_length(rest) {
+                return end + length;
+            }
+        }
+        let Some(next) = rest.unicode_sentences().next() else {
+            return end;
+        };
+        let next_start = next.as_ptr() as usize - base;
+        let next_end = next_start + next.len();
+        if !context[end..next_start].trim().is_empty() {
+            return end;
+        }
+        if !can_join_lines(current, next) {
+            return end;
+        }
+        end = next_end;
+    }
+    return end;
+}
+
+/// 句首的引用标注残留（`30] The genus…`）属于上一句：跳过 `NN]` 这类碎片。
+fn skip_citation_continuation(
+    context: &str,
+    mut start: usize,
+    end: usize,
+    selection_start: usize,
+) -> usize {
+    loop {
+        let slice = &context[start..end];
+        let trimmed = slice.trim_start();
+        let lead = slice.len() - trimmed.len();
+        let Some(consumed) = leading_citation_length(trimmed) else {
+            return start;
+        };
+        let next = start + lead + consumed;
+        // 选区落在标注碎片里时不跳过，否则句子会不含所选文本
+        if next > selection_start {
+            return start;
+        }
+        start = next;
+    }
+}
+
+/// 句首引用标注的长度：`[30]`、`[30][31]`，或断句后残留的 `30]`。
+fn leading_citation_length(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if bytes.first() == Some(&b'[') {
+        let mut index = 0usize;
+        let mut consumed = None;
+        while bytes.get(index) == Some(&b'[') {
+            let mut cursor = index + 1;
+            let mut saw_alnum = false;
+            while cursor < bytes.len() && bytes[cursor] != b']' {
+                let byte = bytes[cursor];
+                if byte.is_ascii_alphanumeric() {
+                    saw_alnum = true;
+                } else if !matches!(byte, b' ' | b',' | b';' | b'-') {
+                    return consumed;
+                }
+                cursor += 1;
+            }
+            if cursor >= bytes.len() || !saw_alnum {
+                return consumed;
+            }
+            index = cursor + 1;
+            consumed = Some(index);
+        }
+        return consumed;
+    }
+    // “30] …”：开括号已经在上一段末尾
+    let mut digits = 0usize;
+    while digits < bytes.len() && bytes[digits].is_ascii_digit() {
+        digits += 1;
+    }
+    return (digits > 0 && bytes.get(digits) == Some(&b']')).then_some(digits + 1);
+}
+
+/// `rest` 以引用标注的剩余部分开头（`23][24]…`）时，返回标注结束处的字节长度。
+///
+/// UAX #29 会在 “...1758.[” 处断句（句号后紧跟开括号），标注的余下部分被当成新句
+/// 的开头；标注属于上一句，必须并回去，否则会把后面整段正文一起并进来。
+fn citation_marker_length(rest: &str) -> Option<usize> {
+    // 标注内容都是 ASCII（数字、字母、逗号、分隔符）；遇到其他字节就放弃，
+    // 交给原有的拼行逻辑处理
+    let bytes = rest.as_bytes();
+    let mut index = 0usize;
+    let mut saw_alnum = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b']' {
+            if !saw_alnum {
+                return None;
+            }
+            index += 1;
+            // 连续标注：“[24][25]”
+            if bytes.get(index) == Some(&b'[') {
+                index += 1;
+                saw_alnum = false;
+                continue;
+            }
+            return Some(index);
+        }
+        if byte.is_ascii_alphanumeric() || matches!(byte, b' ' | b',' | b';' | b'-') {
+            saw_alnum |= byte.is_ascii_alphanumeric();
+            index += 1;
+            continue;
+        }
+        return None;
+    }
+    return None;
 }
 
 /// 把以换行分隔的上下文按“块”重建：从选区所在行出发逐行外扩，只在允许连接处合并。
@@ -776,6 +987,45 @@ mod tests {
         join_block_around_anchor, reconcile_with_primary, remember_primary, EmbeddedCapture,
         EmbeddedObject, SentenceCapture, EMBEDDED_OBJECT_CHAR,
     };
+
+    /// 引用标注的另一侧：下一句以 "30] …" 开头时，标注碎片属于上一句，要丢掉
+    #[test]
+    fn citation_fragment_is_dropped_from_the_sentence_start() {
+        let context = "…ago.[29] [30] The genus Felis diverged around 6 million years ago.";
+        let word = "Felis";
+        let sel_start = context[..context.find(word).unwrap()]
+            .encode_utf16()
+            .count() as isize;
+        let (capture, _) = capture_in_context(context, word, &[sel_start], 0, false).unwrap();
+        match capture {
+            SentenceCapture::Expanded { sentence, .. } => {
+                assert_eq!(
+                    sentence,
+                    "The genus Felis diverged around 6 million years ago."
+                );
+            }
+            SentenceCapture::SelectionAsIs(text) => panic!("unexpected selection: {text:?}"),
+        }
+    }
+
+    /// 引用标注被 UAX #29 当成新句起点（"conserve 1758.[" + "23][24] In 2007"）：
+    /// 标注属于上一句，必须并回去，否则会把后面整段正文一起并进来
+    #[test]
+    fn citation_markers_stay_with_the_sentence() {
+        let context =
+            "In 2003, the name was conserved.[23][24] In 2007, the modern cat was sampled.";
+        let word = "name";
+        let sel_start = context[..context.find(word).unwrap()]
+            .encode_utf16()
+            .count() as isize;
+        let (capture, _) = capture_in_context(context, word, &[sel_start], 0, false).unwrap();
+        match capture {
+            SentenceCapture::Expanded { sentence, .. } => {
+                assert_eq!(sentence, "In 2003, the name was conserved.[23][24]");
+            }
+            SentenceCapture::SelectionAsIs(text) => panic!("unexpected selection: {text:?}"),
+        }
+    }
 
     /// 锚点候选 1：提供方忠实响应请求窗口（窗口偏移有效）
     #[test]
@@ -1322,6 +1572,59 @@ mod tests {
         assert!(!block_looks_cut("1 Introduction"));
         assert!(!block_looks_cut("91"));
         assert!(!block_looks_cut("A complete sentence."));
+    }
+
+    /// 折行连字符：词里带 U+2010、文本里没有时也要能对上
+    #[test]
+    fn hyphenated_word_matches_unhyphenated_text() {
+        let segments = ["Examples include word embeddings (Mikolov et al., 2013)."];
+        let (capture, word) = capture_in_segments(&segments, 0, 22, "em\u{2010}bedding").unwrap();
+        assert_eq!(word, "embeddings");
+        let SentenceCapture::Expanded { sentence, .. } = capture else {
+            panic!("expected an expanded sentence");
+        };
+        assert!(sentence.starts_with("Examples include word embeddings"));
+    }
+
+    /// 少报末尾字符的选区要补到完整单词：Chromium 把 "Examples" 报成 "Example"
+    #[test]
+    fn partial_word_is_completed() {
+        let segments = ["Examples include word embeddings (Mikolov et al., 2013)."];
+        let (capture, word) = capture_in_segments(&segments, 0, 0, "Example").unwrap();
+        assert_eq!(word, "Examples");
+        let SentenceCapture::Expanded { sentence, .. } = capture else {
+            panic!("expected an expanded sentence");
+        };
+        assert!(sentence.starts_with("Examples include"));
+    }
+
+    /// 缩写处的伪句末：UAX #29 把 "Fig. 2" 切成两段，要并回同一句
+    #[test]
+    fn abbreviation_break_is_rejoined() {
+        let context = "Overall they win on dense tasks, as visible in Fig. 2. Next one.";
+        let offset = utf16_of(context, "visible");
+        let (capture, _) =
+            capture_in_context(context, "visible", &[offset as isize], 0, false).unwrap();
+        let SentenceCapture::Expanded { sentence, .. } = capture else {
+            panic!("expected an expanded sentence");
+        };
+        assert_eq!(
+            sentence,
+            "Overall they win on dense tasks, as visible in Fig. 2."
+        );
+    }
+
+    /// 标题不是伪句末：下一段以大写开头，不并回
+    #[test]
+    fn heading_is_not_merged_into_the_next_sentence() {
+        let context = "Introduction\nRecurrent models typically factor computation.";
+        let offset = utf16_of(context, "Introduction");
+        let (capture, _) =
+            capture_in_context(context, "Introduction", &[offset as isize], 0, false).unwrap();
+        let SentenceCapture::Expanded { sentence, .. } = capture else {
+            panic!("expected an expanded sentence");
+        };
+        assert_eq!(sentence, "Introduction");
     }
 
     /// 块拼接：行内公式被拆成多个字符块（"h" "t" "−" "1"），仍要接回同一句。

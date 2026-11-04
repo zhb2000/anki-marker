@@ -12,6 +12,10 @@ use super::text::{looks_truncated, strip_text_artifacts, strip_text_artifacts_wi
 /// 真正的块边界由拼行规则决定，这里只是上界。
 const LINE_EXPANSION_LINES: usize = 40;
 
+/// 短于此长度的“段落”只可能是行内节点（链接、强调片段），不是真正的块：
+/// 这类片段值得做一次树上溯，且容器文本与它相等时可以穿过行内节点继续上溯
+const MAX_INLINE_FRAGMENT_CHARS: usize = 200;
+
 /// 校验对象确实是 AXTextMarkerRange。AXTextMarkerRangeCopyStart/EndMarker 在本进程内
 /// 解析对象内部结构（不是跨进程调用），而属性值的类型由目标应用决定，非 WebKit/Chromium
 /// 的应用可能返回别的 CF 类型；不校验就解包是未定义行为，最坏让本应用崩溃。
@@ -63,14 +67,6 @@ fn continues_after_paragraph(
     let Ok(paragraph_text) = string_for_marker_range_by_ax(element, paragraph) else {
         return false;
     };
-    // 段落被切断的两种形态：
-    // 1. 停在内嵌对象前的空白上（"…hidden states "）；
-    // 2. 停在引用标注之类的文本片段边界上（"…long short-term memory ["，PDF 里
-    //    "[13]" 往往自成一段）。段落不会以开括号/连字符结尾，出现即说明被截断。
-    // 标题、表格单元格两种形态都不满足，因此不会被误判
-    if !block_looks_cut(&paragraph_text) {
-        return false;
-    }
     let Ok(paragraph_end) = marker_of_range(paragraph, true) else {
         return false;
     };
@@ -92,7 +88,26 @@ fn continues_after_paragraph(
     let Ok(next_text) = string_for_marker_range_by_ax(element, &range) else {
         return false;
     };
-    return can_join_lines(&paragraph_text, &next_text);
+    // 段落后面没有同一行的内容：段落边界就是真边界（标题、表格单元格、段落末尾）
+    if next_text.trim().is_empty() {
+        return false;
+    }
+    // 段落被切断的形态：
+    // 1. 停在空白或开括号上（行内公式、引用链接："…hidden states "、"…memory ["）；
+    // 2. 停在单词中间（折行把词切开："…em‐bedding" + "s (Mikolov…"），此时段尾是
+    //    普通字母，后面的续接以小写字母/数字开头
+    if block_looks_cut(&paragraph_text) {
+        return true;
+    }
+    let last_is_word = paragraph_text
+        .chars()
+        .next_back()
+        .is_some_and(char::is_alphanumeric);
+    let next_starts_mid_word = next_text
+        .chars()
+        .find(|c| !c.is_whitespace())
+        .is_some_and(|c| c.is_lowercase() || c.is_numeric());
+    return last_is_word && next_starts_mid_word;
 }
 
 /// 读取元素的选区 marker 范围（AXSelectedTextMarkerRange），并校验其类型。
@@ -235,6 +250,78 @@ fn find_sentence_for_marker_range(
         selection_start.as_CFTypeRef(),
     )?;
     let paragraph_start = marker_of_range(&paragraph, false)?;
+
+    // 段落被行内链接截断（"…word embeddings ("）：链接文字不在 marker 文本流里，
+    // 段落和行范围都在链接处停下。这时改从 AX 树拼出完整段落再取句
+    if let Ok(paragraph_text) = string_for_marker_range_by_ax(element, &paragraph) {
+        // 段落被切断（行内链接、公式、或折行把单词切开）：只要还有内容可补，
+        // 就尝试从 AX 树拼完整段落——行文本在链接处同样截断，且带折行连字符
+        // 片段短于行内节点上限时，无论首字符是什么都做一次树上溯：大写专名（链接、
+        // 斜体）与正常块开头的形态完全一样，靠字符判不出来
+        let cont = paragraph_text.trim().chars().count() < MAX_INLINE_FRAGMENT_CHARS
+            || starts_mid_block(&paragraph_text)
+            || continues_after_paragraph(element, &paragraph);
+        if cont {
+            if let Ok(provider_start) =
+                prefix_length_utf16(element, &paragraph_start, &selection_start)
+            {
+                // 同名文字可能在树里出现多次（信息框、目录、参考文献）：逐个候选尝试，
+                // 首选能切出完整句子的那个
+                let mut complete = Vec::new();
+                let mut fallback = None;
+                for (assembled, fragment_offset) in
+                    block_candidates_from_tree(element, &paragraph_text, selection)
+                {
+                    // 提供方的偏移是“被截断的段落文本”坐标系里的；树拼文本把链接文字
+                    // 补了回来，选区落在链接之后时两者不再对齐，需要重新定位
+                    let sel_start = offset_in_assembled_text(
+                        &assembled,
+                        &paragraph_text,
+                        provider_start,
+                        fragment_offset,
+                        word,
+                    );
+                    match capture_in_segments(&[assembled], 0, sel_start, word) {
+                        Ok((capture, capture_word)) => {
+                            let truncated = matches!(
+                                &capture,
+                                SentenceCapture::Expanded { sentence, .. } if looks_truncated(sentence)
+                            );
+                            if truncated {
+                                fallback.get_or_insert((capture, capture_word));
+                            } else {
+                                complete.push((capture, capture_word, fragment_offset, sel_start));
+                            }
+                        }
+                        Err(error) => {
+                            log::info!("rebuilding the paragraph from the AX tree failed: {error}")
+                        }
+                    }
+                }
+                // 同名文字出现在多处时可能有好几个“成句”的候选：分不清就退回词本身，
+                // 不拿一句位置不对的句子冒充
+                if complete.len() == 1 {
+                    let (capture, capture_word, fragment_offset, sel_start) =
+                        complete.pop().expect("checked length");
+                    log::info!(
+                        "rebuilt the block from the AX tree (fragment at {fragment_offset}, \
+                         selection at {sel_start})"
+                    );
+                    return Ok((capture, capture_word));
+                }
+                if complete.len() > 1 {
+                    log::info!(
+                        "several blocks contain the selected text ({} candidates); keeping the word only",
+                        complete.len()
+                    );
+                } else if let Some(found) = fallback {
+                    log::info!("rebuilt the block from the AX tree (the sentence looks truncated)");
+                    return Ok(found);
+                }
+            }
+        }
+    }
+
     let paragraph_capture = capture_in_paragraph(
         element,
         word,
@@ -305,22 +392,29 @@ fn collect_block_by_lines(
     anchor_right: &core_foundation::base::CFType,
     selection_start: &core_foundation::base::CFType,
 ) -> Result<(Vec<String>, usize, usize), String> {
-    // 选区所在的连续文本（手动跨行选择时可能包含多行，但 Chromium 不插换行）
-    let anchor_text = string_for_marker_range_by_ax(
-        element,
-        &marker_range_between(element, anchor_left, anchor_right)?,
-    )?;
-    let intra = prefix_length_utf16(element, anchor_left, selection_start)?;
+    // 用提供方自己的“行范围”取文本：行内链接、公式在 AX 里是独立节点，我们自建的
+    // marker 区间（AXTextMarkerRangeForUnorderedTextMarkers）读到链接处就截断，
+    // 而提供方的行范围文本是完整的（实测 "…as visible in Fig. 2." 含链接文字）。
+    let anchor_line = line_range_of(element, selection_start)
+        .ok_or("the provider has no line range for the selection")?;
+    let anchor_text = string_for_marker_range_by_ax(element, &anchor_line)?;
+    let anchor_start = marker_of_range(&anchor_line, false).unwrap_or_else(|_| anchor_left.clone());
+    let anchor_line_end =
+        marker_of_range(&anchor_line, true).unwrap_or_else(|_| anchor_right.clone());
+    let intra = prefix_length_utf16(element, &anchor_start, selection_start)?;
 
     // 向前：逐行取上一行，直到拼行规则判定为块边界
     let mut before: Vec<String> = Vec::new();
-    let mut cursor = anchor_left.clone();
+    let mut cursor = anchor_start;
     let mut head = anchor_text.clone();
     for _ in 0..LINE_EXPANSION_LINES {
-        let Some(previous) = previous_line_start(element, &cursor) else {
+        let Some(previous_start) = previous_line_start(element, &cursor) else {
             break;
         };
-        let Some(text) = line_text(element, &previous, &cursor) else {
+        let Some(previous_line) = line_range_of(element, &previous_start) else {
+            break;
+        };
+        let Ok(text) = string_for_marker_range_by_ax(element, &previous_line) else {
             break;
         };
         if !can_join_lines(&text, &head) {
@@ -328,19 +422,22 @@ fn collect_block_by_lines(
         }
         head = text.clone();
         before.push(text);
-        cursor = previous;
+        cursor = previous_start;
     }
     before.reverse();
 
     // 向后：逐行取下一行
     let mut after: Vec<String> = Vec::new();
-    let mut cursor = anchor_right.clone();
+    let mut cursor = anchor_line_end;
     let mut tail = anchor_text.clone();
     for _ in 0..LINE_EXPANSION_LINES {
-        let Some(next) = next_line_end(element, &cursor) else {
+        let Some(next_end) = next_line_end(element, &cursor) else {
             break;
         };
-        let Some(text) = line_text(element, &cursor, &next) else {
+        let Some(next_line) = line_range_of(element, &next_end) else {
+            break;
+        };
+        let Ok(text) = string_for_marker_range_by_ax(element, &next_line) else {
             break;
         };
         if !can_join_lines(&tail, &text) {
@@ -348,7 +445,11 @@ fn collect_block_by_lines(
         }
         tail = text.clone();
         after.push(text);
-        cursor = next;
+        if let Ok(line_end) = marker_of_range(&next_line, true) {
+            cursor = line_end;
+        } else {
+            break;
+        }
     }
 
     let anchor_index = before.len();
@@ -357,31 +458,243 @@ fn collect_block_by_lines(
     return Ok((before, anchor_index, intra));
 }
 
-/// 两个 marker 之间的范围对象。
-fn marker_range_between(
+/// 行内引用链接的文字不在 marker 文本流里（段落文本、行范围文本都停在 "(" 处），
+/// 但 AX 树里链接节点挂着文字（AXLink 的 AXTitle，或其子 AXStaticText）。以段落片段
+/// 开头为锚在树里定位那个段落组，再按子节点顺序拼出完整文本。
+///
+/// 只用于“段落确实被行内链接截断”的情形：正常段落不需要走树，开销也更大。
+fn block_candidates_from_tree(
     element: &core_foundation::base::CFType,
-    from: &core_foundation::base::CFType,
-    to: &core_foundation::base::CFType,
-) -> Result<core_foundation::base::CFType, String> {
-    use core_foundation::array::CFArray;
-    use core_foundation::base::TCFType;
+    paragraph_text: &str,
+    selection: &core_foundation::base::CFType,
+) -> Vec<(String, usize)> {
+    use super::ax::{copy_children_array_by_ax, copy_string_attribute_by_ax};
+    use core_foundation::base::{CFType, TCFType};
 
-    let markers = CFArray::from_CFTypes(&[from.clone(), to.clone()]);
-    return copy_parameterized_attribute_by_ax(
+    /// 用于在树里认领段落的开头长度：太短容易撞车，太长容易受空白差异影响
+    const PREFIX_CHARS: usize = 24;
+    /// 遍历预算：防御超长文档（只在段落被截断时才走这条路）
+    const NODE_BUDGET: usize = 20_000;
+
+    let fragment = paragraph_text.trim_end();
+    // 片段短于认领长度时（引用串之间常常只剩 “, astronomy ” 这样的碎片）改用整段
+    // 精确匹配：短前缀会撞车，但整段文本本身是唯一的
+    let exact = fragment.trim().chars().count() < PREFIX_CHARS;
+    if fragment.trim().is_empty() {
+        return Vec::new();
+    }
+    let prefix: String = fragment.trim_start().chars().take(PREFIX_CHARS).collect();
+
+    fn children(node: &CFType) -> Vec<CFType> {
+        let Ok(array) = copy_children_array_by_ax(node.as_CFTypeRef()) else {
+            return Vec::new();
+        };
+        let count = unsafe { ax_ffi::CFArrayGetCount(array.as_CFTypeRef()) };
+        let mut result = Vec::new();
+        for index in 0..count {
+            let raw = unsafe { ax_ffi::CFArrayGetValueAtIndex(array.as_CFTypeRef(), index) };
+            if !raw.is_null() {
+                result.push(unsafe { TCFType::wrap_under_get_rule(raw) });
+            }
+        }
+        return result;
+    }
+
+    fn value(node: &CFType, attribute: &'static str) -> String {
+        return copy_string_attribute_by_ax(node, attribute).unwrap_or_default();
+    }
+
+    /// 深度优先收集可能是片段开头的静态文本：
+    /// - 片段够长时按前缀匹配；
+    /// - 片段短时按整段精确匹配（短前缀会撞车）；
+    /// - 片段开头横跨多个静态文本时（`<i>Felis catus</i>` + `), also called…`），
+    ///   退一步收“整段文本是片段开头一部分”的节点。
+    ///
+    /// 同一段文字可能出现在多处（正文与信息框都写着 “Felis”），这里全部收下，
+    /// 由调用方用选区所在行验收。
+    fn find_candidates(
+        node: &CFType,
+        prefix: &str,
+        fragment: &str,
+        exact: bool,
+        depth: usize,
+        budget: &mut usize,
+        out: &mut Vec<CFType>,
+    ) {
+        if depth > 40 || *budget == 0 || out.len() >= MAX_CANDIDATES {
+            return;
+        }
+        *budget -= 1;
+        if value(node, "AXRole") == "AXStaticText" {
+            let text = value(node, "AXValue");
+            let trimmed = text.trim();
+            let matched = if exact {
+                trimmed == fragment.trim()
+            } else {
+                trimmed.starts_with(prefix)
+                    || (trimmed.chars().count() >= 6 && fragment.starts_with(trimmed))
+            };
+            if matched
+                && !out
+                    .iter()
+                    .any(|seen| seen.as_CFTypeRef() == node.as_CFTypeRef())
+            {
+                out.push(node.clone());
+            }
+        }
+        for child in children(node) {
+            find_candidates(&child, prefix, fragment, exact, depth + 1, budget, out);
+        }
+    }
+
+    /// 拼一个节点的文本：静态文本取 AXValue，链接取子静态文本或 AXTitle，
+    /// 其他容器递归；行内节点之间没有分隔符
+    fn text_of(node: &CFType, depth: usize) -> String {
+        if depth > 6 {
+            return String::new();
+        }
+        let role = value(node, "AXRole");
+        if role == "AXStaticText" {
+            return value(node, "AXValue");
+        }
+        if role == "AXLink" {
+            let inner = children(node)
+                .iter()
+                .map(|child| text_of(child, depth + 1))
+                .collect::<String>();
+            return if inner.trim().is_empty() {
+                value(node, "AXTitle")
+            } else {
+                inner
+            };
+        }
+        let inner = children(node)
+            .iter()
+            .map(|child| text_of(child, depth + 1))
+            .collect::<String>();
+        if !inner.is_empty() {
+            return inner;
+        }
+        return value(node, "AXValue");
+    }
+
+    /// 同一段文字可能在树里出现多次（正文与信息框都写着 “Felis”）：逐个候选尝试，
+    /// 用选区所在行的文本验收，避免把别处的同名文字当成选区所在块
+    const MAX_CANDIDATES: usize = 8;
+
+    // 首选：按选区的屏幕坐标命中元素，从它上溯。同名文字在别处出现也不会拿错
+    let mut blocks: Vec<(String, usize)> = Vec::new();
+    let mut budget = NODE_BUDGET;
+    let mut candidates: Vec<CFType> = Vec::new();
+    find_candidates(
         element,
-        ax_ffi::RANGE_FOR_UNORDERED_MARKERS_PARAMETERIZED_ATTRIBUTE,
-        markers.as_CFTypeRef(),
+        &prefix,
+        fragment,
+        exact,
+        0,
+        &mut budget,
+        &mut candidates,
+    );
+
+    let line = selection_line_text(element, selection);
+    for candidate in candidates.iter().take(MAX_CANDIDATES) {
+        let Some((text, offset)) = climb_to_block(candidate, fragment, &text_of, &value) else {
+            continue;
+        };
+        // 能读到选区所在行时，块必须包含它——同名文字拼出来的块对不上
+        if block_contains_line(&text, line.as_deref())
+            && !blocks.iter().any(|(seen, _)| seen == &text)
+        {
+            blocks.push((text, offset));
+        }
+    }
+    return blocks;
+}
+
+/// 从命中的静态文本逐层上溯，取第一个“包含段落片段、且比片段更长”的容器。
+///
+/// 用“包含”而不是“以片段开头”：提供方把行内链接之间的文本 run 当作段落时，
+/// 片段从块的中间开始（左边是前一个链接），容器的起点不等于片段的起点。
+/// 容器文本与片段相等时：行内节点（链接）可以穿过，块级角色（标题、单元格）
+/// 到此为止——再往上就是小节/正文容器，扩过去只会把相邻段落拼进来。
+fn climb_to_block(
+    node: &core_foundation::base::CFType,
+    fragment: &str,
+    text_of: &dyn Fn(&core_foundation::base::CFType, usize) -> String,
+    value: &dyn Fn(&core_foundation::base::CFType, &'static str) -> String,
+) -> Option<(String, usize)> {
+    let mut current = node.clone();
+    // 只看祖先：起始节点本身就是片段（文本 run / 链接里的静态文本），不构成块
+    for _ in 0..6 {
+        let Ok(parent) = copy_element_attribute_by_ax(&current, "AXParent") else {
+            break;
+        };
+        let assembled = text_of(&parent, 0);
+        if assembled != fragment {
+            if let Some(offset) = utf16_index_of(&assembled, fragment, 0) {
+                return Some((assembled, offset));
+            }
+        } else if is_block_role(&value(&parent, "AXRole"))
+            || fragment.chars().count() >= MAX_INLINE_FRAGMENT_CHARS
+        {
+            return None;
+        }
+        current = parent;
+    }
+    return None;
+}
+
+/// 块级角色：文本与片段相等即说明片段本身就是一个完整的块，不再上溯。
+fn is_block_role(role: &str) -> bool {
+    return matches!(
+        role,
+        "AXHeading" | "AXCell" | "AXRow" | "AXList" | "AXListItem" | "AXParagraph" | "AXTable"
     );
 }
 
-/// 两个 marker 之间的文本；读不到返回 None（调用方按走查结束处理）。
-fn line_text(
+/// 选区所在行的文本（抹平空白与折行连字符）：用来给树拼结果做验收。
+/// 行文本过短（多半也在链接处被截断）时不作为依据。
+fn selection_line_text(
     element: &core_foundation::base::CFType,
-    from: &core_foundation::base::CFType,
-    to: &core_foundation::base::CFType,
+    selection_start: &core_foundation::base::CFType,
 ) -> Option<String> {
-    let range = marker_range_between(element, from, to).ok()?;
-    return string_for_marker_range_by_ax(element, &range).ok();
+    let line = line_range_of(element, selection_start)?;
+    let text = string_for_marker_range_by_ax(element, &line).ok()?;
+    let normalized = normalize_for_compare(&text);
+    return (normalized.chars().count() >= 15).then_some(normalized);
+}
+
+/// 树拼结果必须包含选区所在行——同名文字在别处出现时（信息框、目录、参考文献）
+/// 拼出来的块与选区所在行对不上，据此拒掉。
+fn block_contains_line(block: &str, line: Option<&str>) -> bool {
+    let Some(line) = line else {
+        return true;
+    };
+    return normalize_for_compare(block).contains(line);
+}
+
+/// 比较用的归一化：折叠空白，去掉浏览器排版插入的折行连字符。
+fn normalize_for_compare(text: &str) -> String {
+    let cleaned: String = text
+        .chars()
+        .filter(|c| !matches!(c, '\u{2010}' | '\u{2011}' | '\u{00AD}'))
+        .collect();
+    return cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+}
+
+/// 提供方给出的、包含该 marker 的行范围对象。
+fn line_range_of(
+    element: &core_foundation::base::CFType,
+    marker: &core_foundation::base::CFType,
+) -> Option<core_foundation::base::CFType> {
+    use core_foundation::base::TCFType;
+
+    return copy_parameterized_attribute_by_ax(
+        element,
+        ax_ffi::LINE_TEXT_MARKER_RANGE_PARAMETERIZED_ATTRIBUTE,
+        marker.as_CFTypeRef(),
+    )
+    .ok();
 }
 
 /// 从给定 marker 起上一行的行首 marker。
@@ -471,6 +784,73 @@ fn prefix_length_utf16(
     return Ok(string_for_marker_range_by_ax(element, &prefix)?
         .encode_utf16()
         .count());
+}
+
+/// 选区起点在树拼文本里的 UTF-16 偏移。
+///
+/// 段落片段原样保留在树拼文本里、起点在 `fragment_offset`：选区落在片段内时，
+/// 提供方报告的偏移加上这个起点即可。选区落在片段之后（被行内链接隔开）时，链接
+/// 文字是树里补进来的、段落文本里没有，提供方的偏移停在切点，改从切点在树拼文本里
+/// 重新定位所选文本。
+///
+/// 定位失败时返回推算值，交给 capture_in_segments 的逐码元校验拒掉，不在这里猜。
+fn offset_in_assembled_text(
+    assembled: &str,
+    paragraph_text: &str,
+    sel_start: usize,
+    fragment_offset: usize,
+    word: &str,
+) -> usize {
+    let fragment_units = paragraph_text.trim_end().encode_utf16().count();
+    if sel_start < fragment_units {
+        return fragment_offset + sel_start;
+    }
+    return utf16_index_of(assembled, word.trim(), fragment_offset + fragment_units)
+        .unwrap_or(fragment_offset + sel_start);
+}
+
+/// 段落片段是否从块的中间开始：提供方把行内链接之间的文本 run 当作“段落”时
+/// （Chromium 系网页），片段会以空白、小写字母、闭合标点开头，或者出现没有
+/// 对应开括号的闭括号（引用串 “Tolan et al., 2024), astronomy (”）——块在这
+/// 之前还有内容。标题、表格单元格、正常段落都不满足。
+fn starts_mid_block(text: &str) -> bool {
+    let Some(first) = text.chars().next() else {
+        return false;
+    };
+    if first.is_whitespace()
+        || first.is_lowercase()
+        || matches!(first, ')' | ']' | '}' | ',' | ';' | ':' | '.')
+    {
+        return true;
+    }
+    let mut depth = 0i32;
+    for c in text.chars() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => {
+                depth -= 1;
+                if depth < 0 {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    return false;
+}
+
+/// 从给定的 UTF-16 偏移起找第一个匹配，返回匹配处的 UTF-16 偏移。
+fn utf16_index_of(haystack: &str, needle: &str, from_utf16: usize) -> Option<usize> {
+    let units: Vec<u16> = haystack.encode_utf16().collect();
+    let needle: Vec<u16> = needle.encode_utf16().collect();
+    if needle.is_empty() || units.len() < needle.len() {
+        return None;
+    }
+    let last = units.len() - needle.len();
+    if from_utf16 > last {
+        return None;
+    }
+    return (from_utf16..=last).find(|&start| units[start..start + needle.len()] == needle[..]);
 }
 
 /// 范围链路切出的句子被截断时，用 marker 链路重试：元素没有 marker 范围、或重试仍没有
@@ -670,5 +1050,43 @@ mod tests {
         assert!(super::ensure_text_marker_range(&range).is_ok());
         assert!(super::ensure_text_marker_range(&CFString::new("x").as_CFType()).is_err());
         assert!(super::ensure_text_marker_range(&CFBoolean::true_value().as_CFType()).is_err());
+    }
+
+    /// 树拼文本的偏移换算：片段起点 + 片内偏移，选区在链接之后时从切点重新定位。
+    /// 回归：Chromium 把行内链接之间的文本 run 当作段落，片段的起点在块中间，
+    /// 直接拿提供方偏移会切出一句缺了开头的句子。
+    #[test]
+    fn assembled_offset_accounts_for_the_fragment_position() {
+        let assembled = "methods (Radford et al., 2021) which require images.";
+        // 片段就是块的开头：片段起点为 0，片内偏移原样可用
+        assert_eq!(
+            super::offset_in_assembled_text(assembled, "methods (", 0, 0, "methods"),
+            0
+        );
+        // 片段从块中间开始（左侧被链接截断）：加片段起点
+        assert_eq!(
+            super::offset_in_assembled_text(assembled, " require images.", 8, 30, "images"),
+            38
+        );
+        // 选区在片段之后：从切点重新定位
+        let start = super::offset_in_assembled_text(assembled, "methods (", 9, 0, "require");
+        assert_eq!(start, 37);
+        assert_eq!(&assembled[start..start + "require".len()], "require");
+        // 定位失败时返回推算值，由锚点校验拒掉
+        assert_eq!(
+            super::offset_in_assembled_text(assembled, "methods (", 9, 0, "absent"),
+            9
+        );
+    }
+
+    /// 片段是否从块中间开始：Chromium 的文本 run 以空白/小写/闭合标点开头说明
+    /// 左边还有内容；标题、表格单元格、段落开头的片段不会满足
+    #[test]
+    fn fragment_start_detection() {
+        assert!(super::starts_mid_block(" which require images"));
+        assert!(super::starts_mid_block(") which require images"));
+        assert!(super::starts_mid_block("et al. (2024)"));
+        assert!(!super::starts_mid_block("Unlike weakly supervised"));
+        assert!(!super::starts_mid_block("2024 results"));
     }
 }
