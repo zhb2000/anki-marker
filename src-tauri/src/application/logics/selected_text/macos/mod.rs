@@ -79,6 +79,7 @@ pub fn get_selected_context(
 ) -> Result<SelectedContext, String> {
     if !word_to_sentence {
         let context = get_selected_text().map(|text| SelectedContext {
+            context: Default::default(),
             text,
             word: None,
             word_offset: None,
@@ -124,6 +125,7 @@ pub fn get_selected_context(
     };
     let mut context =
         get_selected_text_by_applescript(silent_if_unchanged).map(|text| SelectedContext {
+            context: Default::default(),
             text,
             word: None,
             word_offset: None,
@@ -219,6 +221,7 @@ fn get_selected_context_by_ax() -> Result<SelectedContext, AxAttemptError> {
     if word.trim().is_empty() {
         // 与现有 get_selected_text 的空串语义一致：由调用方回退 AppleScript
         return Ok(SelectedContext {
+            context: Default::default(),
             text: word,
             word: None,
             word_offset: None,
@@ -245,6 +248,7 @@ pub(super) fn context_from_word_and_element(
         Ok(SentenceCapture::Expanded {
             sentence,
             word_offset,
+            ..
         }) => {
             // 范围链路的上下文可能带视觉行硬换行（Chrome 的 PDF 查看器：同时提供
             // AXSelectedText 与 marker 范围，但 AXStringForRange 的文本按行给出），
@@ -256,12 +260,14 @@ pub(super) fn context_from_word_and_element(
                 }
             }
             SelectedContext {
+                context: Default::default(),
                 text: sentence,
                 word: Some(word.trim().to_string()),
                 word_offset,
             }
         }
         Ok(SentenceCapture::SelectionAsIs(text)) => SelectedContext {
+            context: Default::default(),
             text,
             word: None,
             word_offset: None,
@@ -278,6 +284,7 @@ pub(super) fn context_from_word_and_element(
                          (PDF page lookup: {pdf_error})"
                     );
                     SelectedContext {
+                        context: Default::default(),
                         text: word.to_string(),
                         word: None,
                         word_offset: None,
@@ -296,6 +303,8 @@ fn finish_context(context: SelectedContext) -> SelectedContext {
         text,
         word: context.word.map(|word| strip_text_artifacts(&word)),
         word_offset,
+        // 上下文由块链路算好，收尾只清伪影（上下文里有控制字符也在前端清一遍）
+        context: context.context,
     };
 }
 

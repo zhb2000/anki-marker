@@ -289,6 +289,7 @@ mod tests {
 
     fn plain_context(text: &str) -> super::SelectedContext {
         return super::SelectedContext {
+            context: Default::default(),
             text: text.to_string(),
             word: None,
             word_offset: None,

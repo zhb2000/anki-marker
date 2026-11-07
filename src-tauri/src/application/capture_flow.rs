@@ -37,6 +37,25 @@ pub struct CapturedSentence {
     /// 是否为“后台补取”的迟到结果：前端据此在用户已改动（编辑句子、输入查询、
     /// 手动标记）时丢弃它，避免覆盖用户的改动
     retry: bool,
+    /// 句子两侧的上下文：常驻显示在句子上下，点击一侧即并入该侧最近的一句
+    context: CapturedContext,
+}
+
+/// 去掉控制字符（保留空白）：提供方会把行尾软连字符输出成 U+0002 之类的字符，
+/// 录入文本在平台层已经清过，这里把建议文本对齐到同一形态
+fn strip_control_chars(text: &str) -> String {
+    return text
+        .chars()
+        .filter(|c| !(c.is_control() && !c.is_whitespace()))
+        .collect();
+}
+
+/// 句子两侧的上下文（近端在前）：一侧只显示第一句，并入后由下一句补位
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapturedContext {
+    before: Vec<String>,
+    after: Vec<String>,
 }
 
 impl CapturedSentence {
@@ -67,6 +86,28 @@ impl CapturedSentence {
             }
             word => (text, word),
         };
+        // 上下文只在“句子确实包含了所选词”时保留：降级为仅录词时句子就是那个词，
+        // 上下句没有意义。上下文里的控制字符也要清掉——录入文本已经清过
+        let captured_context = if word.is_some() {
+            CapturedContext {
+                before: context
+                    .context
+                    .before
+                    .iter()
+                    .map(|line| strip_control_chars(line))
+                    .filter(|line| !line.is_empty())
+                    .collect(),
+                after: context
+                    .context
+                    .after
+                    .iter()
+                    .map(|line| strip_control_chars(line))
+                    .filter(|line| !line.is_empty())
+                    .collect(),
+            }
+        } else {
+            CapturedContext::default()
+        };
         let word_offset = word.as_deref().and_then(|word| {
             let trimmed = context.text.len() - context.text.trim_start().len();
             let offset = context
@@ -84,6 +125,7 @@ impl CapturedSentence {
             word,
             word_offset,
             retry,
+            context: captured_context,
         });
     }
 
@@ -303,6 +345,8 @@ fn reconcile_retry(captured: CapturedSentence, primary: &str) -> Option<Captured
             word: Some(primary.to_string()),
             word_offset: None,
             retry: true,
+            // 句子没变，上下文继续有效（补取只修正了词）
+            context: captured.context,
         });
     }
     log::warn!(
@@ -559,6 +603,7 @@ mod tests {
 
     fn context(text: &str, word: Option<&str>) -> SelectedContext {
         return SelectedContext {
+            context: Default::default(),
             text: text.to_string(),
             word: word.map(str::to_string),
             word_offset: None,
@@ -576,6 +621,7 @@ mod tests {
     fn payload_keeps_the_whole_text() {
         let captured = CapturedSentence::from_selected_context(
             SelectedContext {
+                context: Default::default(),
                 text: "  We design a Transformer-based encoder-decoder model.".to_string(),
                 word: Some("design".to_string()),
                 word_offset: Some(5),
@@ -597,6 +643,7 @@ mod tests {
     fn payload_drops_unverified_offset() {
         let captured = CapturedSentence::from_selected_context(
             SelectedContext {
+                context: Default::default(),
                 text: "We design models.".to_string(),
                 word: Some("design".to_string()),
                 word_offset: Some(7),
@@ -613,6 +660,7 @@ mod tests {
     fn payload_degrades_when_text_lacks_the_word() {
         let captured = CapturedSentence::from_selected_context(
             SelectedContext {
+                context: Default::default(),
                 text: "We".to_string(),
                 word: Some("design".to_string()),
                 word_offset: Some(3),

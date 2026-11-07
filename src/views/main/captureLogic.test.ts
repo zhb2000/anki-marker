@@ -41,13 +41,13 @@ describe('planCapturedSentence', () => {
 
     it('录入时裁剪文本与命中词，文本未被裁剪时保留偏移', () => {
         expect(planCapturedSentence(payload({ word: ' fox ' }), false)).toEqual({
-            kind: 'apply', text: 'The quick brown fox.', word: 'fox', wordOffset: 16,
+            kind: 'apply', text: 'The quick brown fox.', word: 'fox', wordOffset: 16, context: { before: [], after: [] },
         });
     });
 
     it('文本被裁剪改短时偏移不再可信', () => {
         const plan = planCapturedSentence(payload({ text: '  The quick brown fox.  ', wordOffset: 18 }), false);
-        expect(plan).toEqual({ kind: 'apply', text: 'The quick brown fox.', word: 'fox', wordOffset: null });
+        expect(plan).toEqual({ kind: 'apply', text: 'The quick brown fox.', word: 'fox', wordOffset: null, context: { before: [], after: [] } });
     });
 
     it.each([null, '', '   '])('命中词为 %j 时视为未命中', word => {

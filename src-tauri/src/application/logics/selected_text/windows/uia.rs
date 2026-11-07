@@ -177,6 +177,7 @@ pub(super) fn context_from_range(
     if word.trim().is_empty() {
         // 与 get_selected_text 的空串语义一致：由调用方回退 Ctrl+C
         return Ok(SelectedContext {
+            context: Default::default(),
             text: word,
             word: None,
             word_offset: None,
@@ -187,11 +188,13 @@ pub(super) fn context_from_range(
             sentence,
             word_offset,
         }) => SelectedContext {
+            context: Default::default(),
             text: sentence,
             word: Some(word.trim().to_string()),
             word_offset,
         },
         Ok(SentenceCapture::SelectionAsIs(text)) => SelectedContext {
+            context: Default::default(),
             text,
             word: None,
             word_offset: None,
@@ -200,6 +203,7 @@ pub(super) fn context_from_range(
             // 已拿到词：取句失败不致命，降级为仅录入词原文
             log::warn!("failed to extract sentence for the selected word: {error}");
             SelectedContext {
+                context: Default::default(),
                 text: word,
                 word: None,
                 word_offset: None,

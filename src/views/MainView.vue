@@ -18,6 +18,7 @@ import {
     YoudaoCard,
     PlayAudioButton,
     SettingButton,
+    HistoryButton,
     ScrollMemory
 } from '../components';
 import { createCardNotices } from './main/cardNotices';
@@ -62,6 +63,7 @@ const editor = useSentenceEditor({
 });
 const {
     tokens, selection, sentence, showEdit, editPlaceholder, pasteNotice,
+    contextBefore, contextAfter, canUndo, canRedo, extendContext, undo, redo,
     changeEditStatus, handleEditTextAreaKeydown,
 } = editor;
 // #endregion
@@ -130,6 +132,45 @@ function onSelectionCommitted(): void {
     }
 }
 
+/**
+ * 撤销 / 恢复：句子、选区与两侧上下文一起还原。
+ * 句子变了 = 语境变了，和并入上下文同一处理：按同一个查询词重取释义
+ */
+function onUndo(): void {
+    capture.markUserTouched();
+    if (!undo()) {
+        return;
+    }
+    if (searchText.value.trim().length > 0) {
+        void query.submitSearch();
+    }
+}
+
+function onRedo(): void {
+    capture.markUserTouched();
+    if (!redo()) {
+        return;
+    }
+    if (searchText.value.trim().length > 0) {
+        void query.submitSearch();
+    }
+}
+
+/**
+ * 并入一侧的上下文：句子变长，分词与标记同步重建。
+ * 句子变了 = 语境变了，按同一个查询词重取释义（与确认编辑同一处理，避免 AI 优选
+ * 继续用旧句子的缓存）
+ */
+function onContextExtend(side: 'before' | 'after'): void {
+    capture.markUserTouched();
+    if (extendContext(side) == null) {
+        return;
+    }
+    if (searchText.value.trim().length > 0) {
+        void query.submitSearch();
+    }
+}
+
 async function pasteToEdit() {
     const text = await editor.readPastedSentence();
     if (text == null) {
@@ -190,6 +231,8 @@ onBeforeMount(async () => {
                 {{ showEdit ? '完成' : '编辑' }}
             </FluentButton>
             <FluentButton class="header-button" @click="pasteToEdit">粘贴</FluentButton>
+            <HistoryButton icon="undo" label="撤销" :disabled="!canUndo || showEdit" @click="onUndo" />
+            <HistoryButton icon="redo" label="恢复" :disabled="!canRedo || showEdit" @click="onRedo" />
             <FluentInput class="header-input-text" type="text" v-model="searchText" placeholder="回车查询单词" name="search"
                 no-auto-correct
                 @input="onUserEdit"
@@ -208,7 +251,9 @@ onBeforeMount(async () => {
             <FluentStatusText class="sentence-notice" :severity="pasteNotice?.severity ?? 'error'"
                 :message="pasteNotice?.message ?? null" />
             <SentencePanel class="sentence-main" :tokens="tokens" v-model:selection="selection" v-if="!showEdit"
-                @commit="onSelectionCommitted" />
+                :context-before="contextBefore" :context-after="contextAfter"
+                @commit="onSelectionCommitted" @extend-before="onContextExtend('before')"
+                @extend-after="onContextExtend('after')" />
             <FluentTextarea class="sentence-editor sentence-main" v-model="sentence" v-if="showEdit" ref="editTextArea"
                 :placeholder="editPlaceholder" @input="onSentenceEdit" @keydown="handleEditTextAreaKeydown" />
             <SentenceCaptureRing :active="captureSettling" v-if="!showEdit" />

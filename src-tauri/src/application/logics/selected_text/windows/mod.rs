@@ -83,6 +83,7 @@ pub fn get_selected_context(
 ) -> Result<SelectedContext, String> {
     if !word_to_sentence {
         return get_selected_text().map(|text| SelectedContext {
+            context: Default::default(),
             text,
             word: None,
             word_offset: None,
@@ -108,6 +109,7 @@ pub fn get_selected_context(
                  expose its selection via UIA), falling back to simulated Ctrl+C"
             );
             return copy_via_ctrl_c(true).map(|text| SelectedContext {
+                context: Default::default(),
                 text,
                 word: None,
                 word_offset: None,
@@ -138,6 +140,7 @@ pub fn get_selected_context(
             }
             log::warn!("UIA path failed, falling back to simulated Ctrl+C: {error}");
             let context = copy_via_ctrl_c(false).map(|text| SelectedContext {
+                context: Default::default(),
                 text,
                 word: None,
                 word_offset: None,

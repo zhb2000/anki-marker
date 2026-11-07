@@ -8,9 +8,11 @@
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 use super::SelectedContext;
+use super::SentenceContext;
 use crate::application::logics::sentence::{
     count_intersecting_sentences, find_sentence_with_range,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 /// 结果日志的描述串：词与录入文本（各截断到 80 字符），用于实机定位“读错控件”
 /// 类问题（日志只写本机日志文件，不上传）。
@@ -44,6 +46,8 @@ pub enum SentenceCapture {
     Expanded {
         sentence: String,
         word_offset: Option<usize>,
+        /// 句子两侧的上下文（常驻显示，点击可并入）：块内已有的相邻句子
+        context: SentenceContext,
     },
     /// 选区横跨多个句子：只扩展、不丢弃——原样录入用户所选文本（不做单词预选）
     SelectionAsIs(String),
@@ -147,6 +151,9 @@ pub fn capture_in_context(
         SentenceCapture::Expanded {
             sentence,
             word_offset,
+            // 窗口链路没有“块”的概念，无从判断句子后面还有什么：建议只在
+            // capture_in_segments（块链路）里计算
+            context: Default::default(),
         },
         touched_edge,
     ));
@@ -227,6 +234,88 @@ pub fn assemble_block_segments<S: AsRef<str>>(
     return (block, selection);
 }
 
+/// UTF-16 码元偏移 → 字节偏移（落在代理对中间或越界时返回 None）
+fn utf16_to_byte(text: &str, units: usize) -> Option<usize> {
+    let mut position = 0usize;
+    for (byte, ch) in text.char_indices() {
+        if position == units {
+            return Some(byte);
+        }
+        position += ch.len_utf16();
+        if position > units {
+            return None;
+        }
+    }
+    return (position == units).then_some(text.len());
+}
+
+/// 去掉提供方插入的软断字符（U+0002、U+00AD），并把 UTF-16 偏移换算到新文本。
+///
+/// 这些字符表示“这里折行了，但不是空格”，必须先删再切句：UAX #29 会把控制字符
+/// 当成句子边界，imple + U+0002 + mentation 会被切在词中间。两个字符都是单码元，
+/// 偏移只需减去其前被删掉的个数。
+fn strip_soft_breaks(text: &str, offset: usize) -> (String, usize) {
+    let mut output = String::with_capacity(text.len());
+    let mut source = 0usize;
+    let mut removed = 0usize;
+    for c in text.chars() {
+        if matches!(c, '\u{2}' | '\u{AD}') {
+            if source < offset {
+                removed += 1;
+            }
+        } else {
+            output.push(c);
+        }
+        source += c.len_utf16();
+    }
+    return (output, offset.saturating_sub(removed));
+}
+
+/// 句子在上下文中的字节区间。与 capture_in_context 的切句规则保持一致：先排除
+/// “用户手选的跨句文本”，再叠加引用标注残留剔除与缩写尾补全。两处只改一处会让
+/// 边界的计算与实际录入的句子错位，改动时务必对照 capture_in_context。
+fn sentence_span(
+    context: &str,
+    sel_start_utf16: usize,
+    sel_end_utf16: usize,
+) -> Option<(usize, usize)> {
+    if count_intersecting_sentences(context, sel_start_utf16, sel_end_utf16) > 1 {
+        return None;
+    }
+    let (_, start, end) = find_sentence_with_range(context, sel_start_utf16, sel_end_utf16)?;
+    let selection_byte = utf16_to_byte(context, sel_start_utf16)?;
+    let start = skip_citation_continuation(context, start, end, selection_byte);
+    let end = extend_abbreviation_tail(context, start, end);
+    return Some((start, end));
+}
+
+/// 每侧最多提供几句上下文（近端优先）：给“再并入一句”留一次余量，不把整段都搬上来
+const CONTEXT_SENTENCES: usize = 2;
+
+/// 相邻句子的纯文本：去掉控制字符（PDF 的软连字符等）并裁剪首尾空白。
+fn clean_context_sentence(text: &str) -> String {
+    let cleaned: String = text
+        .chars()
+        .filter(|c| *c != '\u{2}' && *c != '\u{AD}' && !(c.is_control() && !c.is_whitespace()))
+        .collect();
+    return cleaned.trim().to_string();
+}
+
+/// 从片段里取相邻句子：nearest_last 为 true 时取末尾几句（上文），否则取开头几句
+/// （下文）。近端始终排在第一位——界面只显示第一句，并入后由下一句补位。
+fn adjacent_sentences(fragment: &str, limit: usize, nearest_last: bool) -> Vec<String> {
+    let mut sentences: Vec<String> = fragment
+        .unicode_sentences()
+        .map(clean_context_sentence)
+        .filter(|text| !text.is_empty())
+        .collect();
+    if nearest_last {
+        sentences.reverse();
+    }
+    sentences.truncate(limit);
+    return sentences;
+}
+
 /// 由块片段直接取句：组装片段 → 按拼行规则合并 → 切句。
 ///
 /// 返回 {取句结果, 应上报的词}——拼行会把换行折成空格，词也折成同一形态，
@@ -240,8 +329,11 @@ pub fn capture_in_segments<S: AsRef<str>>(
     let (block, sel_start) = assemble_block_segments(segments, anchor_segment, anchor_offset_utf16);
     let block_word = collapse_whitespace(word);
     let sel_end = sel_start + block_word.encode_utf16().count();
-    let (joined, joined_start) = join_block_around_anchor(&block, sel_start, sel_end)
+    let joined_block = join_block_parts(&block, sel_start, sel_end)
         .ok_or_else(|| "the selection is not inside the block".to_string())?;
+    // 提供方插在行内的结构性字符（PDF 查看器的软连字符 U+0002 等）必须在切句之前
+    // 去掉：UAX #29 会把控制字符当成断句点，一句完整的话会被从词中间切开
+    let (joined, joined_start) = strip_soft_breaks(&joined_block.text, joined_block.selection);
     // 偏移是本地推导的，与 Windows 同理不用“唯一出现位置”兜底（见 find_anchor）；
     // window_loc 传 0：上下文就是块本身，句子贴着块的起点/终点不是“被窗口截断”
     // 提供方报的选区偶尔差一个码元（Chromium 在行内节点边界上实测会偏 1），
@@ -255,7 +347,23 @@ pub fn capture_in_segments<S: AsRef<str>>(
     // 选中 "em‐bedding" 时词里带连字符，块文本里是 "embeddings"，校验会对不上。
     // 原文匹配不到时，用去掉折行连字符的形态再试一次
     for candidate in word_variants(&block_word) {
-        if let Some((capture, _)) = capture_in_context(&joined, &candidate, &candidates, 0, false) {
+        if let Some((mut capture, _)) =
+            capture_in_context(&joined, &candidate, &candidates, 0, false)
+        {
+            // 句子两侧的上下文：块内已有的相邻句子，**常驻**（不看“是否可疑”）。
+            // 需要补救的时刻恰恰是算法以为自己取对了的时候，条件显示覆盖不到
+            if let SentenceCapture::Expanded { context, .. } = &mut capture {
+                if let Some((start, end)) = sentence_span(&joined, joined_start, sel_end) {
+                    let tail = joined_block.tail.trim();
+                    let extended = if tail.is_empty() {
+                        joined.clone()
+                    } else {
+                        format!("{joined} {tail}")
+                    };
+                    context.before = adjacent_sentences(&joined[..start], CONTEXT_SENTENCES, true);
+                    context.after = adjacent_sentences(&extended[end..], CONTEXT_SENTENCES, false);
+                }
+            }
             return Ok((capture, complete_word_at(&joined, joined_start, &candidate)));
         }
     }
@@ -487,12 +595,34 @@ fn citation_marker_length(rest: &str) -> Option<usize> {
 ///
 /// 返回合并后的上下文与选区起点在新上下文中的 UTF-16 偏移；选区定位失败返回 None
 /// （调用方降级，不猜位置）。
+/// 选区所在块，以及同一收集窗口里块之后的文本。
+pub struct JoinedBlock {
+    /// 合并后的块文本（选区的句子从这里切）
+    pub text: String,
+    /// 选区起点在 `text` 中的 UTF-16 偏移
+    pub selection: usize,
+    /// 块之后的后续行（trim 后以空格连接）：并入建议的材料
+    pub tail: String,
+}
+
+/// 只要合并结果、不关心块后文本的便捷入口（单测与早期调用方使用）
 #[cfg(any(target_os = "macos", test))]
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn join_block_around_anchor(
     raw: &str,
     sel_start_utf16: usize,
     sel_end_utf16: usize,
 ) -> Option<(String, usize)> {
+    let joined = join_block_parts(raw, sel_start_utf16, sel_end_utf16)?;
+    return Some((joined.text, joined.selection));
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub fn join_block_parts(
+    raw: &str,
+    sel_start_utf16: usize,
+    sel_end_utf16: usize,
+) -> Option<JoinedBlock> {
     let lines = split_lines_utf16(raw);
     // 空行不参与拼接判定：Chromium 的 PDF 查看器用连续换行分隔视觉行，空行不代表段落
     let usable: Vec<usize> = lines
@@ -554,7 +684,17 @@ pub fn join_block_around_anchor(
             let next = text.chars().next();
             let hyphenated =
                 matches!(previous, Some('-' | '\u{2010}')) && next.is_some_and(char::is_lowercase);
-            if hyphenated {
+            if previous == Some('\u{2}') {
+                // 提供方的行尾软连字符：去掉它直接相接（lan + guage → language），
+                // 既不补连字符也不插空格
+                output.pop();
+                output_utf16 -= 1;
+                if let Some(offset) = output_sel {
+                    if offset > output_utf16 {
+                        output_sel = Some(offset - 1);
+                    }
+                }
+            } else if hyphenated {
                 // 行尾软连字符：去掉连字符直接相接（per- + centage → percentage）
                 output.pop();
                 output_utf16 -= 1;
@@ -584,7 +724,20 @@ pub fn join_block_around_anchor(
         output.push_str(text);
         output_utf16 += text.encode_utf16().count();
     }
-    return Some((output, output_sel?));
+    // 块之后的行：并入建议的材料。只取块以外的行，块内的句子不参与
+    let tail = lines
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index > last)
+        .map(|(_, (_, text))| text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    return Some(JoinedBlock {
+        text: output,
+        selection: output_sel?,
+        tail,
+    });
 }
 
 /// 上下文的行序列：每行给出它在原文中的 UTF-16 起点与内容（不含换行符）。
@@ -617,10 +770,32 @@ pub fn can_join_lines(previous: &str, next: &str) -> bool {
     if previous.is_empty() || next.is_empty() {
         return false;
     }
+    // 行尾是提供方的软连字符（PDF 查看器把行尾连字符输出为 U+0002）：词被换行切成
+    // 两半，必须接上，与下一行的首字符无关
+    if previous.ends_with('\u{2}') {
+        return true;
+    }
     if ends_sentence(previous) {
         return false;
     }
+    // 行尾停在分号/逗号/开括号这类“显然没说完”的位置：本身就是续接证据。
+    // 引用串常在这里断开，下一行以作者名（大写）开头——只看首字母就会漏掉
+    if ends_with_continuation_marker(previous) {
+        return true;
+    }
     return starts_continuation(next);
+}
+
+/// 行尾是否停在“不可能是一个块的结尾”的标点上。
+///
+/// 只看右侧首字母的续接判定在这里失效：引用串 “…(Mikolov et al., 2013;” 的下一行是
+/// 另一条引用 “Bojanowski et al., 2017)”，首字母大写，规则会判成“新块”，句子就被
+/// 切在第一个引用处。这些标点本身已经说明话没说完，不必再看下一行。
+fn ends_with_continuation_marker(text: &str) -> bool {
+    return matches!(
+        text.chars().next_back(),
+        Some(';' | ',' | '(' | '[' | '{' | '–' | '—' | '/' | '&')
+    );
 }
 
 /// 行尾是否结束了一个句子：去掉尾随引号/括号后以句末标点结尾。
@@ -934,6 +1109,7 @@ pub fn reconcile_with_primary(
         .filter(|p| !p.is_empty())
     else {
         return SelectedContext {
+            context: Default::default(),
             text,
             word,
             word_offset,
@@ -951,6 +1127,7 @@ pub fn reconcile_with_primary(
                 );
             }
             SelectedContext {
+                context: Default::default(),
                 text,
                 word: Some(primary),
                 // 词被替换时原偏移指向的是漂移前的词，作废；词未变则偏移继续有效
@@ -966,12 +1143,14 @@ pub fn reconcile_with_primary(
                 text
             );
             SelectedContext {
+                context: Default::default(),
                 text: primary,
                 word: None,
                 word_offset: None,
             }
         }
         None => SelectedContext {
+            context: Default::default(),
             text: primary,
             word: None,
             word_offset: None,
@@ -1111,6 +1290,7 @@ mod tests {
             SentenceCapture::Expanded {
                 sentence,
                 word_offset,
+                ..
             } => {
                 assert_eq!(sentence, "The target word is fox.");
                 // "fox" 在句中的 UTF-16 偏移（"The target word is " 共 19 个码元）
@@ -1134,6 +1314,7 @@ mod tests {
             SentenceCapture::Expanded {
                 sentence,
                 word_offset,
+                ..
             } => {
                 assert_eq!(sentence, "The encoder stops.");
                 assert_eq!(word_offset, Some(4));
@@ -1152,6 +1333,7 @@ mod tests {
             SentenceCapture::Expanded {
                 sentence,
                 word_offset,
+                ..
             } => {
                 assert_eq!(sentence, "Hello world.");
                 assert_eq!(word_offset, Some(6));
@@ -1265,6 +1447,7 @@ mod tests {
         let SentenceCapture::Expanded {
             sentence,
             word_offset,
+            ..
         } = &result.capture
         else {
             panic!("expected an expanded sentence, got {:?}", result.capture);
@@ -1561,6 +1744,100 @@ mod tests {
             sentence,
             "Recurrent neural networks, long short-term memory [13] and gated recurrent networks."
         );
+    }
+
+    /// 实机样本（arXiv 2508.10104，Chrome PDF 查看器）：AX 把同一个视觉行在每处行内链接
+    /// 切成独立片段，并在片段边界插入 CRLF / U+0002（行尾软连字符）。取句必须跨过这些
+    /// 结构性切口，否则句子停在第 1 个引用处。
+    #[test]
+    fn joins_citation_fragments_split_by_the_pdf_provider() {
+        let segments = [
+            "pervised pre-training approaches for text data. Examples include word embeddings (Mikolov et al., 2013;",
+            "\r\nBojanowski et al., ",
+            "2017), sentence representations (",
+            "Devlin et al., ",
+            "2018; ",
+            "Liu et al., ",
+            "2019), and plain lan\u{2}",
+            "guage models (Mikolov et al., 2010; Zaremba et al., 2014). In contrast, computer vision presents greater\r\n",
+            "challenges due to the continuous nature of the signal.",
+        ];
+        const EXPECTED: &str =
+            "Examples include word embeddings (Mikolov et al., 2013; Bojanowski et al., 2017), \
+             sentence representations (Devlin et al., 2018; Liu et al., 2019), and plain language \
+             models (Mikolov et al., 2010; Zaremba et al., 2014).";
+        // 句子中任意位置取词都应得到同一句：正向（第一个引用处）与反向（跨过引用往回）
+        // 两种拼接方向都要过
+        for (segment, word) in [
+            (0usize, "embeddings"),
+            (1, "Bojanowski"),
+            (2, "representations"),
+        ] {
+            let offset = utf16_of(segments[segment], word);
+            let (capture, _) = capture_in_segments(&segments, segment, offset, word).unwrap();
+            let SentenceCapture::Expanded { sentence, .. } = capture else {
+                panic!("expected an expanded sentence for {word}");
+            };
+            assert_eq!(sentence, EXPECTED, "anchor word {word}");
+        }
+    }
+
+    /// 实机样本（arXiv 1810.04805，Chrome PDF 查看器）：提供方把行尾软连字符输出成
+    /// 片段内部的 U+0002（imple + U+0002 + mentation）。切句前必须先删掉——UAX #29 会把它
+    /// 当成句子边界，句子被从词中间劈开
+    #[test]
+    fn soft_breaks_inside_a_segment_do_not_split_the_sentence() {
+        let segments = [
+            "Because the use of Transformers has become common and our im\u{2}plementation is \
+             almost identical to the original, we will omit an exhaustive background \
+             descrip\u{2}tion of the original.",
+        ];
+        let offset = utf16_of(segments[0], "Transformers");
+        let (capture, _) = capture_in_segments(&segments, 0, offset, "Transformers").unwrap();
+        let SentenceCapture::Expanded { sentence, .. } = capture else {
+            panic!("expected an expanded sentence");
+        };
+        assert_eq!(
+            sentence,
+            "Because the use of Transformers has become common and our implementation is almost \
+             identical to the original, we will omit an exhaustive background description of the \
+             original."
+        );
+    }
+
+    /// 上下文是常驻的：句子后面还有一句时，即使当前句已经收住也要给出（界面靠它
+    /// 让用户看见边界、并按需并入）。这里验证并入的是“下一句”这个语义单位
+    #[test]
+    fn context_after_holds_the_next_sentence() {
+        let segments = ["The model is fast. ", "It runs on CPUs."];
+        let offset = utf16_of(segments[0], "model");
+        let (capture, _) = capture_in_segments(&segments, 0, offset, "model").unwrap();
+        let SentenceCapture::Expanded {
+            sentence, context, ..
+        } = capture
+        else {
+            panic!("expected an expanded sentence");
+        };
+        assert_eq!(sentence, "The model is fast.");
+        assert!(context.before.is_empty());
+        assert_eq!(context.after, vec!["It runs on CPUs.".to_string()]);
+    }
+
+    /// 上文同样常驻：取句子之前最近的一句，近端排第一
+    #[test]
+    fn context_before_holds_the_previous_sentence() {
+        let segments = ["First one. Second one. Third one."];
+        let offset = utf16_of(segments[0], "Second");
+        let (capture, _) = capture_in_segments(&segments, 0, offset, "Second").unwrap();
+        let SentenceCapture::Expanded {
+            sentence, context, ..
+        } = capture
+        else {
+            panic!("expected an expanded sentence");
+        };
+        assert_eq!(sentence, "Second one.");
+        assert_eq!(context.before, vec!["First one.".to_string()]);
+        assert_eq!(context.after, vec!["Third one.".to_string()]);
     }
 
     /// 段落是否被切断：内嵌对象前的空白、引用标注处的开括号都算；标题与单元格不算

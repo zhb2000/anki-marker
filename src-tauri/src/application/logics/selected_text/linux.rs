@@ -110,6 +110,7 @@ pub fn get_selected_context(
 ) -> Result<SelectedContext, String> {
     if !word_to_sentence {
         return get_selected_text().map(|text| SelectedContext {
+            context: Default::default(),
             text,
             word: None,
             word_offset: None,
@@ -126,6 +127,7 @@ pub fn get_selected_context(
                  expose its selection via AT-SPI), checking the PRIMARY selection for a change"
             );
             return Ok(SelectedContext {
+                context: Default::default(),
                 text: changed_primary_selection(),
                 word: None,
                 word_offset: None,
@@ -136,6 +138,7 @@ pub fn get_selected_context(
         }
     }
     return primary_selection_fallback().map(|text| SelectedContext {
+        context: Default::default(),
         text,
         word: None,
         word_offset: None,
@@ -235,6 +238,7 @@ fn atspi_context_with_timeout(word_to_sentence: bool) -> Result<SelectedContext,
 
 fn empty_context() -> SelectedContext {
     return SelectedContext {
+        context: Default::default(),
         text: String::new(),
         word: None,
         word_offset: None,
@@ -264,6 +268,7 @@ async fn atspi_selected_context(
         .map_err(|error| format!("failed to read the selected text: {error}"))?;
     if word.trim().is_empty() {
         return Ok(SelectedContext {
+            context: Default::default(),
             text: word,
             word: None,
             word_offset: None,
@@ -275,6 +280,7 @@ async fn atspi_selected_context(
             return Err(EMBEDDED_WORD_ERROR.to_string());
         }
         return Ok(SelectedContext {
+            context: Default::default(),
             text: word,
             word: None,
             word_offset: None,
@@ -289,6 +295,7 @@ async fn atspi_selected_context(
             },
             real_word,
         )) => SelectedContext {
+            context: Default::default(),
             text: sentence,
             word: Some(real_word.trim().to_string()),
             word_offset,
@@ -298,6 +305,7 @@ async fn atspi_selected_context(
             return Err(EMBEDDED_WORD_ERROR.to_string());
         }
         Ok((SentenceCapture::SelectionAsIs(text), _)) => SelectedContext {
+            context: Default::default(),
             text,
             word: None,
             word_offset: None,
@@ -309,6 +317,7 @@ async fn atspi_selected_context(
             // 已拿到词：取句失败不致命，降级为仅录入词原文
             log::warn!("failed to extract sentence for the selected word: {error}");
             SelectedContext {
+                context: Default::default(),
                 text: word,
                 word: None,
                 word_offset: None,

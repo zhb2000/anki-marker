@@ -18,7 +18,8 @@ import type { SentenceEditor } from './useSentenceEditor';
 
 export interface UseCaptureListenerOptions {
     router: Router;
-    editor: Pick<SentenceEditor, 'tokens' | 'selection' | 'showEdit' | 'replaceSentence' | 'changeEditStatus'>;
+    editor: Pick<SentenceEditor,
+        'tokens' | 'selection' | 'showEdit' | 'replaceSentence' | 'setContext' | 'changeEditStatus'>;
     /** 以“显式”语义写入搜索框（见 useQueryDispatch） */
     setQueryExplicitly: (text: string) => void;
 }
@@ -70,6 +71,8 @@ export function useCaptureListener(options: UseCaptureListenerOptions) {
         }
         // 先整体替换：分词同步重建为全新状态（每次捕获都是全新状态），进行中的编辑草稿一并作废
         editor.replaceSentence(plan.text);
+        // 上下文属于这次捕获的初始状态：替换之后立刻挂上（replaceSentence 会先清空）
+        editor.setContext(plan.context);
         if (editor.showEdit.value) {
             await editor.changeEditStatus();
         }

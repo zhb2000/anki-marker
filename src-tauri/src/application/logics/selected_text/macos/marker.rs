@@ -173,6 +173,7 @@ pub(super) fn marker_selected_context(
     let word = marker_selected_text(element)?;
     if word.trim().is_empty() {
         return Some(SelectedContext {
+            context: Default::default(),
             text: word,
             word: None,
             word_offset: None,
@@ -184,6 +185,7 @@ pub(super) fn marker_selected_context(
             SentenceCapture::Expanded {
                 sentence,
                 word_offset,
+                context,
             },
             capture_word,
         )) => {
@@ -192,9 +194,11 @@ pub(super) fn marker_selected_context(
                 text,
                 word: Some(strip_text_artifacts(capture_word.trim())),
                 word_offset,
+                context,
             }
         }
         Ok((SentenceCapture::SelectionAsIs(text), _)) => SelectedContext {
+            context: Default::default(),
             text: strip_text_artifacts(&text),
             word: None,
             word_offset: None,
@@ -202,6 +206,7 @@ pub(super) fn marker_selected_context(
         Err(error) => {
             log::warn!("failed to extract sentence for the selected word: {error}");
             SelectedContext {
+                context: Default::default(),
                 text: strip_text_artifacts(&word),
                 word: None,
                 word_offset: None,
@@ -238,7 +243,7 @@ fn find_sentence_for_marker_range(
     word: &str,
     selection: &core_foundation::base::CFType,
 ) -> Result<(SentenceCapture, String), String> {
-    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::base::TCFType;
 
     let selection_start = marker_of_range(selection, false)?;
     let selection_end = marker_of_range(selection, true)?;
@@ -316,6 +321,17 @@ fn find_sentence_for_marker_range(
                     );
                 } else if let Some(found) = fallback {
                     log::info!("rebuilt the block from the AX tree (the sentence looks truncated)");
+                    // 树拼块也只到链接处（PDF 把同一视觉行按行内链接切成多个组）：改用
+                    // 逐行收集再取一次——行拼接规则能跨过这些结构切口，而树拼块本身
+                    // 已经到顶。行块的句子更长就采用它
+                    if let Ok((wider, wider_word)) =
+                        line_block(element, word, &selection_start, &selection_end)
+                    {
+                        if sentence_len(&wider) > sentence_len(&found.0) {
+                            log::info!("line navigation recovered a longer sentence than the AX tree block");
+                            return Ok((wider, wider_word));
+                        }
+                    }
                     return Ok(found);
                 }
             }
@@ -348,6 +364,24 @@ fn find_sentence_for_marker_range(
     }
 
     // 第二轮：段落取不到块时，退到行导航扩展
+    return match line_block(element, word, &selection_start, &selection_end) {
+        Ok(result) => Ok(result),
+        Err(error) => Err(format!(
+            "{}; line context: {error}",
+            paragraph_capture.err().unwrap_or_default()
+        )),
+    };
+}
+
+/// 用选区所在行向外逐行收集块并取句（行级提供方的兜底路径）。
+fn line_block(
+    element: &core_foundation::base::CFType,
+    word: &str,
+    selection_start: &core_foundation::base::CFType,
+    selection_end: &core_foundation::base::CFType,
+) -> Result<(SentenceCapture, String), String> {
+    use core_foundation::base::{CFType, TCFType};
+
     let line_start_of = |marker: &CFType, end: bool| -> Result<CFType, String> {
         let line = copy_parameterized_attribute_by_ax(
             element,
@@ -357,27 +391,22 @@ fn find_sentence_for_marker_range(
         return marker_of_range(&line, end);
     };
     let (anchor_left, anchor_right) = match (
-        line_start_of(&selection_start, false),
-        line_start_of(&selection_end, true),
+        line_start_of(selection_start, false),
+        line_start_of(selection_end, true),
     ) {
         (Ok(left), Ok(right)) => (left, right),
         (Err(error), _) | (_, Err(error)) => {
             return Err(format!("{error}; line navigation unavailable"));
         }
     };
+    return expand_block_around_lines(element, word, &anchor_left, &anchor_right, selection_start);
+}
 
-    return match expand_block_around_lines(
-        element,
-        word,
-        &anchor_left,
-        &anchor_right,
-        &selection_start,
-    ) {
-        Ok(result) => Ok(result),
-        Err(error) => Err(format!(
-            "{}; line context: {error}",
-            paragraph_capture.err().unwrap_or_default()
-        )),
+/// 结果里句子的长度（非整句结果记 0）：用来在多个候选之间挑更完整的那个
+fn sentence_len(capture: &SentenceCapture) -> usize {
+    return match capture {
+        SentenceCapture::Expanded { sentence, .. } => sentence.chars().count(),
+        SentenceCapture::SelectionAsIs(_) => 0,
     };
 }
 
@@ -568,10 +597,21 @@ fn block_candidates_from_tree(
                 inner
             };
         }
-        let inner = children(node)
-            .iter()
-            .map(|child| text_of(child, depth + 1))
-            .collect::<String>();
+        let mut inner = String::new();
+        for child in children(node) {
+            // 标题是块级边界：拼接时在它两侧断行，否则标题会和相邻正文连成一句
+            // （文档站的短段落尤其常见）。行内节点（链接、强调）不加分隔符，
+            // 它们本来就是同一句话的一部分
+            if value(&child, "AXRole") == "AXHeading" {
+                if !inner.is_empty() && !inner.ends_with('\n') {
+                    inner.push('\n');
+                }
+                inner.push_str(&text_of(&child, depth + 1));
+                inner.push('\n');
+                continue;
+            }
+            inner.push_str(&text_of(&child, depth + 1));
+        }
         if !inner.is_empty() {
             return inner;
         }
@@ -865,6 +905,7 @@ pub(super) fn refine_truncated_with_markers(
             SentenceCapture::Expanded {
                 sentence,
                 word_offset,
+                context,
             },
             capture_word,
         )) if !looks_truncated(&sentence) => {
@@ -876,6 +917,7 @@ pub(super) fn refine_truncated_with_markers(
                 text,
                 word: Some(strip_text_artifacts(capture_word.trim())),
                 word_offset,
+                context,
             })
         }
         _ => None,

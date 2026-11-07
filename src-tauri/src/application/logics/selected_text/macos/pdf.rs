@@ -291,12 +291,15 @@ fn capture_pdf_occurrence(page: &[u16], start: usize, end: usize) -> Option<Sele
         SentenceCapture::Expanded {
             sentence,
             word_offset,
+            ..
         } => SelectedContext {
+            context: Default::default(),
             text: sentence,
             word: Some(word.trim().to_string()),
             word_offset,
         },
         SentenceCapture::SelectionAsIs(text) => SelectedContext {
+            context: Default::default(),
             text,
             word: None,
             word_offset: None,

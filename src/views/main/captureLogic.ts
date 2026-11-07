@@ -12,6 +12,14 @@ export interface CapturedSentencePayload {
     word: string | null;
     wordOffset: number | null;
     retry: boolean;
+    /** 句子两侧的上下文（近端在前）：常驻显示，点击一侧即并入该侧最近的一句 */
+    context?: CapturedContextPayload | null;
+}
+
+/** 句子两侧的上下文：一侧只有第一项会被显示，并入后由下一项补位 */
+export interface CapturedContextPayload {
+    before: string[];
+    after: string[];
 }
 
 /**
@@ -27,7 +35,7 @@ export type CapturedSentencePlan =
     /** 迟到的补取结果，而用户已经改动过工作区：丢弃 */
     | { kind: 'stale-retry'; }
     /** 录入：text 为裁剪后的句子；word 为裁剪后的命中词（缺失或为空时 null）；wordOffset 已按裁剪校验 */
-    | { kind: 'apply'; text: string; word: string | null; wordOffset: number | null; };
+    | { kind: 'apply'; text: string; word: string | null; wordOffset: number | null; context: CapturedContextPayload; };
 
 /**
  * 决定如何处理一次捕获载荷。
@@ -50,11 +58,20 @@ export function planCapturedSentence(payload: CapturedSentencePayload, userTouch
         word: (word != null && word.length > 0) ? word : null,
         // 偏移以载荷原文为基准：文本被 trim 改短时偏移不再可信
         wordOffset: trimmed.length === payload.text.length ? payload.wordOffset : null,
+        context: validContext(payload.context),
     };
 }
 
+/** 上下文只保留非空字符串：空项会让界面出现一行空气 */
+function validContext(context: CapturedContextPayload | null | undefined): CapturedContextPayload {
+    const clean = (list: unknown): string[] =>
+        Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [];
+    return { before: clean(context?.before), after: clean(context?.after) };
+}
+
 export function isSameCapturedPayload(a: CapturedSentencePayload, b: CapturedSentencePayload): boolean {
-    return a.text === b.text && a.word === b.word && a.wordOffset === b.wordOffset && a.retry === b.retry;
+    return a.text === b.text && a.word === b.word && a.wordOffset === b.wordOffset && a.retry === b.retry
+        && JSON.stringify(a.context ?? null) === JSON.stringify(b.context ?? null);
 }
 
 /**

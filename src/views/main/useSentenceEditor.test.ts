@@ -100,4 +100,48 @@ describe('useSentenceEditor', () => {
         mocks.readText.mockResolvedValueOnce('  Pasted sentence.\n');
         expect(await editor.readPastedSentence()).toBe('Pasted sentence.');
     });
+
+    it('并入上下文后可撤销/恢复：句子、选区与两侧上下文一并还原', () => {
+        const { editor } = setup();
+        editor.setContext({ before: ['First one.'], after: ['Third one.'] });
+        const original = editor.sentence.value;
+
+        editor.extendContext('after');
+        expect(editor.sentence.value).toBe(original + ' Third one.');
+        expect(editor.contextAfter.value).toEqual([]);
+        expect(selected(editor)).toEqual(['fox']);
+        expect(editor.canUndo.value).toBe(true);
+
+        expect(editor.undo()).toBe(true);
+        expect(editor.sentence.value).toBe(original);
+        // 队列也回到并入前：还能重新并入
+        expect(editor.contextAfter.value).toEqual(['Third one.']);
+        expect(selected(editor)).toEqual(['fox']);
+        expect(editor.canRedo.value).toBe(true);
+
+        expect(editor.redo()).toBe(true);
+        expect(editor.sentence.value).toBe(original + ' Third one.');
+        expect(editor.contextAfter.value).toEqual([]);
+    });
+
+    it('撤销后做新动作，恢复栈作废', () => {
+        const { editor } = setup();
+        editor.setContext({ before: [], after: ['More.'] });
+        editor.extendContext('after');
+        editor.undo();
+        expect(editor.canRedo.value).toBe(true);
+        editor.extendContext('after');
+        expect(editor.canRedo.value).toBe(false);
+    });
+
+    it('重新取词（整体替换）会清空撤销与恢复历史', () => {
+        const { editor } = setup();
+        editor.setContext({ before: [], after: ['More.'] });
+        editor.extendContext('after');
+        expect(editor.canUndo.value).toBe(true);
+
+        editor.replaceSentence('A brand new sentence.');
+        expect(editor.canUndo.value).toBe(false);
+        expect(editor.canRedo.value).toBe(false);
+    });
 });

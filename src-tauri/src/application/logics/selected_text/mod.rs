@@ -63,6 +63,17 @@ pub struct RetryCallbacks {
     pub is_cancelled: Box<dyn Fn() -> bool + Send>,
 }
 
+/// 句子两侧的上下文：每侧最多两句，**近端在前**（`before[0]` 是紧邻的上一句）。
+///
+/// 界面上一侧只显示一行淡色文字；点一下就把该侧最近的一句并入句子。上下文是
+/// 常驻的——不靠“算法觉得被截断”来决定是否显示，因为需要补救的时刻恰恰是
+/// 算法以为自己取对了的时候。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SentenceContext {
+    pub before: Vec<String>,
+    pub after: Vec<String>,
+}
+
 /// 划词捕获结果：text 为录入文本（取句成功时是整句），word 为取句模式命中的单词。
 #[derive(Debug)]
 pub struct SelectedContext {
@@ -74,6 +85,9 @@ pub struct SelectedContext {
     /// （折叠空白、去伪影、用剪贴板权威词替换词）都必须同步换算偏移或置为 None。
     /// 前端也不盲信：使用前以“该位置的切片等于 word”校验，不符则回退按字符串匹配。
     pub word_offset: Option<usize>,
+    /// 建议并入的下一档（只有块链路、且句尾有截断证据时非空）：前端据此在句子
+    /// 末尾挂出淡色续文，一次点击把句子放宽到下一句
+    pub context: SentenceContext,
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]

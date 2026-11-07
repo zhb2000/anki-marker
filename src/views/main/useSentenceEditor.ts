@@ -4,6 +4,7 @@ import * as api from '../../tauri-api';
 import { tokenize } from '../../logics/stringutils';
 import { useTransientNotice } from '../../fluent-controls/useTransientNotice';
 import { rebuildDraft, tokensToSentenceHTML } from './sentenceDraft';
+import { selectionForCapturedWord, type CapturedContextPayload } from './captureLogic';
 import type { SentenceToken, TokenSelection } from './types';
 
 export interface UseSentenceEditorOptions {
@@ -23,6 +24,78 @@ export function useSentenceEditor(options: UseSentenceEditorOptions) {
     const sentence = ref('');
     /** 是否显示文本框 */
     const showEdit = ref(false);
+    /**
+     * 句子两侧的上下文（近端在前）。语义上属于“当前这次捕获的初始状态”：
+     * 任何整体替换（划词、粘贴、编辑确认）都会把它作废
+     */
+    const contextBefore = ref<string[]>([]);
+    const contextAfter = ref<string[]>([]);
+
+    /** 句子状态快照：撤销/恢复把整份状态（文本、选区、两侧上下文）一起还原 */
+    interface SentenceSnapshot {
+        text: string;
+        selection: TokenSelection | null;
+        before: string[];
+        after: string[];
+    }
+    /** 撤销栈与恢复栈（栈顶是最近一次）。上限防止长时间使用后无限增长 */
+    const undoStack = ref<SentenceSnapshot[]>([]);
+    const redoStack = ref<SentenceSnapshot[]>([]);
+    const canUndo = computed(() => undoStack.value.length > 0);
+    const canRedo = computed(() => redoStack.value.length > 0);
+    const MAX_HISTORY = 50;
+
+    function snapshot(): SentenceSnapshot {
+        return {
+            text: sentence.value,
+            selection: selection.value == null ? null : { ...selection.value },
+            before: [...contextBefore.value],
+            after: [...contextAfter.value],
+        };
+    }
+
+    /** 在改动句子之前调用：记下当前状态，并作废恢复栈（新动作会分叉历史） */
+    function pushHistory(state: SentenceSnapshot = snapshot()): void {
+        undoStack.value.push(state);
+        if (undoStack.value.length > MAX_HISTORY) {
+            undoStack.value.shift();
+        }
+        redoStack.value = [];
+    }
+
+    function restore(state: SentenceSnapshot): void {
+        sentence.value = state.text;
+        tokens.value = tokenize(state.text).map(token => ({ token }));
+        selection.value = state.selection == null ? null : { ...state.selection };
+        contextBefore.value = [...state.before];
+        contextAfter.value = [...state.after];
+        // 还原后不再有进行中的编辑草稿
+        editBaselineTokens = null;
+        editBaselineSelection = null;
+        editSentenceDirty = false;
+    }
+
+    /** 撤销：成功返回 true（调用方据此重取释义） */
+    function undo(): boolean {
+        const state = undoStack.value.pop();
+        if (state == null) {
+            return false;
+        }
+        redoStack.value.push(snapshot());
+        restore(state);
+        return true;
+    }
+
+    /** 恢复 */
+    function redo(): boolean {
+        const state = redoStack.value.pop();
+        if (state == null) {
+            return false;
+        }
+        undoStack.value.push(snapshot());
+        restore(state);
+        return true;
+    }
     /** 文本框控件（模板中 ref="editTextArea"；聚焦经组件暴露的 focus 方法转发到内部 textarea） */
     const editTextArea = useTemplateRef<{ focus: () => void; }>('editTextArea');
     const isMacOS = computed(() => api.os.type() === 'macos');
@@ -43,6 +116,8 @@ export function useSentenceEditor(options: UseSentenceEditorOptions) {
      */
     let editBaselineTokens: SentenceToken[] | null = null;
     let editBaselineSelection: TokenSelection | null = null;
+    /** 进入编辑模式时的句子文本：确认编辑时作为撤销快照 */
+    let editBaselineText = '';
     /**
      * 本次编辑会话中句子是否被改动过：确认编辑时据此决定要不要按新语境重取释义。
      * 用“改过”而不是“前后文本不同”——改完又改回去时文本相同，但旧释义已被清空，仍应恢复
@@ -55,6 +130,16 @@ export function useSentenceEditor(options: UseSentenceEditorOptions) {
      * 值相同也重建——每次整体替换都应是全新状态。
      */
     function replaceSentence(text: string): void {
+        contextBefore.value = [];
+        contextAfter.value = [];
+        // 整体替换是“新的一次录入”：旧句子的撤销历史不再有意义
+        undoStack.value = [];
+        redoStack.value = [];
+        resetSentence(text);
+    }
+
+    /** 整体替换句子但不碰建议（建议并入自己用：并入后队首推进到下一档） */
+    function resetSentence(text: string): void {
         editBaselineTokens = null;
         editBaselineSelection = null;
         editSentenceDirty = false;
@@ -63,6 +148,47 @@ export function useSentenceEditor(options: UseSentenceEditorOptions) {
         }
         tokens.value = tokenize(text).map(token => ({ token }));
         selection.value = null;
+    }
+
+    /** 捕获结果带来的上下文（两侧都可以为空） */
+    function setContext(context: CapturedContextPayload): void {
+        contextBefore.value = context.before;
+        contextAfter.value = context.after;
+    }
+
+    /**
+     * 并入一侧的上下文：把该侧最近的一句接到句子前面 / 后面。
+     * 分词同步重建；标记词按平移后的位置重新标出（上文并入会让词整体右移）。
+     * 返回并入后的句子；该侧没有更多文本时返回 null
+     */
+    function extendContext(side: 'before' | 'after'): string | null {
+        const queue = side === 'before' ? contextBefore : contextAfter;
+        const piece = queue.value[0];
+        if (piece == null) {
+            return null;
+        }
+        pushHistory();
+        const marked = selection.value == null
+            ? ''
+            : tokens.value
+                .slice(selection.value.start, selection.value.end + 1)
+                .map(token => token.token)
+                .join(' ');
+        const wordOffset = selection.value == null
+            ? null
+            : tokens.value
+                .slice(0, selection.value.start)
+                .reduce((offset, token) => offset + token.token.length, 0);
+        const text = side === 'before' ? piece + ' ' + sentence.value : sentence.value + ' ' + piece;
+        const shift = side === 'before' ? piece.length + 1 : 0;
+        queue.value = queue.value.slice(1);
+        resetSentence(text);
+        if (marked.length > 0) {
+            selection.value = selectionForCapturedWord(
+                tokens.value, marked, wordOffset == null ? null : wordOffset + shift, text
+            );
+        }
+        return text;
     }
 
     /** 编辑框的输入：标记本次编辑会话确实改过句子 */
@@ -102,6 +228,7 @@ export function useSentenceEditor(options: UseSentenceEditorOptions) {
             // 进入编辑模式：快照当前分词与选区作为基线，编辑期间不再重建分词；清空“本次编辑是否改过句子”
             editBaselineTokens = tokens.value.map(({ token }) => ({ token }));
             editBaselineSelection = selection.value;
+            editBaselineText = sentence.value;
             editSentenceDirty = false;
             await nextTick();
             editTextArea.value?.focus();
@@ -114,6 +241,14 @@ export function useSentenceEditor(options: UseSentenceEditorOptions) {
             // 确认编辑（完成）：以基线分词与选区为基准重建，尽量保留已选中的词。
             // 基线为 null 说明编辑期间句子被整体替换（划词录入、粘贴），分词已是全新状态，无需重建
             if (editBaselineTokens != null) {
+                if (editSentenceDirty) {
+                    pushHistory({
+                        text: editBaselineText,
+                        selection: editBaselineSelection,
+                        before: [...contextBefore.value],
+                        after: [...contextAfter.value],
+                    });
+                }
                 const rebuilt = rebuildDraft(editBaselineTokens, editBaselineSelection, sentence.value);
                 tokens.value = rebuilt.tokens;
                 selection.value = rebuilt.selection;
@@ -158,6 +293,14 @@ export function useSentenceEditor(options: UseSentenceEditorOptions) {
         showEdit,
         editPlaceholder,
         pasteNotice,
+        contextBefore,
+        contextAfter,
+        canUndo,
+        canRedo,
+        setContext,
+        extendContext,
+        undo,
+        redo,
         replaceSentence,
         markSentenceDirty,
         readPastedSentence,
