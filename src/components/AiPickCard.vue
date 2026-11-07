@@ -211,10 +211,12 @@ function onBodyAnimationEnd(event: AnimationEvent) {
                     <span v-else-if="state.phase === 'done' && state.fallback" class="ai-source-badge ai-source-warning">
                         非词典条目
                     </span>
-                    <!-- 停止/重新生成：进行中可停止；完成态可重新生成（含 fallback 重新生成） -->
+                    <!-- 停止/重新生成/重试：进行中可停止；完成态可重新生成（含 fallback 重新生成）；
+                         失败时重试与“重新生成”同处顶行，不跟错误详情挤在一行被压窄 -->
                     <span class="ai-pick-actions">
                         <button v-if="inProgress" class="ai-action-btn" @click="emit('stop')">停止</button>
                         <button v-else-if="state.phase === 'done'" class="ai-action-btn" @click="emit('regenerate')">重新生成</button>
+                        <button v-else-if="state.phase === 'error'" class="ai-action-btn" @click="emit('regenerate')">重试</button>
                     </span>
                 </div>
                 <!-- fetching 与 loading 共用骨架屏：取候选和等模型首字节对用户是同一件事 -->
@@ -229,10 +231,9 @@ function onBodyAnimationEnd(event: AnimationEvent) {
                         <button class="ai-action-btn" @click="emit('skip-fetch')">跳过</button>
                     </div>
                 </template>
-                <!-- 失败：把原因留在卡片上，并给一次重试；不要让卡片闪一下骨架屏就消失 -->
+                <!-- 失败：把原因留在卡片上；重试按钮在顶行（见 ai-pick-header），此处只放原因 -->
                 <div v-else-if="state.phase === 'error'" class="ai-error">
                     <span class="ai-error-text">{{ state.errorMessage.length > 0 ? state.errorMessage : 'AI 优选失败' }}</span>
-                    <button class="ai-action-btn" @click="emit('regenerate')">重试</button>
                 </div>
                 <!-- 思考模型正在输出思维链：三圆点错峰跳动，区别于首字节前的骨架屏与正文打字机 -->
                 <div v-else-if="state.phase === 'thinking'" class="ai-thinking" aria-hidden="true">
@@ -472,18 +473,15 @@ function onBodyAnimationEnd(event: AnimationEvent) {
     color: var(--control-text-color-active);
 }
 
-/* 失败提示：与正文同宽，错误色，右侧跟一个重试 */
+/* 失败原因：与正文同宽，错误色；重试按钮在顶行，这里不再并排一个按钮 */
 .ai-error {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
     font-size: 12px;
     color: var(--warning-text-color);
     user-select: text;
 }
 
 .ai-error-text {
-    flex-grow: 1;
+    display: block;
     overflow-wrap: break-word;
     cursor: text;
 }
