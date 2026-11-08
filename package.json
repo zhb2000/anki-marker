@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:ai": "node scripts/dev-ai.mjs",
+    "dev:browser": "vite --mode browser",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "node scripts/tauri.mjs",

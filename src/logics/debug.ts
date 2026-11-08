@@ -1,97 +1,86 @@
 /**
- * 调试 mock 机制。
+ * 调试 mock 机制的业务侧入口。
  *
- * 开发时通过环境变量选择 mock 场景：在项目根目录的 `.env.development.local`
- * 文件中配置（该文件被 gitignore，不会误提交），修改后需重启 dev server：
+ * 全部 dev 功能由开发者设置驱动（见 src/dev/schema.ts 的注册表与 docs/dev-features.md）：
+ * 设置页“开发者”入口、文件持久化、URL 参数与 `window.__dev` 都在 src/dev 下，
+ * 这里只负责把当前设置翻译成业务代码关心的几个读取函数。
  *
- * ```ini
- * VITE_APP_UPDATE_SCENARIO=new-version
- * VITE_TEMPLATE_VERSION_SCENARIO=low-version
- * VITE_LAUNCH_AT_LOGIN_EDITABLE=true
- * ```
- *
- * 可用场景见 `AppUpdateScenario` 与 `TemplateVersionScenario`。
- * release 构建强制使用真实场景（'real'），mock 代码不会生效。
+ * 总开关 `VITE_DEV_FEATURES` 关闭（含所有 release 构建）时，每个函数都返回
+ * “真实行为”，开发者设置不存在，也不会被读取。
  */
 import * as semver from 'semver';
 
 import * as api from '../tauri-api';
+import type { EffectiveLlmScenario } from '../dev/effective';
+import { devSettings } from '../dev/state';
+import type { AppUpdateScenario, LlmScenario, TemplateVersionScenario } from '../dev/schema';
 import type { LatestAppInfo } from './globals';
 
-/** 应用更新检查的调试场景 */
-export type AppUpdateScenario =
-    /** 正常请求 GitHub Release API */
-    | 'real'
-    /** 有新版本：红点、新版本链接与更新说明对话框 */
-    | 'new-version'
-    /** 无新版本：提示“当前应用已是最新版本” */
-    | 'no-update'
-    /** 请求失败：设置页弹出错误提示，启动时静默失败 */
-    | 'request-error';
+export type { AppUpdateScenario, LlmScenario, TemplateVersionScenario };
 
-/** 笔记模板版本获取的调试场景 */
-export type TemplateVersionScenario =
-    /** 正常从 Anki 获取笔记模板版本 */
-    | 'real'
-    /** 模板版本过低：显示红点、新版本链接与“更新模板”按钮 */
-    | 'low-version'
-    /** 获取失败：显示“获取失败” */
-    | 'request-error';
-
-const APP_UPDATE_SCENARIOS = ['real', 'new-version', 'no-update', 'request-error'] as const;
-const TEMPLATE_VERSION_SCENARIOS = ['real', 'low-version', 'request-error'] as const;
-
-/** 读取环境变量中的场景值，非法或缺省时回退为 'real' */
-function readScenario<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
-    return typeof value === 'string' && (allowed as readonly unknown[]).includes(value)
-        ? value as T
-        : fallback;
+/** 应用更新检查的当前场景（'real' 表示真实请求） */
+export function appUpdateScenario(): AppUpdateScenario {
+    return __DEV_FEATURES__ ? devSettings.appUpdateScenario : 'real';
 }
 
-/** 应用更新检查的调试场景（release 构建强制为 'real'） */
-export const appUpdateScenario: AppUpdateScenario = import.meta.env.PROD
-    ? 'real'
-    : readScenario(import.meta.env.VITE_APP_UPDATE_SCENARIO, APP_UPDATE_SCENARIOS, 'real');
+/** 笔记模板版本获取的当前场景（'real' 表示真实获取） */
+export function templateVersionScenario(): TemplateVersionScenario {
+    return __DEV_FEATURES__ ? devSettings.templateVersionScenario : 'real';
+}
 
-/** 笔记模板版本获取的调试场景（release 构建强制为 'real'） */
-export const templateVersionScenario: TemplateVersionScenario = import.meta.env.PROD
-    ? 'real'
-    : readScenario(import.meta.env.VITE_TEMPLATE_VERSION_SCENARIO, TEMPLATE_VERSION_SCENARIOS, 'real');
+/** LLM 请求的当前实际场景（'real' 表示使用配置中的真实 API Key 发起请求；auto 已解析掉） */
+export function llmScenario(): EffectiveLlmScenario {
+    if (!__DEV_FEATURES__) {
+        return 'real';
+    }
+    return window.__dev?.mockStatus?.().effective.llmScenario ?? 'real';
+}
+
+/**
+ * 当前是否在用“模拟 AI 连接配置”预览 AI 功能。
+ * 仅在 dev 构建、实际场景是模拟、且模拟配置开关生效时为 true。
+ * release 构建恒为 false。
+ */
+export function mockLlmConfigActive(): boolean {
+    if (!__DEV_FEATURES__) {
+        return false;
+    }
+    return window.__dev?.mockStatus?.().mocks.some(mock => mock.key === 'mockLlmConfig') ?? false;
+}
 
 /**
  * dev 构建下是否解锁“登录时自动启动”设置的修改。
  *
- * dev 构建默认锁定该设置：dev 与生产安装读写同一份系统自启动注册（Linux 的
- * .desktop、Windows 的注册表 Run 值均按 productName 命名，macOS 登录项同名），
- * dev 下修改会把 target/debug 二进制注册为自启动、覆盖生产注册。需要查看开启
- * 状态的界面效果时，在 `.env.development.local` 中配置后重启 dev server：
- *
- * ```ini
- * VITE_LAUNCH_AT_LOGIN_EDITABLE=true
- * ```
- *
- * release 构建始终可修改（本变量不生效）。
+ * dev 与生产安装读写同一份系统自启动注册（Linux 的 .desktop、Windows 的注册表 Run 值
+ * 均按 productName 命名，macOS 登录项同名），dev 下修改会把 target/debug 二进制注册为
+ * 自启动、覆盖生产注册，所以默认锁定。release 构建始终可修改（本函数只在 dev 构建里被问到）。
  */
-export const launchAtLoginEditableInDev: boolean = import.meta.env.PROD
-    ? true
-    : import.meta.env.VITE_LAUNCH_AT_LOGIN_EDITABLE === 'true';
+export function launchAtLoginEditableInDev(): boolean {
+    return __DEV_FEATURES__ && devSettings.launchAtLoginEditable;
+}
 
 /**
  * 应用启动时是否自动检查更新。
  *
- * dev 模式下真实场景（'real'）禁用启动检查，避免频繁请求 GitHub API；
- * mock 场景不打真实 API，自动启用启动检查，以便调试红点等启动时 UI。
+ * - release：始终检查；
+ * - dev：模拟场景不联网，启动时照常检查，以便调试红点等启动时 UI；
+ *   真实场景下默认不检查，避免频繁重启耗尽 GitHub API 的每小时配额，
+ *   需要时在开发者设置里打开“启动时真实检查更新”。
  */
 export function startupAppUpdateCheckEnabled(): boolean {
-    return appUpdateScenario !== 'real' || import.meta.env.PROD;
+    if (import.meta.env.PROD) {
+        return true;
+    }
+    if (!__DEV_FEATURES__) {
+        return false;
+    }
+    return devSettings.appUpdateScenario !== 'real' || devSettings.realUpdateCheckAtStartup;
 }
 
-/** mock 场景统一的请求延迟（毫秒），用于模拟网络请求 */
-const MOCK_DELAY_MS = 1000;
-
-/** 模拟网络请求延迟 */
+/** 模拟网络请求延迟（毫秒数来自开发者设置） */
 export function mockDelay(): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, MOCK_DELAY_MS));
+    const ms = __DEV_FEATURES__ ? devSettings.mockDelayMs : 0;
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /** mock 更新说明的内容（覆盖 markdown 渲染的各种元素，并足够长以测试对话框滚动） */
@@ -134,7 +123,7 @@ const MOCK_CHANGELOG = [
     '',
     '这是一段用于测试更新说明对话框渲染效果的假更新日志（debug mock 场景），内容刻意写得足够长，以便测试对话框的滚动效果。'.repeat(3),
     '',
-    '如需在开发时查看此内容，请在项目根目录的 `.env.development.local` 中配置 `VITE_APP_UPDATE_SCENARIO=new-version`，然后重启 dev server。'
+    '如需在开发时查看此内容，请在设置的“开发者”页把“应用更新检查”切到“有新版本”。'
 ].join('\n');
 
 /** 获取当前应用的下一个（mock）次版本号 */
@@ -144,7 +133,7 @@ async function nextMockAppVersion(): Promise<string> {
 }
 
 /**
- * 获取 mock 的最新应用版本信息（仅在 `appUpdateScenario !== 'real'` 时调用）。
+ * 获取 mock 的最新应用版本信息（仅在 `appUpdateScenario() !== 'real'` 时调用）。
  *
  * - 'new-version'：基于当前应用版本动态生成下一个次版本号
  * - 'no-update'：与当前应用版本相同
@@ -152,7 +141,8 @@ async function nextMockAppVersion(): Promise<string> {
  */
 export async function mockLatestAppInfo(): Promise<LatestAppInfo> {
     await mockDelay();
-    switch (appUpdateScenario) {
+    const scenario = appUpdateScenario();
+    switch (scenario) {
         case 'new-version': {
             const version = await nextMockAppVersion();
             return {
@@ -174,8 +164,8 @@ export async function mockLatestAppInfo(): Promise<LatestAppInfo> {
             };
         }
         case 'request-error':
-            throw new Error(`mock request error (debug app update scenario: '${appUpdateScenario}')`);
+            throw new Error(`mock request error (debug app update scenario: '${scenario}')`);
         default:
-            throw new Error(`unexpected debug app update scenario: '${appUpdateScenario}'`);
+            throw new Error(`unexpected debug app update scenario: '${scenario}'`);
     }
 }

@@ -12,6 +12,7 @@ import {
     type RemoteModelInfo,
 } from '../../logics/llm';
 import { matchProviderPreset, type LlmProviderPreset } from '../../logics/llm-presets';
+import * as debug from '../../logics/debug';
 import { useSettingsStore } from '../../logics/settings-store';
 import { createSettingInputBinder } from '../../logics/setting-input';
 import { useHighlight } from './useHighlight';
@@ -22,6 +23,11 @@ const { bind } = createSettingInputBinder(store);
 
 // 搜索跳转高亮（见 useHighlight 注释）
 useHighlight();
+
+/** dev 构建下 AI 请求是否实际由夹具模拟（release 恒为 false） */
+const llmMockActive = computed(() => debug.llmScenario() !== 'real');
+/** 模拟场景下是否还开启了免 Key 的假连接配置 */
+const llmMockConfigActive = computed(() => debug.mockLlmConfigActive());
 
 /** LLM 子配置项未启用时禁用：卡片常显（搜索跳转锚点始终有效、布局稳定），仅禁用交互 */
 const llmConfigDisabled = computed(() => !state.llmEnabled);
@@ -291,6 +297,10 @@ function describeTestError(error: LlmError): string {
     <div class="settings-page">
         <h2 class="group-title">AI 优选释义</h2>
         <div class="card-list">
+            <FluentSettingCard v-if="llmMockActive" header="开发模拟" description-type="warning"
+                :description="llmMockConfigActive
+                    ? '当前 AI 请求由开发夹具模拟，并使用模拟连接配置；不会访问真实 API。要使用真实 API，请在设置 → 开发者把 LLM 场景切到“真实请求”。'
+                    : '当前 AI 请求由开发夹具模拟，不会访问真实 API；若未配置真实 Key，AI 可能不出现，可在设置 → 开发者打开“免 Key 预览 AI”。'" />
             <FluentSettingCard header="启用 AI 优选释义"
                 description="按句子语境从多本词典中优选释义，需自行配置 LLM API" setting-id="llmEnabled">
                 <template #header-extra>

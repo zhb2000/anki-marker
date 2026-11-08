@@ -86,6 +86,8 @@ npm run tauri dev
 
 开发构建通过 `src-tauri/tauri.dev.conf.json` 使用独立的标识与名称（`com.zhb2000.anki-marker.dev` / `Anki 划词助手 (Dev)`），由上面的命令自动加载（见 `scripts/tauri.mjs`）。因此开发版可以与已安装的正式版**同时运行**：单实例互斥、配置目录、登录自启动项互不干扰。开发版使用自己的一份 `config.toml`，牌组、模板、快捷键等需要在其中重新配置一次。
 
+界面状态预览、无 Key 预览 AI、浏览器模式，以及给 AI 调试用的 `__dev` 接口与 URL 参数，见 [docs/dev-features.md](docs/dev-features.md)。
+
 `tauri build` 构建应用：
 
 ```shell

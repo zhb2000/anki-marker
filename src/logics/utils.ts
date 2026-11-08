@@ -4,7 +4,28 @@ export * as string from './stringutils';
 export { isWord, tokenize, escapeHTML } from './stringutils';
 export * as typing from './typing';
 
+/** dev 夹具的命令拦截器：handled 为 true 时直接返回 value，否则继续走真实 Tauri 命令 */
+export interface DevInvokeResult {
+    handled: boolean;
+    value?: unknown;
+}
+
+export type DevInvokeInterceptor = (
+    cmd: string,
+    args?: Record<string, unknown>,
+) => Promise<DevInvokeResult>;
+
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+    if (__DEV_FEATURES__) {
+        const interceptor = (window as unknown as { __devInvokeInterceptor?: DevInvokeInterceptor })
+            .__devInvokeInterceptor;
+        if (interceptor != null) {
+            const result = await interceptor(cmd, args);
+            if (result.handled) {
+                return result.value as T;
+            }
+        }
+    }
     try {
         return await api.core.invoke<T>(cmd, args);
     } catch (error) {

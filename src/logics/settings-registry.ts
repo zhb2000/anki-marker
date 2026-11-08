@@ -15,10 +15,10 @@ import type * as api from '../tauri-api';
 import { LLM_DEFAULT_MAX_TOKENS } from './llm';
 
 /** 设置页 id（与 /settings/<id> 路由路径段一致） */
-export type SettingsPageId = 'general' | 'selection' | 'anki' | 'ai' | 'advanced' | 'about';
+export type SettingsPageId = 'general' | 'selection' | 'anki' | 'ai' | 'advanced' | 'about' | 'developer';
 
 /** 设置导航图标的 SVG 图标名（对应 src/assets/settings-icons/<name>.svg） */
-export type SettingsNavIconName = 'general' | 'selection' | 'anki' | 'ai' | 'advanced' | 'about';
+export type SettingsNavIconName = 'general' | 'selection' | 'anki' | 'ai' | 'advanced' | 'about' | 'developer';
 
 export interface SettingsPageMeta {
     id: SettingsPageId;
@@ -35,6 +35,8 @@ export const SETTINGS_PAGES: SettingsPageMeta[] = [
     { id: 'ai', title: 'AI 优选', icon: 'ai' },
     { id: 'advanced', title: '高级', icon: 'advanced' },
     { id: 'about', title: '关于', icon: 'about' },
+    // 开发者页只在 dev 功能总开关打开时存在（见 src/dev），不进搜索条目
+    ...(__DEV_FEATURES__ ? [{ id: 'developer', title: '开发者', icon: 'developer' } satisfies SettingsPageMeta] : []),
 ];
 
 /** 设置项可见性判断用的平台（Tauri 的 OsType，应用只发布桌面三端） */

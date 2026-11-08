@@ -1,6 +1,7 @@
 import { os } from '../tauri-api';
 
-const IS_MACOS = os.type() === 'macos';
+/** 是否为 macOS。用函数而非模块级常量：模块求值时 Tauri 运行时可能尚未就绪（浏览器模式的 IPC 打桩在应用模块之前才装好） */
+const isMacOS = () => os.type() === 'macos';
 
 /**
  * 将快捷键字符串（如 "Cmd+Shift+KeyS"）格式化为显示形式。
@@ -9,7 +10,7 @@ const IS_MACOS = os.type() === 'macos';
  *（global-hotkey 把 Cmd/Meta/Super 视为同一修饰键，此处只做显示映射）。
  */
 export function formatShortcut(shortcut: string): string {
-    if (IS_MACOS) {
+    if (isMacOS()) {
         return shortcut
             .split('+')
             .map(token => {

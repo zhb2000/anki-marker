@@ -37,6 +37,10 @@ unicode-segmentation = "1"
 tauri-plugin-global-shortcut = "2.3"
 # WebDriver automation server, for debugging/testing only. Enabled via the `webdriver` feature.
 tauri-plugin-webdriver = { version = "0.2", optional = true }
+# 开发桥接（仅 dev-bridge feature）：本机 HTTP 服务，让浏览器里的前端调用真实的 Rust 命令，见 application/dev_bridge.rs
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query", "json"], optional = true }
+tokio = { version = "1", features = ["net", "sync", "time"], optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
 
 # 划词取词的辅助功能 API 等 macOS 专属依赖
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -115,6 +119,9 @@ custom-protocol = ["tauri/custom-protocol"]
 # Start a W3C WebDriver server at http://127.0.0.1:4445 for automated debugging/testing.
 # NEVER enable this for release builds (`npm run tauri dev -- --features webdriver`).
 webdriver = ["dep:tauri-plugin-webdriver"]
+# Start a local-only HTTP bridge so the frontend running in a plain browser can call the real Rust commands
+# (see docs/dev-features.md). NEVER enable this for release builds (`npm run dev:ai`).
+dev-bridge = ["dep:axum", "dep:tokio", "dep:futures-util"]
 
 [lints.clippy]
 needless_return = "allow"

@@ -1,4 +1,4 @@
-import { fetch } from '@tauri-apps/plugin-http';
+import { fetch } from './net';
 
 /**
  * OpenAI 兼容的 chat completions 流式客户端。
@@ -228,6 +228,11 @@ const COMPAT_STEPS: readonly {
  * 避免每次优选都先撞几次 400。只在请求成功时写入。
  */
 const compatCache = new Map<string, ReadonlySet<CompatStep>>();
+
+/** 清空参数降级缓存（dev 场景切换/重置用） */
+export function clearLlmCompatCache(): void {
+    compatCache.clear();
+}
 
 function compatCacheKey(cfg: LlmRequestConfig): string {
     return `${buildChatCompletionsUrl(cfg.baseUrl)}\n${cfg.model.trim()}`;

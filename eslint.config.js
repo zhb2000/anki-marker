@@ -74,6 +74,11 @@ export default tseslint.config(
             'build-for-windows.js',
             'build-tray-icons.mjs',
             'scripts/tauri.mjs',
+            'scripts/dev-settings-plugin.mjs',
+            'scripts/dev-bridge-proxy.mjs',
+            'scripts/dev-ai.mjs',
+            'scripts/dev-env.mjs',
+            'scripts/wd-screenshot.mjs',
         ],
     },
 );

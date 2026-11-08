@@ -15,6 +15,8 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import { resolveDevEnv, tauriDevOverride } from './dev-env.mjs';
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const devConfigPath = path.join('src-tauri', 'tauri.dev.conf.json');
 const cliEntry = path.join(root, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
@@ -23,7 +25,7 @@ const cliEntry = path.join(root, 'node_modules', '@tauri-apps', 'cli', 'tauri.js
  * 计算传给 Tauri CLI 的参数：dev 子命令且未显式指定 --config 时追加开发配置，
  * 其余情况原样返回。
  */
-export function resolveArgs(args) {
+export function resolveArgs(args, env = process.env) {
     const hasConfig = args.some((arg, index) => arg === '--config'
         || arg === '-c'
         || arg.startsWith('--config=')
@@ -33,11 +35,24 @@ export function resolveArgs(args) {
         return args;
     }
     // 紧跟在 dev 之后插入：放在末尾会落到 `--` 之后的“应用参数”里，CLI 便看不到它
-    return [args[0], '--config', devConfigPath, ...args.slice(1)];
+    const configs = ['--config', devConfigPath];
+    // DEV_PORT / DEV_INSTANCE 覆盖（见 dev-env.mjs）：后追加的配置覆盖先前的同名项
+    const override = tauriDevOverride(resolveDevEnv(env));
+    if (override !== null) {
+        configs.push('--config', JSON.stringify(override));
+    }
+    return [args[0], ...configs, ...args.slice(1)];
 }
 
 function main() {
-    const child = spawn(process.execPath, [cliEntry, ...resolveArgs(process.argv.slice(2))], {
+    let args;
+    try {
+        args = resolveArgs(process.argv.slice(2));
+    } catch (error) {
+        console.error(`[tauri] ${error instanceof Error ? error.message : String(error)}`);
+        process.exit(2);
+    }
+    const child = spawn(process.execPath, [cliEntry, ...args], {
         cwd: root,
         stdio: 'inherit',
     });

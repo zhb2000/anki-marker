@@ -4,6 +4,9 @@
 包括截图查看 UI、点击、滚动、执行 JavaScript 等。目标读者是 AI coding agent，
 所有操作均可通过 `curl` + `python3` 完成，无需安装 Selenium / WebdriverIO。
 
+> 不需要真机的界面状态检查（错误态、平台差异等）优先用浏览器模式，见 [dev-features.md](dev-features.md)。
+> 本文的 WebDriver 流程端口固定（4445、1420），**不支持多个实例并行**；并行开发请用 dev-features.md 里的桥接。
+
 ## 原理
 
 项目以 Cargo feature 方式集成了 [tauri-plugin-webdriver](https://github.com/Choochmeque/tauri-plugin-webdriver)
@@ -55,6 +58,18 @@ kill $(lsof -ti :1420) 2>/dev/null   # vite dev server
 ```bash
 curl -s http://127.0.0.1:4445/session/$SID/title   # {"value":"Anki 划词助手"}
 curl -s http://127.0.0.1:4445/session/$SID/url     # {"value":"http://localhost:1420/settings"}
+```
+
+### 截图前先确认窗口可见（推荐用脚本）
+
+macOS 的 WKWebView 在窗口被其他窗口完全遮挡或最小化时，会把页面当作不可见并暂停重绘，
+此时截图可能是**旧画面**。直接用下面的脚本截图：它先读 `document.visibilityState`，
+不是 `visible` 就以退出码 2 拒绝并说明原因，**遇到拒绝时不要基于任何旧截图下结论**，
+应告知用户露出窗口后重试。
+
+```bash
+node scripts/wd-screenshot.mjs /tmp/shot.png            # 自建并删除会话
+WD_SESSION=$SID node scripts/wd-screenshot.mjs /tmp/shot.png   # 复用已有会话
 ```
 
 ### 截图（查看 UI 视觉效果）

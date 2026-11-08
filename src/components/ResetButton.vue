@@ -10,22 +10,35 @@ import { HoverWrapper } from '../fluent-controls/HoverWrapper';
  * tooltip 中展示将要恢复的默认值。与设置仓库耦合，仅用于设置页。
  */
 const props = withDefaults(defineProps<{
-    /** 对应的设置项键（CONFIG_DEFAULTS 中的键名） */
-    settingKey: keyof ConfigModel;
+    /** 对应的设置项键（CONFIG_DEFAULTS 中的键名）；不传则不绑定设置仓库，由 modified/tooltip/reset 驱动（如开发者设置） */
+    settingKey?: keyof ConfigModel;
+    /** 不绑定设置仓库时：当前值是否偏离默认值 */
+    modified?: boolean;
+    /** 不绑定设置仓库时：tooltip 文案 */
+    tooltip?: string;
     /** 禁用：所在卡片的功能未启用时置灰并禁止点击 */
     disabled?: boolean;
 }>(), {
+    settingKey: undefined,
+    modified: false,
+    tooltip: '',
     disabled: false,
 });
+
+const emit = defineEmits<{ reset: []; }>();
 
 const store = useSettingsStore();
 
 /** 当前值等于默认值时不渲染（无意义的 no-op 按钮是噪音） */
-const visible = computed(() => store.isModified(props.settingKey));
+const visible = computed(() =>
+    props.settingKey != null ? store.isModified(props.settingKey) : props.modified);
 
 /** tooltip 文案：留空语义的文本项说明清空后的实际生效值，其余展示默认值本身 */
-const tooltip = computed(() => {
+const tooltipText = computed(() => {
     const key = props.settingKey;
+    if (key == null) {
+        return props.tooltip;
+    }
     if (key === 'ankiConnectURL' || key === 'deckName' || key === 'modelName') {
         return `清空并使用默认值：${TEXT_SETTING_FALLBACKS[key]}`;
     }
@@ -35,13 +48,21 @@ const tooltip = computed(() => {
     }
     return `重置为默认值：${value === '' ? '留空' : value}`;
 });
+
+function handleClick() {
+    if (props.settingKey != null) {
+        store.reset(props.settingKey);
+    } else {
+        emit('reset');
+    }
+}
 </script>
 
 <template>
     <Transition name="reset-fade">
         <HoverWrapper v-if="visible">
-            <button :title="tooltip" class="reset-button" :disabled="disabled"
-                @click="store.reset(settingKey)">
+            <button :title="tooltipText" class="reset-button" :disabled="disabled"
+                @click="handleClick">
                 <slot></slot>
             </button>
         </HoverWrapper>

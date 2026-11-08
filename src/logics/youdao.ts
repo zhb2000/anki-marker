@@ -1,4 +1,4 @@
-import { fetch } from '@tauri-apps/plugin-http';
+import { fetch } from './net';
 import { decodeHtmlEntities } from './stringutils';
 import { MD5 } from './md5';
 

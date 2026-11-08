@@ -54,7 +54,13 @@ export const router = createRouter({
                     path: 'about',
                     name: 'AboutSettingsPage',
                     component: AboutSettingsPage
-                }
+                },
+                // 开发者设置页：仅 dev 功能总开关打开时注册，release 构建里整段被剔除
+                ...(__DEV_FEATURES__ ? [{
+                    path: 'developer',
+                    name: 'DeveloperPage',
+                    component: () => import('./views/settings/DeveloperPage.vue')
+                }] : [])
             ]
         }
     ]

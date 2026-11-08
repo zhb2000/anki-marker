@@ -1,13 +1,12 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-    /** 应用更新检查的调试场景（可用值见 src/logics/debug.ts） */
-    readonly VITE_APP_UPDATE_SCENARIO?: string;
-    /** 笔记模板版本获取的调试场景（可用值见 src/logics/debug.ts） */
-    readonly VITE_TEMPLATE_VERSION_SCENARIO?: string;
-    /** dev 模式下解锁“登录时自动启动”设置的修改（详见 src/logics/debug.ts） */
-    readonly VITE_LAUNCH_AT_LOGIN_EDITABLE?: string;
+    /** dev 功能总开关：'true' 时开启开发者设置与浏览器模式（详见 docs/dev-features.md） */
+    readonly VITE_DEV_FEATURES?: string;
 }
+
+/** dev 功能总开关的编译期常量（由 vite.config.ts 的 define 注入；release 构建恒为 false） */
+declare const __DEV_FEATURES__: boolean;
 
 declare module "*.vue" {
   import type { DefineComponent } from "vue";

@@ -64,8 +64,10 @@ version = "0.2.1-0"
 dependencies = [
  "arboard",
  "atspi",
+ "axum",
  "block2",
  "core-foundation 0.9.4",
+ "futures-util",
  "log",
  "macos-accessibility-client",
  "muda",
@@ -90,6 +92,7 @@ dependencies = [
  "tauri-plugin-os",
  "tauri-plugin-single-instance",
  "tauri-plugin-webdriver",
+ "tokio",
  "toml_edit 0.25.15+spec-1.1.0",
  "unicode-segmentation",
  "windows",

@@ -186,6 +186,11 @@ kind 按查询文本本身判断：
 /** 结果内存缓存（仅缓存 done 态），key 见 makeAiPickCacheKey */
 const resultCache = new Map<string, AiPickState>();
 
+/** 清空结果缓存（dev 场景切换/重置用；也让测试能从干净状态开始） */
+export function clearAiPickCache(): void {
+    resultCache.clear();
+}
+
 /** 生成一份初始（idle）状态 */
 export function createIdleAiPickState(): AiPickState {
     return {

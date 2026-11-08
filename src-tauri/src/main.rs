@@ -97,6 +97,10 @@ fn main() {
     #[cfg(feature = "webdriver")]
     let builder = builder.plugin(tauri_plugin_webdriver::init());
 
+    // 开发桥接暴露全部命令，只允许 debug 构建
+    #[cfg(all(feature = "dev-bridge", not(debug_assertions)))]
+    compile_error!("the `dev-bridge` feature must never be enabled in release builds");
+
     // 主窗口点关闭按钮的行为可配置（keep-running-on-close），三端一致——
     // 默认仅隐藏窗口、应用保持后台运行，由托盘图标（macOS 为 Dock/菜单栏图标）
     // 或划词快捷键再次唤起；配置为不保持运行时则直接退出应用。
@@ -130,6 +134,10 @@ fn main() {
             app.manage(Mutex::new(None::<Connection>));
             app.manage(application::capture_flow::PendingSentence::new());
             app.manage(application::capture_flow::CaptureSettling::new());
+
+            // 开发桥接（仅 dev-bridge feature）：见 application/dev_bridge.rs
+            #[cfg(feature = "dev-bridge")]
+            application::dev_bridge::start(app.handle());
 
             // 注册配置中设置的划词全局快捷键
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]

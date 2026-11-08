@@ -1,6 +1,6 @@
 import { reactive, ref, watch, computed } from 'vue';
 import * as api from '../tauri-api';
-import { fetch } from '@tauri-apps/plugin-http';
+import { fetch } from './net';
 import * as semver from 'semver';
 import { dialog } from '../fluent-controls';
 
@@ -408,7 +408,7 @@ export async function fetchAndSetLatestAppInfo(force = false) {
         }
     }
 
-    if (debug.appUpdateScenario !== 'real') {
+    if (debug.appUpdateScenario() !== 'real') {
         // mock 分支：不读写持久化缓存，避免调试数据污染真实缓存
         latestAppInfo.value = await debug.mockLatestAppInfo();
         lastFetchTimestamp = Date.now();
@@ -543,7 +543,8 @@ let templateVersionRequestSeq = 0;
  */
 export async function fetchAndSetTemplateVersion(modelName: string) {
     const seq = ++templateVersionRequestSeq;
-    if (debug.templateVersionScenario === 'low-version') {
+    const scenario = debug.templateVersionScenario();
+    if (scenario === 'low-version') {
         // mock：模拟 Anki 中的笔记模板版本过低
         await debug.mockDelay();
         if (seq === templateVersionRequestSeq) {
@@ -551,7 +552,7 @@ export async function fetchAndSetTemplateVersion(modelName: string) {
         }
         return;
     }
-    if (debug.templateVersionScenario === 'request-error') {
+    if (scenario === 'request-error') {
         // mock：模拟获取笔记模板版本失败
         await debug.mockDelay();
         if (seq === templateVersionRequestSeq) {
@@ -616,12 +617,13 @@ export async function initAtAppStart() {
         () => [
             effectiveTextSetting('modelName', config.modelName),
             effectiveTextSetting('ankiConnectURL', config.ankiConnectURL),
+            debug.templateVersionScenario(), // 开发者设置切换场景后重新获取
         ],
         async ([newModelName]) => await fetchAndSetTemplateVersion(newModelName),
         { immediate: true }
     );
     // 检查应用更新，在初始化代码中不等待更新检查的结果，避免阻塞应用启动。
-    // dev 模式且真实场景（'real'）下禁用启动检查，避免频繁请求 GitHub API；
+    // dev 模式且真实场景（'real'）下默认禁用启动检查，避免频繁请求 GitHub API（见 debug.ts）；
     // mock 场景不打真实 API，正常执行启动检查，以便调试红点等启动时 UI。
     // 距上次成功检查未超过 AUTO_CHECK_MIN_INTERVAL 时会直接使用持久化缓存，不发请求
     void (async () => {
@@ -635,6 +637,21 @@ export async function initAtAppStart() {
             // 应用更新检查失败时仅在控制台报错，不弹窗提示，也不阻止后续操作
         }
     })();
+    if (__DEV_FEATURES__) {
+        // 开发者设置切换应用更新场景后立即重新检查：模拟场景不联网；
+        // 切回真实场景时，除非开启了“启动时真实检查更新”，只恢复缓存、不发请求（保护 API 配额）
+        watch(() => debug.appUpdateScenario(), async scenario => {
+            if (scenario === 'real' && !debug.startupAppUpdateCheckEnabled()) {
+                latestAppInfo.value = loadAppInfoCache()?.info ?? null;
+                return;
+            }
+            try {
+                await fetchAndSetLatestAppInfo(true);
+            } catch (error) {
+                console.error(error); // 与启动检查一致：仅控制台报错
+            }
+        });
+    }
     // 初始化全局快捷键/辅助功能权限状态（挂常驻监听并主动查询一次，不阻塞启动）
     void initShortcutStatus();
     initializedAtAppStart = true;

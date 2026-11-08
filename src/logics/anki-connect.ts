@@ -1,4 +1,4 @@
-import { fetch } from '@tauri-apps/plugin-http';
+import { fetch } from './net';
 
 import { typeAssertion } from './typing';
 

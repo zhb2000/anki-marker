@@ -4,6 +4,9 @@ pub mod autostart;
 pub mod capture_flow;
 pub mod config;
 pub mod dict;
+/// 开发桥接：浏览器里的前端调用真实 Rust 命令（仅 dev-bridge feature，禁止进入 release）
+#[cfg(feature = "dev-bridge")]
+pub mod dev_bridge;
 pub mod logics;
 pub mod menubar;
 pub mod shortcut;

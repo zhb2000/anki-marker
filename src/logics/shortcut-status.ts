@@ -31,7 +31,7 @@ export const configuredShortcut: Ref<string> = ref('');
 export const accessibilityTrusted: Ref<boolean | null> = ref(null);
 
 /** 是否为 macOS（全局快捷键与辅助功能权限目前仅支持 macOS） */
-const isMacOS = api.os.type() === 'macos';
+const isMacOS = () => api.os.type() === 'macos';
 
 /** 是否已经初始化过（幂等） */
 let initialized = false;
@@ -65,7 +65,7 @@ export async function initShortcutStatus(): Promise<void> {
     } catch (error) {
         console.error(error);
     }
-    if (isMacOS) {
+    if (isMacOS()) {
         // 首次检查一次辅助功能权限状态
         void checkAccessibilityTrust();
         // 从其他应用切回本应用时（如从系统设置授权后返回）自动刷新权限状态。
@@ -90,7 +90,7 @@ function applyRegistration(registration: ShortcutRegistration) {
 
 /** 检查辅助功能权限状态 */
 export async function checkAccessibilityTrust(): Promise<void> {
-    if (!isMacOS) {
+    if (!isMacOS()) {
         return;
     }
     try {

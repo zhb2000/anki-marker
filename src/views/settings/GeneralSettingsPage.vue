@@ -100,11 +100,10 @@ const launchAtLoginSyncing = ref(false);
 const rustInRelease = ref<boolean | null>(null);
 /**
  * dev 构建下锁定修改（卡片常显保搜索锚点，仅禁用交互）。
- * 需要查看开启状态的界面效果时，可在 `.env.development.local` 配置
- * `VITE_LAUNCH_AT_LOGIN_EDITABLE=true` 解锁（见 debug.launchAtLoginEditableInDev）。
+ * 需要查看开启状态的界面效果时，可在“开发者”设置页解锁（见 debug.launchAtLoginEditableInDev）。
  */
 const launchAtLoginLocked = computed(() =>
-    rustInRelease.value === false && !debug.launchAtLoginEditableInDev
+    rustInRelease.value === false && !debug.launchAtLoginEditableInDev()
 );
 
 /** 登录自启动卡的说明文案：三端均静默常驻后台，唤起入口按平台区分 */
