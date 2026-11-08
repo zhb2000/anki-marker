@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { currentDevEnvironment } from '../../dev/environment';
 import {
@@ -23,6 +24,8 @@ const groups = (Object.keys(DEV_GROUP_TITLES) as DevSettingGroup[]).map(group =>
     title: DEV_GROUP_TITLES[group],
     keys: DEV_SETTING_KEYS.filter(key => DEV_SETTING_DEFS[key].group === group),
 }));
+
+const router = useRouter();
 
 /** 当前运行环境；页面生命周期内不变 */
 const environment = currentDevEnvironment();
@@ -146,6 +149,10 @@ function handleResetMock(): void {
             </FluentSettingCard>
             <FluentSettingCard header="设置文件" description="开发者设置保存在项目根目录，被 gitignore；也可直接编辑，外部修改会实时同步">
                 <span class="value-text">dev-settings.local.json</span>
+            </FluentSettingCard>
+            <FluentSettingCard header="卡片模板预览"
+                description="并排查看笔记模板的正面与背面，可切样本、宽度与夜间模式；改模板文件保存即刷新">
+                <FluentButton @click="router.push('/dev/card')">打开预览</FluentButton>
             </FluentSettingCard>
         </div>
 

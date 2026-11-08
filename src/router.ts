@@ -62,6 +62,12 @@ export const router = createRouter({
                     component: () => import('./views/settings/DeveloperPage.vue')
                 }] : [])
             ]
-        }
+        },
+        // 卡片模板预览：仅 dev 功能总开关打开时注册，release 构建里整段被剔除
+        ...(__DEV_FEATURES__ ? [{
+            path: '/dev/card',
+            name: 'CardPreviewView',
+            component: () => import('./dev/card/CardPreviewView.vue')
+        }] : [])
     ]
 });
