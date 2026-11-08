@@ -10,10 +10,27 @@
 
 | 入口 | 适用者 | 说明 |
 |---|---|---|
-| **AI 推荐：真实 Rust + 浏览器** | AI | `npm run dev:ai`（放后台跑），就绪后输出 `[dev-ai] READY`。以 `dev-bridge` feature 启动 Tauri dev，用 agent-browser / playwright-cli 打开 `http://localhost:1420/`，页面自动连到真实 Rust。`node scripts/dev-ai.mjs status` 查询是否就绪 |
+| **AI 推荐：真实 Rust + 浏览器** | AI | `npm run dev:ai`（放后台跑），就绪后输出 `[dev-ai] READY`。以 `dev-bridge` feature 启动 Tauri dev，用浏览器工具打开 `http://localhost:1420/`（选哪个见下文“选浏览器工具与内核”），页面自动连到真实 Rust。`node scripts/dev-ai.mjs status` 查询是否就绪 |
 | 仅夹具（不编译 Rust） | AI | `npm run dev:browser`，端口 1421（`DEV_PORT` 可改），全部命令由夹具应答，适合快速看界面状态与 AI 场景 |
 | 真机窗口 | 人类 | `npm run tauri dev`。人类可以直接操作原生 GUI；AI 场景也在这条路径生效（LLM 默认跟随环境真实请求，免 Key 预览需打开“免 Key 预览 AI”），见下文“AI 场景” |
 | 自动化操作真机 | AI（必要时） | `npm run tauri dev -- --features webdriver`，受窗口遮挡影响，见 `automation-debugging.md` |
+
+## 选浏览器工具与内核
+
+**优先用 `playwright-cli`**：它能指定内核，渲染与事件行为和真机对得上；`agent-browser`（vercel-labs）只有 Chromium，适合临时看页面、抓文本，内核相关的问题不要用它下结论。
+
+内核按平台选，与 Tauri 在真机上用的保持一致：
+
+| 平台 | 真机内核 | 用法 |
+|---|---|---|
+| macOS | WKWebView | `playwright-cli open --browser=webkit <url>` |
+| Linux | WebKitGTK | `playwright-cli open --browser=webkit <url>` |
+| Windows | WebView2（Chromium） | `playwright-cli open --browser=msedge <url>`（或 `chrome`） |
+
+- 界面与手势问题先在对应内核复现：macOS/Linux 的问题在 Chromium 里复现不出来是正常的，反之亦然（如拖到窗口外松开时 mouseup 丢不丢，各内核就不一致）。
+- 需要逐事件构造手势（按下、多次移动、抬起分开下发）或中途 `eval` 读组件内部状态时，只有 playwright-cli 够用；它的会话是常驻的，两条命令之间不会丢页面。
+- 浏览器版本与 CLI 绑定，首次 `open --browser=webkit` 报缺内核时按提示安装（`npx playwright install webkit`）。
+- 系统取词、托盘、全局快捷键、原生窗口在浏览器里测不了，仍要真机复核（见 `automation-debugging.md`）。
 
 ## 桥接（dev-bridge）：浏览器里使用真实功能
 
@@ -118,8 +135,9 @@ agent-browser open 'http://localhost:1421/?dev.llmScenario=real&dev.mockLlmConfi
 
 ## 给 AI 的调试闭环
 
-页面里的 `window.__dev.help()` 会打印用法。核心套路：**把一整段操作写进同一条 eval**——agent-browser 的标签页在两条命令之间可能回到空白页，
-元素编号也每次快照都会变；`__dev` 的助手按可见文字定位元素、用 `idle()` 等应用安静，不需要编号和 sleep。
+页面里的 `window.__dev.help()` 会打印用法。核心套路：**把一整段操作写进同一条 eval**——用 agent-browser 时标签页在两条命令之间可能回到空白页，
+元素编号每次快照都会变；playwright-cli 的会话常驻，但也建议一条 eval 走完一段操作，少来回、输出更完整。
+`__dev` 的助手按可见文字定位元素、用 `idle()` 等应用安静，不需要编号和 sleep。
 eval 里**直接返回对象**（不要 `JSON.stringify`），输出才不会被二次转义。
 
 ```bash
@@ -185,7 +203,7 @@ agent-browser eval '(async () => {
 - 当前模式下完全无效的项会禁用并写明原因（如 Tauri 下的平台模拟、Anki 状态、浏览器后端、配置写入位置）；
 - 当前值无效的项用 WinUI warning 色（浅色 `#9a6700`、深色 `#d4a72c`）提示描述文字，卡片边框保持中性（如夹具模式选“真实 Anki/真实请求”、显式真实请求时开“免 Key 预览 AI”、没有模拟请求时调模拟延迟）。
 
-截图用 agent-browser 的 `screenshot`；能用 `report` / `text` 回答的问题优先用文字，省 token 也更准。
+截图用浏览器工具的 `screenshot`；能用 `report` / `text` 回答的问题优先用文字，省 token 也更准。
 不开浏览器也能看 Rust 日志：`curl -H 'X-Dev-Bridge: 1' 'http://localhost:1420/__dev/bridge/logs?lines=100&grep=error'`。
 启动/停止：`npm run dev:ai`（后台跑）、`node scripts/dev-ai.mjs status`、`node scripts/dev-ai.mjs stop`。
 
@@ -222,6 +240,6 @@ agent-browser eval '(async () => {
 
 - 应用模块顶层不要访问 Tauri 运行时 API（如 `os.type()`），用函数惰性读取——浏览器模式的 IPC 打桩在应用模块之前才装好。
 - **真实 Tauri 命令的调用轨迹只在浏览器模式可用**：真实 Tauri 窗口里 `__TAURI_INTERNALS__.invoke` 是不可写、不可配置的属性，包装会抛 TypeError。原生窗口里 `report().invokes` 仍会包含 dev 夹具直接处理的 HTTP 请求（由拦截器补记），但不包含真实 Tauri 命令（console / 报错 / 对话框文字照常）。dev 初始化的任何失败都不会阻塞应用挂载。
-- Chromium 不等同于 macOS/Linux 的 WebKit；系统取词、托盘、全局快捷键在浏览器里测不了。真机复核见 `automation-debugging.md`（含截图前的可见性保护）。
+- 浏览器内核要与平台对齐（macOS/Linux 用 `webkit`、Windows 用 Chromium，见“选浏览器工具与内核”）；即便如此，系统取词、托盘、全局快捷键在浏览器里仍测不了。真机复核见 `automation-debugging.md`（含截图前的可见性保护）。
 - `on_message` 在 Tauri 文档里标注为非稳定 API（供自定义 invoke 系统使用）；升级 Tauri 后若桥接编译失败，只需修 `dev_bridge.rs` 一个文件。
 - playwright-cli / agent-browser 的浏览器若在沙箱里启动失败（`sandbox initialization failed`），需在沙箱外运行。

@@ -5,6 +5,7 @@
 所有操作均可通过 `curl` + `python3` 完成，无需安装 Selenium / WebdriverIO。
 
 > 不需要真机的界面状态检查（错误态、平台差异等）优先用浏览器模式，见 [dev-features.md](dev-features.md)。
+> 浏览器模式要按平台选内核（macOS/Linux 用 `webkit`、Windows 用 Chromium），见该文档“选浏览器工具与内核”。
 > 本文的 WebDriver 流程端口固定（4445、1420），**不支持多个实例并行**；并行开发请用 dev-features.md 里的桥接。
 
 ## 原理
