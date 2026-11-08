@@ -1392,6 +1392,12 @@ function onWindowMouseMove(event: MouseEvent): void {
     if (!pressed.value || anchor == null) {
         return;
     }
+    // 抬起丢了（macOS 上拖到窗口外松开、系统层把抬起吞掉）：此后收到的 mousemove 已经不带左键。
+    // 不在这里收尾的话手势会一直停在拖选中，指针回到面板上还会继续改选区
+    if ((event.buttons & 1) === 0) {
+        endGesture(true);
+        return;
+    }
     if (!pressMoved
         && (Math.abs(event.clientX - pressX) > CLICK_SLOP_PX || Math.abs(event.clientY - pressY) > CLICK_SLOP_PX)) {
         pressMoved = true;
