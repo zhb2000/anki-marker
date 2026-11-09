@@ -66,11 +66,22 @@
        tauri.conf.json 中 titleBarStyle: Overlay：内容视图铺满窗口，红绿灯浮在网页上，
        顶部标题栏高度由页面让出（各视图用它做顶部内边距）。全屏时系统标题栏隐藏，归零 */
     --titlebar-inset: 0px;
+
     /* -apple-system / BlinkMacSystemFont 让 macOS 用系统字体（SF），
        而不是回退到 Tahoma：后者粗体比常规宽约 17%，句子面板“预留加粗宽度”
        会把词距撑得过松；SF 的粗体只宽约 3%，预留后几乎看不出差别。
        Windows 上首选的 Segoe UI 命中，这两个别名不生效 */
     --font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Tahoma, Geneva, Verdana, sans-serif;
+
+    /* ───── 层级 ─────
+       固定层从低到高：页面切换动画 < 标题栏拖动条 < 下拉弹层 < 模态弹窗。
+       拖动条必须盖在页面之上（页面切换会铺满整个视口），但必须压在所有浮层之下：
+       下拉弹层在窗口顶部会被钳制到视口上缘，选中项在列表下方时第一项正好落进顶部
+       那条 32px 拖动区（--titlebar-inset），拖动条若在上层就会把点击变成窗口拖动 */
+    --z-page-transition: 100;
+    --z-titlebar-drag: 1000;
+    --z-flyout: 1100;
+    --z-dialog: 1200;
 
     /* ───── 窗口 ───── */
     --window-background: #f3f3f3;

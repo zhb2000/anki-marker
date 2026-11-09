@@ -17,8 +17,9 @@ export interface DialogLayer {
 /** 当前打开的弹窗栈（按打开顺序，末尾即最上层） */
 const stack: DialogLayer[] = [];
 let nextId = 0;
-/** 层级游标：只增不减，保证“后打开在上” */
-let zIndexSeed = 1000;
+/** 层级游标：只增不减，保证“后打开在上”。起点高于标题栏拖动条与下拉弹层
+    （见 fluent-styles.css 的 --z-dialog），弹窗的遮罩因此能盖住顶部拖动区 */
+let zIndexSeed = 1200;
 
 /** 登记一个刚打开的弹窗，返回其身份与层级 */
 export function enterDialog(): DialogLayer {

@@ -46,7 +46,7 @@ watch(() => currentRoute.matched[0]?.path ?? currentRoute.path, (newTopPath) => 
 }
 
 .slide-left-enter-from {
-    z-index: 100;
+    z-index: var(--z-page-transition, 100);
     transform: translateX(100%);
     box-shadow: var(--page-transition-shadow);
 }
@@ -68,7 +68,7 @@ watch(() => currentRoute.matched[0]?.path ?? currentRoute.path, (newTopPath) => 
 }
 
 .slide-right-leave-to {
-    z-index: 100;
+    z-index: var(--z-page-transition, 100);
     transform: translateX(100%);
 }
 

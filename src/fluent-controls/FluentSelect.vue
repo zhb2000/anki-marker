@@ -493,7 +493,8 @@ onBeforeUnmount(() => {
 /* 弹层：Teleport 到 body 的节点仍带本组件的 scoped 属性，样式照常生效 */
 .fluent-select-flyout {
     position: fixed;
-    z-index: 1000;
+    /* 高于标题栏拖动条：弹层贴到窗口顶部时第一项会盖住那条拖动区，点击要落到列表项上 */
+    z-index: var(--z-flyout, 1100);
     width: max-content;
     background-color: var(--flyout-background);
     border: 1px solid var(--flyout-border-color);

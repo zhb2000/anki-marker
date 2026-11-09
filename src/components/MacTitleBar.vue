@@ -84,14 +84,16 @@ function handleMouseDown(event: MouseEvent): void {
 </template>
 
 <style scoped>
-/* 覆盖顶部标题栏高度：整条都是拖动区（红绿灯在原生层，点击照常生效） */
+/* 覆盖顶部标题栏高度：整条都是拖动区（红绿灯在原生层，点击照常生效）。
+   层级取 --z-titlebar-drag：在页面内容之上、下拉弹层与弹窗之下——浮层盖住这条时
+   必须由浮层接收点击，否则顶部那截控件会被这一层当成窗口拖动 */
 .mac-titlebar {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     height: var(--titlebar-inset, 32px);
-    z-index: 3000;
+    z-index: var(--z-titlebar-drag, 1000);
     user-select: none;
     -webkit-user-select: none;
 }
