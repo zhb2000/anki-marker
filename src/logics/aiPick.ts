@@ -543,7 +543,7 @@ export function buildCandidates(sources: AiPickSources): {
 
 /**
  * 结构化输出的 schema：pick 只能取本次送入的候选编号或 null。
- * 支持 strict 模式的端点会据此约束解码，"编号非法"从此不可能出现；
+ * 支持 strict 模式的端点会据此约束解码，“编号非法”从此不可能出现；
  * 不支持的服务会降级成 json_object，仍然靠白名单校验兜住
  */
 export function buildResponseSchema(byId: Map<string, AiPick>): { name: string; schema: Record<string, unknown>; } {

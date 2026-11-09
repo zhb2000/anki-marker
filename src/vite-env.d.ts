@@ -8,6 +8,18 @@ interface ImportMetaEnv {
 /** dev 功能总开关的编译期常量（由 vite.config.ts 的 define 注入；release 构建恒为 false） */
 declare const __DEV_FEATURES__: boolean;
 
+/** 卡片模板编译产物：源码见 src/card-template，构建见 scripts/card-template.mjs */
+declare module 'virtual:card-template' {
+    /** 正面模板（已内联卡片脚本） */
+    export const front: string;
+    /** 背面模板 */
+    export const back: string;
+    /** 卡片样式（图标已内联为 data URL） */
+    export const css: string;
+    /** 模板版本号，来自 front.html 顶部信息块 */
+    export const version: string;
+}
+
 declare module "*.vue" {
   import type { DefineComponent } from "vue";
   const component: DefineComponent<{}, {}, any>;

@@ -1,0 +1,36 @@
+<script id="com.zhb2000.anki-marker_card-template-info" type="application/json">
+    {
+        "identifier": "com.zhb2000.anki-marker",
+        "version": "0.3.0",
+        "author": "ZHB"
+    }
+</script>
+
+<div class="section">
+    <div class="bar anki-icon" style="cursor: auto;">
+        <a href="https://github.com/zhb2000/anki-marker" title="zhb2000/anki-marker">Anki 划词助手</a>
+    </div>
+</div>
+
+<div class="section">
+    <div id="front" class="items">{{单词}}</div>
+    <hr>
+    <div id="phonetic" class="items">{{音标}} {{发音}}</div>
+</div>
+
+{{#例句}}
+<div class="section" id="sentenceSection">
+    <div class="bar sentence-icon" onclick="toggle('sentence-grid')" title="点击展开/折叠例句">例句</div>
+    <div id="sentence-grid" class="items-grid">
+        <div class="items-overflow-hidden">
+            <div class="items">
+                <span id="sentence-content">{{例句}}</span>
+                <div onclick="clickSentenceButton()" id="sentenceButton" class="audio-button" title="例句发音">
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{{/例句}}
+
+<!-- card-script -->

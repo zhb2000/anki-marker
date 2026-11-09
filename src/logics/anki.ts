@@ -284,32 +284,25 @@ export function makeAiFields(
     };
 }
 
-import MODEL_FRONT from '../assets/model-front.html?raw';
-import MODEL_BACK from '../assets/model-back.html?raw';
-import MODEL_CSS from '../assets/model-css.css?raw';
+// 卡片模板不是手写的字符串：源码见 src/card-template，构建见 scripts/card-template.mjs
+import { back as MODEL_BACK, css as MODEL_CSS, front as MODEL_FRONT, version } from 'virtual:card-template';
 
-function extractCardTemplateInfo(html: string): Record<string, any> | null {
-    const parser = new DOMParser();
-    // 解析 HTML 字符串为一个 Document 对象
-    const doc = parser.parseFromString(html, 'text/html');
-    const scriptElement = doc.getElementById('com.zhb2000.anki-marker_card-template-info');
-    if (scriptElement != null) {
-        // 获取 script 节点的文本内容
-        const jsonString = scriptElement.textContent;
-        if (jsonString != null) {
-            // 解析 JSON 字符串为对象并返回
-            return JSON.parse(jsonString) as Record<string, any>;
-        } else {
-            return null;
-        }
-    }
-    return null;
-}
-
+/**
+ * 从模板 HTML 的信息块里取版本号。模板可能来自 Anki（用户库里存的旧版本），
+ * 也可能是本地构建产物，所以按 HTML 解析而不是直接读构建结果
+ */
 function extractCardTemplateVersion(html: string): string | null {
-    const info = extractCardTemplateInfo(html);
-    return (info != null && typeof info.version === 'string') ? info.version : null;
+    const match = /id="com\.zhb2000\.anki-marker_card-template-info"[^>]*>([\s\S]*?)<\/script>/.exec(html);
+    if (match == null) {
+        return null;
+    }
+    try {
+        const info = JSON.parse(match[1]) as { version?: unknown };
+        return typeof info.version === 'string' ? info.version : null;
+    } catch {
+        return null;
+    }
 }
 
 /** 应用内置的卡片模板的版本号 */
-export const CARD_TEMPLATE_VERSION = extractCardTemplateVersion(MODEL_FRONT)!;
+export const CARD_TEMPLATE_VERSION = version;

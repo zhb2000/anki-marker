@@ -1,9 +1,7 @@
 import { invoke, sanitizeFilename } from './utils';
 import * as youdao from './youdao';
-import * as iciba from './iciba';
-import { MD5 } from './md5';
-
-export { makeYoudaoDictVoiceUrl } from './youdao';
+import { MD5 } from '../shared/md5';
+import { makeIcibaTtsUrl, makeYoudaoDictVoiceUrl, makeYoudaoPronounceUrl } from '../shared/tts';
 
 export interface CollinsItem {
     word: string;
@@ -251,9 +249,9 @@ async function findFirstValidAudio(urls: string[], timeoutMs: number): Promise<n
  * 否则 addMedia 下载失败会把错误信息写进“发音”字段。
  */
 export async function makePronunciationURL(word: string, pronunciationType: 'en' | 'us'): Promise<{ url: string, dict: 'youdao' | 'iciba'; } | null> {
-    const youdaoPronunciationUrl = youdao.makeYoudaoPronounceUrl(word, { type: pronunciationType === 'en' ? '1' : '2' });
-    const youdaoDictVoiceUrl = youdao.makeYoudaoDictVoiceUrl(word, pronunciationType);
-    const icibaTtsUrl = iciba.makeIcibaTtsUrl(word);
+    const youdaoPronunciationUrl = makeYoudaoPronounceUrl(word, { type: pronunciationType === 'en' ? '1' : '2' });
+    const youdaoDictVoiceUrl = makeYoudaoDictVoiceUrl(word, pronunciationType);
+    const icibaTtsUrl = makeIcibaTtsUrl(word);
     const urls = [youdaoPronunciationUrl, youdaoDictVoiceUrl, icibaTtsUrl];
     const dicts = ['youdao', 'youdao', 'iciba'] as const;
     const timeoutMs = 5000; // 设置超时时间为 5 秒

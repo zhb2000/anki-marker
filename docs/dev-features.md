@@ -243,3 +243,23 @@ agent-browser eval '(async () => {
 - 浏览器内核要与平台对齐（macOS/Linux 用 `webkit`、Windows 用 Chromium，见“选浏览器工具与内核”）；即便如此，系统取词、托盘、全局快捷键在浏览器里仍测不了。真机复核见 `automation-debugging.md`（含截图前的可见性保护）。
 - `on_message` 在 Tauri 文档里标注为非稳定 API（供自定义 invoke 系统使用）；升级 Tauri 后若桥接编译失败，只需修 `dev_bridge.rs` 一个文件。
 - playwright-cli / agent-browser 的浏览器若在沙箱里启动失败（`sandbox initialization failed`），需在沙箱外运行。
+
+## 卡片模板的预览与构建
+
+笔记模板不是本应用的一部分：它是一段经 AnkiConnect 发给 Anki 的自包含字符串。源码在 `src/card-template/`，
+由 `scripts/card-template.mjs` 在 Vite 的 `load` 钩子里按需构建、改源码时失效缓存并整页重载。
+`tauri dev`、`dev:ai`、`dev:browser`、`vitest` 与 `vite build` 走的是同一段代码，**没有单独的构建步骤**。
+
+| 文件 | 作用 |
+|---|---|
+| `front.html` / `back.html` | mustache 模板；`<!-- card-script -->` 处插入打包后的脚本 |
+| `script.ts` | 卡片脚本，打包成单个 IIFE（换卡时脚本会重复执行，靠这层保证安全） |
+| `style.css` | 样式；图标以 `url('./icons/x.png')` 引用，构建时内联为 data URL |
+| `icons/` | 图标源文件（PNG / SVG） |
+| `release-note.md` | 模板更新说明，设置页展示 |
+
+预览页：设置 → 开发者 → “卡片模板预览”，或直接访问 `/dev/card`。渲染的就是构建产物（与发给 Anki 的完全一致），
+可切样本、预览宽度与夜间模式；链接点击会被拦下并显示目标地址，折叠与朗读按原样执行。
+
+依赖约束：`src/shared/` 与 `src/card-template/` 只能用标准 Web API。构建期有白名单（引入应用运行时直接构建失败）、
+lint 有限制导入、产物测试会连续执行两次脚本。要共用逻辑请放进 `src/shared/`。

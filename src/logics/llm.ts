@@ -82,7 +82,7 @@ export interface StreamChatOptions {
     jsonMode?: boolean;
     /**
      * 结构化输出 schema。服务端支持 strict 模式时，它会取代 json_object——
-     * 语义上保证输出符合 schema（例如 pick 只能取候选编号），"编号非法"变成不可能事件。
+     * 语义上保证输出符合 schema（例如 pick 只能取候选编号），“编号非法”变成不可能事件。
      * 不支持的服务（如 DeepSeek）会在第一次失败后自动降级为 json_object，并按端点+模型记住
      */
     jsonSchema?: { name: string; schema: Record<string, unknown>; };

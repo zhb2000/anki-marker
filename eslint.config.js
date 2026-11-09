@@ -45,6 +45,19 @@ export default tseslint.config(
             'vue/multi-word-component-names': 'warn'
         },
     },
+    // 共享纯函数与卡片模板：只能用标准 Web API，不能被应用运行时（Tauri/dev）污染，
+    // 否则会一起打进发给 Anki 的卡片产物（构建期还有一层白名单，见 scripts/card-template.mjs）
+    {
+        files: ['src/shared/**/*.ts', 'src/card-template/**/*.ts'],
+        rules: {
+            'no-restricted-imports': ['error', {
+                patterns: [{
+                    group: ['../logics/*', '../dev/*', '../views/*', '../components/*', '@tauri-apps/*'],
+                    message: '纯区只能引用标准 Web API 与同一纯区内的模块；应用运行时不得引入',
+                }],
+            }],
+        },
+    },
     // 针对 .ts 文件的特定配置
     {
         files: ['**/*.ts'],
@@ -78,6 +91,7 @@ export default tseslint.config(
             'scripts/dev-bridge-proxy.mjs',
             'scripts/dev-ai.mjs',
             'scripts/dev-env.mjs',
+            'scripts/card-template.mjs',
             'scripts/wd-screenshot.mjs',
         ],
     },

@@ -3,6 +3,7 @@ import vue from "@vitejs/plugin-vue";
 import svgLoader from 'vite-svg-loader';
 import { devSettingsPlugin } from './scripts/dev-settings-plugin.mjs';
 import { devBridgeProxyPlugin } from './scripts/dev-bridge-proxy.mjs';
+import { cardTemplatePlugin } from './scripts/card-template.mjs';
 import { resolveDevEnvFromProcess } from './scripts/dev-env.mjs';
 
 // https://vitejs.dev/config/
@@ -16,7 +17,13 @@ export default defineConfig(async ({ command, mode }) => {
     // 经 define 变成编译期常量，关闭时 src/dev 整个目录都不会进入产物
     const devFeatures = command === 'serve' && loadEnv(mode, root, 'VITE_').VITE_DEV_FEATURES === 'true';
     return {
-        plugins: [vue(), svgLoader(), ...(devFeatures ? [devSettingsPlugin(root), devBridgeProxyPlugin(root)] : [])],
+        // 卡片模板：源码在 src/card-template，构建成要发给 Anki 的自包含字符串（与 dev 开关无关）
+        plugins: [
+            vue(),
+            svgLoader(),
+            cardTemplatePlugin(),
+            ...(devFeatures ? [devSettingsPlugin(root), devBridgeProxyPlugin(root)] : []),
+        ],
         define: {
             __DEV_FEATURES__: JSON.stringify(devFeatures),
         },

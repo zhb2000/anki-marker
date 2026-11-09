@@ -7,8 +7,7 @@
  * src/dev/mock/llm.ts 在更前面的前端 HTTP 入口拦截，不经过这里；这里不再重复实现。
  */
 import pkg from '../../../package.json';
-import MODEL_FRONT from '../../assets/model-front.html?raw';
-import MODEL_BACK from '../../assets/model-back.html?raw';
+import { back as MODEL_BACK, front as MODEL_FRONT } from 'virtual:card-template';
 import { devSettings } from '../state';
 import { youdaoXml } from './fixtures';
 import { ankiRunning } from './runtime';

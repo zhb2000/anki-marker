@@ -155,7 +155,7 @@ async function handleLaunchAnkiClick() {
 }
 /** 是否打开笔记模板更新说明对话框 */
 const templateReleaseNoteDialogVisible = ref(false);
-import TEMPLATE_RELEASE_NOTE from '../../assets/model-template-release-note.md?raw';
+import TEMPLATE_RELEASE_NOTE from '../../card-template/release-note.md?raw';
 /** 渲染后的笔记模板更新说明 */
 const renderedTemplateReleaseNote = markdownIt.render(TEMPLATE_RELEASE_NOTE);
 

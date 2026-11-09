@@ -1,5 +1,5 @@
 <!--
-  卡片模板预览：把 model-front/back/css 当成 Anki 会渲染的样子跑起来，
+  卡片模板预览：把构建出的模板产物当成 Anki 会渲染的样子跑起来，
   左右并排看正面与背面，可切样本、宽度与夜间模式。
 
   模板的脚本、朗读与折叠都按原样执行，只有两处例外：链接不真的跳转（会把 iframe 导航走）、
@@ -8,9 +8,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
-import MODEL_BACK from '../../assets/model-back.html?raw';
-import MODEL_CSS from '../../assets/model-css.css?raw';
-import MODEL_FRONT from '../../assets/model-front.html?raw';
+// 渲染的就是要发给 Anki 的那份产物：模板源码在 src/card-template，构建见 scripts/card-template.mjs
+import { back as MODEL_BACK, css as MODEL_CSS, front as MODEL_FRONT } from 'virtual:card-template';
 import { SAMPLES } from './fixtures';
 import { renderTemplate } from './render';
 
@@ -94,10 +93,40 @@ const WIDTHS = [
     { value: 412, label: 'Android 412' },
 ];
 
-const sampleId = ref(SAMPLES[0].id);
-const width = ref(800);
-const night = ref(false);
+/** 改模板源码会整页重载（不是热替换），把观察视角存下来，刷新后不用重新选 */
+const STORAGE_KEY = 'anki-marker.card-preview';
+
+function readStoredView(): { sampleId?: string; width?: number; night?: boolean; } {
+    try {
+        return JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '{}') as {
+            sampleId?: string;
+            width?: number;
+            night?: boolean;
+        };
+    } catch {
+        return {};
+    }
+}
+
+const storedView = readStoredView();
+const sampleId = ref(
+    SAMPLES.some(item => item.id === storedView.sampleId) ? storedView.sampleId! : SAMPLES[0].id
+);
+const width = ref(WIDTHS.some(item => item.value === storedView.width) ? storedView.width! : 800);
+const night = ref(storedView.night === true);
 const renderKey = ref(0);
+
+watch([sampleId, width, night], () => {
+    try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            sampleId: sampleId.value,
+            width: width.value,
+            night: night.value,
+        }));
+    } catch {
+        // 隐私模式等场景下写不进去，不影响预览
+    }
+});
 
 const sample = computed(() => SAMPLES.find(item => item.id === sampleId.value) ?? SAMPLES[0]);
 const shell = computed(() => buildShell(night.value));
@@ -247,7 +276,7 @@ onBeforeUnmount(() => {
                 <input type="checkbox" v-model="night" /> 夜间模式
             </label>
             <button @click="rerender">重新渲染</button>
-            <span class="hint">改 src/assets/model-front.html / model-back.html / model-css.css 后保存即可</span>
+            <span class="hint">改 src/card-template 下的源码后保存即可</span>
         </div>
 
         <div class="panes">
